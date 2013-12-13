@@ -526,6 +526,9 @@ struct kvm_ppc_smmu_info {
 #define KVM_GET_API_VERSION       _IO(KVMIO,   0x00)
 #define KVM_CREATE_VM             _IO(KVMIO,   0x01) /* returns a VM fd */
 #define KVM_GET_MSR_INDEX_LIST    _IOWR(KVMIO, 0x02, struct kvm_msr_list)
+// XELATEX
+#define KVM_ENABLE_RECORD         _IO(KVMIO, 0x09)
+#define KVM_DISABLE_RECORD        _IO(KVMIO, 0x0a)
 
 #define KVM_S390_ENABLE_SIE       _IO(KVMIO,   0x06)
 /*

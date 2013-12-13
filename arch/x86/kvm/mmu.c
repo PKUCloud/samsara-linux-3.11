@@ -2691,13 +2691,51 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	int emulate = 0;
 	gfn_t pseudo_gfn;
 
+	//struct page *p;
+	//int npages;
+	//unsigned long hva;
+	//struct task_struct s;
+
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
+			//unsigned int *content, *content2;
+			//content = (unsigned int *)pfn_to_kaddr(pfn);
+			//if (is_shadow_present_pte(*iterator.sptep)) {
+			//if (!write)
+			//	printk(KERN_ERR "XELATEX - read, pfn=0x%llx\n", pfn);
+			if (*iterator.sptep & (1ull << 11)) {
+				if (write) {
+					*iterator.sptep |= PT_PRESENT_MASK | PT_WRITABLE_MASK | PT_USER_MASK;
+					//printk(KERN_ERR "XELATEX - WRITE, pfn=0x%llx, gpa=0x%llx\n",
+					//	pfn, v);
+				}
+				else {
+					*iterator.sptep |= PT_PRESENT_MASK | PT_USER_MASK;
+					//printk(KERN_ERR "XELATEX - READ, pfn=0x%llx, gpa=0x%llx\n",
+					//	pfn, v);
+				}
+				//vcpu->sptep = iterator.sptep;
+				//vcpu->monitor_sptep = true;
+				//hva = gfn_to_hva(vcpu->kvm, gfn);
+				//npages = get_user_pages_fast(hva, 1, 1, &p);
+				//printk(KERN_ERR "XELATEX - npages=%d, gpa=0x%llx, pfn=%d, pfn_to_kaddr=0x%llx\n",
+				//	npages, v, pfn, pfn_to_kaddr(pfn));
+				//printk(KERN_ERR "\tcontents=0x%x\n", *content);
+				//printk(KERN_ERR "XELATEX - gpa=0x%llx, gfn=0x%llx\n", v, gfn);
+				//printk(KERN_ERR "XELATEX - page_to_pfn=0x%llx, pfn=0x%llx\n",
+				//	page_to_pfn(p), pfn);	
+				break;
+			}
+			//mmu_set_spte(vcpu, iterator.sptep, ACC_EXEC_MASK,// | ACC_USER_MASK,
 			mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
 				     write, &emulate, level, gfn, pfn,
 				     prefault, map_writable);
 			direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
+			if (!is_mmio_spte(*iterator.sptep)) {
+				*iterator.sptep &= ~0x7ull;
+				*iterator.sptep |= (1ull << 11);
+			}
 			break;
 		}
 

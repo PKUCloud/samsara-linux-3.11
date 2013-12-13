@@ -2620,6 +2620,10 @@ static long kvm_dev_ioctl_check_extension_generic(long arg)
 	return kvm_dev_ioctl_check_extension(arg);
 }
 
+// XELATEX
+bool kvm_record = false;
+EXPORT_SYMBOL(kvm_record);
+
 static long kvm_dev_ioctl(struct file *filp,
 			  unsigned int ioctl, unsigned long arg)
 {
@@ -2634,6 +2638,17 @@ static long kvm_dev_ioctl(struct file *filp,
 		break;
 	case KVM_CREATE_VM:
 		r = kvm_dev_ioctl_create_vm(arg);
+		break;
+	// XELATEX
+	case KVM_ENABLE_RECORD:
+		kvm_record = true;
+		printk(KERN_ERR "XELATEX - kvm_record ENABLED\n");
+		r = 0;
+		break;
+	case KVM_DISABLE_RECORD:
+		kvm_record = false;
+		printk(KERN_ERR "XELATEX - kvm_record DISABLED\n");
+		r = 0;
 		break;
 	case KVM_CHECK_EXTENSION:
 		r = kvm_dev_ioctl_check_extension_generic(arg);

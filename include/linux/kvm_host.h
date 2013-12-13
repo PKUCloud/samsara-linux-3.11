@@ -260,6 +260,10 @@ struct kvm_vcpu {
 #endif
 	bool preempted;
 	struct kvm_vcpu_arch arch;
+	// XELATEX
+	//u64 *sptep;
+	//bool monitor_sptep;
+	//unsigned long monitor_rip;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
