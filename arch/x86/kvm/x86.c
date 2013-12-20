@@ -5783,6 +5783,11 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 			kvm_deliver_pmi(vcpu);
 		if (kvm_check_request(KVM_REQ_SCAN_IOAPIC, vcpu))
 			vcpu_scan_ioapic(vcpu);
+		// XELATEX
+		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
+			printk(KERN_ERR "XELATEX - get request KVM_REQ_RECORD");
+			kvm_x86_ops->tm_commit(vcpu);
+		}
 	}
 
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
@@ -6818,6 +6823,9 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	kvm_async_pf_hash_reset(vcpu);
 	kvm_pmu_init(vcpu);
 
+	// XELATEX
+	vcpu->is_kicked = false;
+
 	return 0;
 fail_free_wbinvd_dirty_mask:
 	free_cpumask_var(vcpu->arch.wbinvd_dirty_mask);
@@ -6868,6 +6876,9 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	spin_lock_init(&kvm->arch.pvclock_gtod_sync_lock);
 
 	pvclock_update_vm_gtod_copy(kvm);
+
+	// XELATEX
+	kvm->record_master = false;
 
 	return 0;
 }

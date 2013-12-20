@@ -743,6 +743,8 @@ struct kvm_x86_ops {
 			       struct x86_instruction_info *info,
 			       enum x86_intercept_stage stage);
 	void (*handle_external_intr)(struct kvm_vcpu *vcpu);
+	// XELATEX
+	int (*tm_commit)(struct kvm_vcpu *vcpu);
 };
 
 struct kvm_arch_async_pf {
@@ -918,6 +920,9 @@ void kvm_disable_tdp(void);
 
 int complete_pio(struct kvm_vcpu *vcpu);
 bool kvm_check_iopl(struct kvm_vcpu *vcpu);
+
+// XELATEX
+int tm_commit(struct kvm_vcpu *vcpu);
 
 static inline gpa_t translate_gpa(struct kvm_vcpu *vcpu, gpa_t gpa, u32 access)
 {

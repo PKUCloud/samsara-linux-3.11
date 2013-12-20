@@ -4199,6 +4199,7 @@ static void ept_set_mmio_spte_mask(void)
 	kvm_mmu_set_mmio_spte_mask((0x3ull << 62) | 0x6ull);
 }
 
+
 /*
  * Sets up the vmcs for emulated real mode.
  */
@@ -4305,6 +4306,20 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 
 	vmcs_writel(CR0_GUEST_HOST_MASK, ~0UL);
 	set_cr4_guest_host_mask(vmx);
+
+	// XELATEX
+	if (!(vmx->preemption_begin) && kvm_record) {
+		if (!vmx->preemption_timer) {
+			printk(KERN_ERR "XELATEX - preemption_timer doesn't init\n");
+			kvm_record = false;
+		} else {
+			printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
+			vmx->preemption_begin = true;
+			vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vmx->preemption_timer_value);
+			vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
+			vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
+		}
+	}
 
 	return 0;
 }
@@ -5492,38 +5507,67 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 }
 
 // XELATEX
-//DEFINE_MUTEX(preempt_mutex);
-//atomic_t vcpu_num = {.counter = 0}; 
-//bool vcpu_go = false;
-static int handle_preemption(struct kvm_vcpu *vcpu)
+DEFINE_MUTEX(preempt_mutex);
+DEFINE_MUTEX(preempt_commit);
+
+// XELATEX
+int tm_commit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
-	extern bool kvm_record;
+	struct kvm *kvm = vcpu->kvm;
+	int i;
+	struct kvm_vcpu *cur_vcpu;
 
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vmx->preemption_timer_value);
-//	mutex_lock(&preempt_mutex);
-	printk(KERN_ERR "XELATEX - handle_preemption, vcpu=%d\n", vcpu->vcpu_id);
-/*	atomic_inc(&vcpu_num);
-	if (vcpu_num.counter == 4)
-		vcpu_go = true;
-	mutex_unlock(&preempt_mutex);
-	printk(KERN_ERR "%d - 1\n", vcpu->vcpu_id);
-	while (!vcpu_go) {
-		schedule();
-	}
-	printk(KERN_ERR "%d - 2\n", vcpu->vcpu_id);
-	atomic_dec(&vcpu_num);
-	if (vcpu_num.counter == 0)
-		vcpu_go = false;
-	printk(KERN_ERR "%d - 3\n", vcpu->vcpu_id);
-*/
 	if (!kvm_record) {
 		printk(KERN_ERR "XELATEX - disable kvm_record\n");
 		vmx->preemption_begin = false;
 		vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
 		vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
+		kvm->record_master = false;
+		vcpu->is_kicked = false;
+		return 1;
 	}
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vmx->preemption_timer_value);
+
+	mutex_lock(&preempt_mutex);
+	if (kvm->record_master == false) {
+		printk(KERN_ERR "XELATEX - tm_commit, MASTER, vcpu=%d, online_vcpu=%d\n",
+			vcpu->vcpu_id, kvm->online_vcpus.counter);
+		kvm->record_master = true;
+		atomic_set(&(kvm->vcpu_commit), 0);
+		for (i=0; i<kvm->online_vcpus.counter; i++) {
+			cur_vcpu = kvm->vcpus[i];
+			kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
+			kvm_vcpu_kick(cur_vcpu);
+			cur_vcpu->is_kicked = true;
+		}
+	}
+	else
+		printk(KERN_ERR "XELATEX - tm_commit, SLAVE, vcpu=%d, online_vcpu=%d\n",
+			vcpu->vcpu_id, kvm->online_vcpus.counter);
+	vcpu->is_kicked = false;
+	mutex_unlock(&preempt_mutex);
+
+	atomic_inc(&(kvm->vcpu_commit));
+
+	while (atomic_read(&(kvm->vcpu_commit)) != atomic_read(&(kvm->online_vcpus)) && kvm_record)
+		yield();
+
+	mutex_lock(&preempt_commit);
+	printk(KERN_ERR "XELATEX - commit, vcpu=%d\n", vcpu->vcpu_id);
+	atomic_dec(&(kvm->vcpu_commit));
+	if (atomic_read(&(kvm->vcpu_commit)) == 0)
+		kvm->record_master = false;
+	mutex_unlock(&preempt_commit);
+
 	return 1;
+}
+EXPORT_SYMBOL(tm_commit);
+
+// XELATEX
+static int handle_preemption(struct kvm_vcpu *vcpu)
+{
+	return tm_commit(vcpu);
 }
 
 /*
@@ -6641,7 +6685,6 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	u32 vectoring_info = vmx->idt_vectoring_info;
 
 	// XELATEX
-	extern bool kvm_record;
 	if (!(vmx->preemption_begin) && kvm_record) {
 		if (!vmx->preemption_timer) {
 			printk(KERN_ERR "XELATEX - preemption_timer doesn't init\n");
@@ -7227,12 +7270,9 @@ static void vmx_free_vcpu(struct kvm_vcpu *vcpu)
 /* XELATEX */
 static void vmx_init_preemption_timer(struct vcpu_vmx *vmx, u32 v)
 {
-	extern bool kvm_record;
-
 	vmx->preemption_timer = true;
 	vmx->preemption_begin = false;
 	vmx->preemption_timer_value = v;
-	kvm_record = false;
 	return;
 }
 
@@ -8294,6 +8334,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 
 	.check_intercept = vmx_check_intercept,
 	.handle_external_intr = vmx_handle_external_intr,
+	.tm_commit = tm_commit,
 };
 
 static int __init vmx_init(void)

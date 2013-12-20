@@ -2698,7 +2698,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
-			//unsigned int *content, *content2;
+/*			//unsigned int *content, *content2;
 			//content = (unsigned int *)pfn_to_kaddr(pfn);
 			//if (is_shadow_present_pte(*iterator.sptep)) {
 			//if (!write)
@@ -2726,16 +2726,18 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				//	page_to_pfn(p), pfn);	
 				break;
 			}
+*/
 			//mmu_set_spte(vcpu, iterator.sptep, ACC_EXEC_MASK,// | ACC_USER_MASK,
 			mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
 				     write, &emulate, level, gfn, pfn,
 				     prefault, map_writable);
 			direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
-			if (!is_mmio_spte(*iterator.sptep)) {
+/*			if (!is_mmio_spte(*iterator.sptep)) {
 				*iterator.sptep &= ~0x7ull;
 				*iterator.sptep |= (1ull << 11);
 			}
+*/
 			break;
 		}
 

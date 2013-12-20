@@ -80,6 +80,9 @@ static atomic_t hardware_enable_failed;
 struct kmem_cache *kvm_vcpu_cache;
 EXPORT_SYMBOL_GPL(kvm_vcpu_cache);
 
+bool kvm_record;
+EXPORT_SYMBOL_GPL(kvm_record);
+
 static __read_mostly struct preempt_ops kvm_preempt_ops;
 
 struct dentry *kvm_debugfs_dir;
@@ -2621,8 +2624,6 @@ static long kvm_dev_ioctl_check_extension_generic(long arg)
 }
 
 // XELATEX
-bool kvm_record = false;
-EXPORT_SYMBOL(kvm_record);
 
 static long kvm_dev_ioctl(struct file *filp,
 			  unsigned int ioctl, unsigned long arg)

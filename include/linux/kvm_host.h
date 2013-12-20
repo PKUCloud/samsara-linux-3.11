@@ -126,6 +126,8 @@ static inline bool is_error_page(struct page *page)
 #define KVM_REQ_EPR_EXIT          20
 #define KVM_REQ_SCAN_IOAPIC       21
 #define KVM_REQ_GLOBAL_CLOCK_UPDATE 22
+// XELATEX
+#define KVM_REQ_RECORD              23
 
 #define KVM_USERSPACE_IRQ_SOURCE_ID		0
 #define KVM_IRQFD_RESAMPLE_IRQ_SOURCE_ID	1
@@ -261,9 +263,7 @@ struct kvm_vcpu {
 	bool preempted;
 	struct kvm_vcpu_arch arch;
 	// XELATEX
-	//u64 *sptep;
-	//bool monitor_sptep;
-	//unsigned long monitor_rip;
+	bool is_kicked;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
@@ -398,6 +398,9 @@ struct kvm {
 #endif
 	long tlbs_dirty;
 	struct list_head devices;
+	// XELATEX
+	bool record_master;
+	atomic_t vcpu_commit;
 };
 
 #define kvm_err(fmt, ...) \
@@ -1018,6 +1021,8 @@ static inline bool kvm_check_request(int req, struct kvm_vcpu *vcpu)
 }
 
 extern bool kvm_rebooting;
+
+extern bool kvm_record;
 
 struct kvm_device_ops;
 
