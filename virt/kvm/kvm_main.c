@@ -80,6 +80,10 @@ static atomic_t hardware_enable_failed;
 struct kmem_cache *kvm_vcpu_cache;
 EXPORT_SYMBOL_GPL(kvm_vcpu_cache);
 
+// XELATEX
+struct kmem_cache *kvm_tm_page_cache;
+EXPORT_SYMBOL_GPL(kvm_tm_page_cache);
+
 bool kvm_record;
 EXPORT_SYMBOL_GPL(kvm_record);
 
@@ -3169,6 +3173,14 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 		goto out_free_3;
 	}
 
+	// XELATEX
+	kvm_tm_page_cache = kmem_cache_create("kvm_rm_page", sizeof(struct kvm_tm_page),
+			ARCH_MIN_TASKALIGN, 0, NULL);
+	if (!kvm_tm_page_cache) {
+		r = -ENOMEM;
+		goto out_free_4;
+	}
+
 	r = kvm_async_pf_init();
 	if (r)
 		goto out_free;
@@ -3202,6 +3214,9 @@ out_undebugfs:
 out_unreg:
 	kvm_async_pf_deinit();
 out_free:
+// XELATEX
+	kmem_cache_destroy(kvm_tm_page_cache);
+out_free_4:
 	kmem_cache_destroy(kvm_vcpu_cache);
 out_free_3:
 	unregister_reboot_notifier(&kvm_reboot_notifier);
@@ -3225,6 +3240,8 @@ void kvm_exit(void)
 	kvm_exit_debug();
 	misc_deregister(&kvm_dev);
 	kmem_cache_destroy(kvm_vcpu_cache);
+	// XELATEX
+	kmem_cache_destroy(kvm_tm_page_cache);
 	kvm_async_pf_deinit();
 	unregister_syscore_ops(&kvm_syscore_ops);
 	unregister_reboot_notifier(&kvm_reboot_notifier);

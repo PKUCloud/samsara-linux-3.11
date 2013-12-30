@@ -1225,7 +1225,9 @@ static bool __rmap_write_protect(struct kvm *kvm, unsigned long *rmapp,
 	bool flush = false;
 
 	for (sptep = rmap_get_first(*rmapp, &iter); sptep;) {
-		BUG_ON(!(*sptep & PT_PRESENT_MASK));
+		// XELATEX
+		//BUG_ON(!(*sptep & PT_PRESENT_MASK));
+		BUG_ON(!((*sptep & PT_PRESENT_MASK) || (*sptep & PT_TM_RECORD)));
 		if (spte_write_protect(kvm, sptep, &flush, pt_protect)) {
 			sptep = rmap_get_first(*rmapp, &iter);
 			continue;
@@ -1289,7 +1291,9 @@ static int kvm_unmap_rmapp(struct kvm *kvm, unsigned long *rmapp,
 	int need_tlb_flush = 0;
 
 	while ((sptep = rmap_get_first(*rmapp, &iter))) {
-		BUG_ON(!(*sptep & PT_PRESENT_MASK));
+		// XELATEX
+		//BUG_ON(!(*sptep & PT_PRESENT_MASK));
+		BUG_ON(!((*sptep & PT_PRESENT_MASK) || (*sptep & PT_TM_RECORD)));
 		rmap_printk("kvm_rmap_unmap_hva: spte %p %llx\n", sptep, *sptep);
 
 		drop_spte(kvm, sptep);
@@ -1546,6 +1550,7 @@ static void kvm_mmu_free_page(struct kvm_mmu_page *sp)
 		free_page((unsigned long)sp->gfns);
 	kmem_cache_free(mmu_page_header_cache, sp);
 }
+EXPORT_SYMBOL_GPL(kvm_mmu_free_page);
 
 static unsigned kvm_page_table_hashfn(gfn_t gfn)
 {
@@ -1958,6 +1963,10 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 		role.quadrant = quadrant;
 	}
 	for_each_gfn_sp(vcpu->kvm, sp, gfn) {
+		// XELATEX
+		if (kvm_record)
+			break;
+
 		if (is_obsolete_sp(vcpu->kvm, sp))
 			continue;
 
@@ -1987,6 +1996,8 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 		return sp;
 	sp->gfn = gfn;
 	sp->role = role;
+	// XELATEX
+	//sp->unsync = 1;
 	hlist_add_head(&sp->hash_link,
 		&vcpu->kvm->arch.mmu_page_hash[kvm_page_table_hashfn(gfn)]);
 	if (!direct) {
@@ -2690,54 +2701,53 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	struct kvm_mmu_page *sp;
 	int emulate = 0;
 	gfn_t pseudo_gfn;
-
-	//struct page *p;
-	//int npages;
-	//unsigned long hva;
-	//struct task_struct s;
+	unsigned pte_access = 0;
+//	struct kvm_tm_page *tm_page;
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
-/*			//unsigned int *content, *content2;
-			//content = (unsigned int *)pfn_to_kaddr(pfn);
-			//if (is_shadow_present_pte(*iterator.sptep)) {
-			//if (!write)
-			//	printk(KERN_ERR "XELATEX - read, pfn=0x%llx\n", pfn);
-			if (*iterator.sptep & (1ull << 11)) {
+			pte_access = ACC_ALL;
+			if (kvm_record) {
 				if (write) {
-					*iterator.sptep |= PT_PRESENT_MASK | PT_WRITABLE_MASK | PT_USER_MASK;
-					//printk(KERN_ERR "XELATEX - WRITE, pfn=0x%llx, gpa=0x%llx\n",
-					//	pfn, v);
+					pte_access = ACC_ALL;
+					if (!(*iterator.sptep & PT_WRITABLE_MASK)) {
+						printk(KERN_ERR "\tXELATEX - W turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+					} else {
+						printk(KERN_ERR "\tXELATEX - UW turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+					}
+				} else {
+					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
+					if (!(*iterator.sptep & PT_PRESENT_MASK)) {
+						printk(KERN_ERR "\tXELATEX - R turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+					} else {
+						printk(KERN_ERR "\tXELATEX - UR turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+					}
 				}
-				else {
-					*iterator.sptep |= PT_PRESENT_MASK | PT_USER_MASK;
-					//printk(KERN_ERR "XELATEX - READ, pfn=0x%llx, gpa=0x%llx\n",
-					//	pfn, v);
-				}
-				//vcpu->sptep = iterator.sptep;
-				//vcpu->monitor_sptep = true;
-				//hva = gfn_to_hva(vcpu->kvm, gfn);
-				//npages = get_user_pages_fast(hva, 1, 1, &p);
-				//printk(KERN_ERR "XELATEX - npages=%d, gpa=0x%llx, pfn=%d, pfn_to_kaddr=0x%llx\n",
-				//	npages, v, pfn, pfn_to_kaddr(pfn));
-				//printk(KERN_ERR "\tcontents=0x%x\n", *content);
-				//printk(KERN_ERR "XELATEX - gpa=0x%llx, gfn=0x%llx\n", v, gfn);
-				//printk(KERN_ERR "XELATEX - page_to_pfn=0x%llx, pfn=0x%llx\n",
-				//	page_to_pfn(p), pfn);	
-				break;
+				/*
+				tm_page = kmem_cache_zalloc(kvm_tm_page_cache, GFP_KERNEL);
+				tm_page->sptep = iterator.sptep;
+				tm_page->level = level;
+				tm_page->vcpu = vcpu;
+				tm_page->gpa = v;
+				tm_page->gfn = gfn;
+				tm_page->pfn = pfn;
+				tm_page->write = write;
+				list_add_tail(&(tm_page->queue), &(vcpu->commit_sptep_list));
+				*/
 			}
-*/
-			//mmu_set_spte(vcpu, iterator.sptep, ACC_EXEC_MASK,// | ACC_USER_MASK,
-			mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
+
+			mmu_set_spte(vcpu, iterator.sptep, pte_access,
+			//mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
 				     write, &emulate, level, gfn, pfn,
 				     prefault, map_writable);
+			// XELATEX
+			//*iterator.sptep |= PT_TM_RECORD;
 			direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
-/*			if (!is_mmio_spte(*iterator.sptep)) {
-				*iterator.sptep &= ~0x7ull;
-				*iterator.sptep |= (1ull << 11);
-			}
-*/
 			break;
 		}
 
@@ -3478,8 +3488,11 @@ static int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
 	make_mmu_pages_available(vcpu);
 	if (likely(!force_pt_level))
 		transparent_hugepage_adjust(vcpu, &gfn, &pfn, &level);
+	// XELATEX
 	r = __direct_map(vcpu, gpa, write, map_writable,
-			 level, gfn, pfn, prefault);
+			 PT_PAGE_TABLE_LEVEL, gfn, pfn, prefault);
+	//r = __direct_map(vcpu, gpa, write, map_writable,
+	//		 level, gfn, pfn, prefault);
 	spin_unlock(&vcpu->kvm->mmu_lock);
 
 	return r;
@@ -4389,6 +4402,7 @@ restart:
 	 */
 	kvm_mmu_commit_zap_page(kvm, &kvm->arch.zapped_obsolete_pages);
 }
+EXPORT_SYMBOL_GPL(kvm_zap_obsolete_pages);
 
 /*
  * Fast invalidate all shadow pages and use lock-break technique

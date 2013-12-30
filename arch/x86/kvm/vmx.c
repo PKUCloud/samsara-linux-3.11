@@ -5509,6 +5509,7 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 // XELATEX
 DEFINE_MUTEX(preempt_mutex);
 DEFINE_MUTEX(preempt_commit);
+extern void kvm_zap_obsolete_pages(struct kvm *kvm);
 
 // XELATEX
 int tm_commit(struct kvm_vcpu *vcpu)
@@ -5517,6 +5518,11 @@ int tm_commit(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 	int i;
 	struct kvm_vcpu *cur_vcpu;
+//	struct kvm_tm_page *tm_page;
+//	struct kvm_tm_page *tm_page_tmp;
+//	struct kvm_mmu_page *sp;
+//	struct kvm_mmu_page *sp_tmp;
+	bool master = false;
 
 	if (!kvm_record) {
 		printk(KERN_ERR "XELATEX - disable kvm_record\n");
@@ -5531,35 +5537,84 @@ int tm_commit(struct kvm_vcpu *vcpu)
 
 	mutex_lock(&preempt_mutex);
 	if (kvm->record_master == false) {
-		printk(KERN_ERR "XELATEX - tm_commit, MASTER, vcpu=%d, online_vcpu=%d\n",
-			vcpu->vcpu_id, kvm->online_vcpus.counter);
+		//printk(KERN_ERR "XELATEX - tm_commit, MASTER, vcpu=%d, online_vcpu=%d\n",
+		//	vcpu->vcpu_id, kvm->online_vcpus.counter);
+		master = true;
 		kvm->record_master = true;
+		kvm->record_go = false;
 		atomic_set(&(kvm->vcpu_commit), 0);
+		atomic_set(&(kvm->vcpu_finish), 0);
 		for (i=0; i<kvm->online_vcpus.counter; i++) {
 			cur_vcpu = kvm->vcpus[i];
 			kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
 			kvm_vcpu_kick(cur_vcpu);
 			cur_vcpu->is_kicked = true;
+			//printk(KERN_ERR "XELATEX - vcpu=%d, cur_vcpu->arch.mmu.root_hpa=0x%llx\n",
+			//	cur_vcpu->vcpu_id, cur_vcpu->arch.mmu.root_hpa);
 		}
 	}
-	else
-		printk(KERN_ERR "XELATEX - tm_commit, SLAVE, vcpu=%d, online_vcpu=%d\n",
-			vcpu->vcpu_id, kvm->online_vcpus.counter);
+	//else printk(KERN_ERR "XELATEX - tm_commit, SLAVE, vcpu=%d, online_vcpu=%d\n",
+		//	vcpu->vcpu_id, kvm->online_vcpus.counter);
 	vcpu->is_kicked = false;
 	mutex_unlock(&preempt_mutex);
 
 	atomic_inc(&(kvm->vcpu_commit));
 
+	if (master) {
+		//printk(KERN_ERR "++++++++++kvm->arch.mmu_valid_gen=%lu\n", kvm->arch.mmu_valid_gen);
+		kvm->arch.mmu_valid_gen++;
+	}
+
 	while (atomic_read(&(kvm->vcpu_commit)) != atomic_read(&(kvm->online_vcpus)) && kvm_record)
 		yield();
 
+	if (!kvm_record)
+		return 1;
+
+	(vcpu->tm_turn) ++;
+	kvm_mmu_unload(vcpu);
+	if (master && kvm->arch.mmu_valid_gen == ~0ul) {
+		spin_lock(&kvm->mmu_lock);
+		kvm_zap_obsolete_pages(kvm);
+		spin_unlock(&kvm->mmu_lock);
+	}
+	//kvm_mmu_invalidate_zap_all_pages(kvm);
+	
+
+/*	if (master) {
+		for (i=0; i<KVM_NUM_MMU_PAGES; i++) {
+			hlist_for_each_entry_safe(sp, sp_tmp, &(kvm->arch.mmu_page_hash[i]), hash_link) {
+				kvm_mmu_free_page(sp);
+			}
+		}
+	}
+*/
+/*
+	list_for_each_entry_safe(tm_page, tm_page_tmp, &(vcpu->commit_sptep_list), queue) {
+		if (!kvm_record) {
+			INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
+			break;
+		}
+		//printk(KERN_ERR "XELATEX - tm_page gpa=0x%llx\n", tm_page->gpa);
+		*(tm_page->sptep) &= ~(0x7);
+		*(tm_page->sptep) |= PT_TM_RECORD;
+		list_del_init(&(tm_page->queue));
+		kmem_cache_free(kvm_tm_page_cache, tm_page);
+	}
+*/
+
 	mutex_lock(&preempt_commit);
-	printk(KERN_ERR "XELATEX - commit, vcpu=%d\n", vcpu->vcpu_id);
-	atomic_dec(&(kvm->vcpu_commit));
-	if (atomic_read(&(kvm->vcpu_commit)) == 0)
+	//printk(KERN_ERR "XELATEX - commit, vcpu=%d\n", vcpu->vcpu_id);
+	atomic_inc(&(kvm->vcpu_finish));
+	if (atomic_read(&(kvm->vcpu_finish)) == atomic_read(&(kvm->online_vcpus))) {
+		printk(KERN_ERR "XELATEX ============================\n");
 		kvm->record_master = false;
+		kvm->record_go = true;
+	}
 	mutex_unlock(&preempt_commit);
 
+	while (!(kvm->record_go) && kvm_record)
+		yield();
 	return 1;
 }
 EXPORT_SYMBOL(tm_commit);
@@ -7311,7 +7366,8 @@ static struct kvm_vcpu *vmx_create_vcpu(struct kvm *kvm, unsigned int id)
 	vmx_vcpu_load(&vmx->vcpu, cpu);
 	vmx->vcpu.cpu = cpu;
 	/* XELATEX */
-	vmx_init_preemption_timer(vmx, 1000000);
+	//vmx_init_preemption_timer(vmx, 1000000);
+	vmx_init_preemption_timer(vmx, 50000);
 	err = vmx_vcpu_setup(vmx);
 	vmx_vcpu_put(&vmx->vcpu);
 	put_cpu();

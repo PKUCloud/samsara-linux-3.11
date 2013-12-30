@@ -5736,6 +5736,11 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_immediate_exit = false;
 
 	if (vcpu->requests) {
+		// XELATEX
+		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
+			//printk(KERN_ERR "XELATEX - get request KVM_REQ_RECORD");
+			kvm_x86_ops->tm_commit(vcpu);
+		}
 		if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu))
 			kvm_mmu_unload(vcpu);
 		if (kvm_check_request(KVM_REQ_MIGRATE_TIMER, vcpu))
@@ -5783,11 +5788,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 			kvm_deliver_pmi(vcpu);
 		if (kvm_check_request(KVM_REQ_SCAN_IOAPIC, vcpu))
 			vcpu_scan_ioapic(vcpu);
-		// XELATEX
-		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
-			printk(KERN_ERR "XELATEX - get request KVM_REQ_RECORD");
-			kvm_x86_ops->tm_commit(vcpu);
-		}
 	}
 
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
@@ -6825,6 +6825,8 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 
 	// XELATEX
 	vcpu->is_kicked = false;
+	INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
+	vcpu->tm_turn = 0;
 
 	return 0;
 fail_free_wbinvd_dirty_mask:

@@ -135,6 +135,8 @@ static inline bool is_error_page(struct page *page)
 struct kvm;
 struct kvm_vcpu;
 extern struct kmem_cache *kvm_vcpu_cache;
+// XELATEX
+extern struct kmem_cache *kvm_tm_page_cache;
 
 extern raw_spinlock_t kvm_lock;
 extern struct list_head vm_list;
@@ -207,6 +209,18 @@ struct kvm_mmio_fragment {
 	unsigned len;
 };
 
+// XELATEX
+struct kvm_tm_page {
+	struct list_head queue;
+	u64 *sptep;
+	int level;
+	struct kvm_vcpu *vcpu;
+	gpa_t gpa;
+	gfn_t gfn;
+	pfn_t pfn;
+	int write;
+};
+
 struct kvm_vcpu {
 	struct kvm *kvm;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -264,6 +278,8 @@ struct kvm_vcpu {
 	struct kvm_vcpu_arch arch;
 	// XELATEX
 	bool is_kicked;
+	struct list_head commit_sptep_list;
+	u64 tm_turn;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
@@ -401,6 +417,8 @@ struct kvm {
 	// XELATEX
 	bool record_master;
 	atomic_t vcpu_commit;
+	atomic_t vcpu_finish;
+	bool record_go;
 };
 
 #define kvm_err(fmt, ...) \
