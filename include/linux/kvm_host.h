@@ -280,7 +280,6 @@ struct kvm_vcpu {
 	// XELATEX
 	bool is_kicked;
 	struct list_head commit_sptep_list;
-	u64 tm_turn;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
@@ -420,6 +419,7 @@ struct kvm {
 	atomic_t vcpu_commit;
 	atomic_t vcpu_finish;
 	bool record_go;
+	u64 tm_turn;
 };
 
 #define kvm_err(fmt, ...) \

@@ -2702,6 +2702,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	int emulate = 0;
 	gfn_t pseudo_gfn;
 	unsigned pte_access = 0;
+	struct kvm *kvm = vcpu->kvm;
 //	struct kvm_tm_page *tm_page;
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
@@ -2712,19 +2713,19 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 					pte_access = ACC_ALL;
 					if (!(*iterator.sptep & PT_WRITABLE_MASK)) {
 						printk(KERN_ERR "\tXELATEX - W turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					} else {
 						printk(KERN_ERR "\tXELATEX - UW turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					}
 				} else {
 					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
 					if (!(*iterator.sptep & PT_PRESENT_MASK)) {
 						printk(KERN_ERR "\tXELATEX - R turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					} else {
 						printk(KERN_ERR "\tXELATEX - UR turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							vcpu->tm_turn, vcpu->vcpu_id, pfn, gfn);
+							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					}
 				}
 				/*

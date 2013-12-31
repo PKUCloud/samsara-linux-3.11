@@ -6826,7 +6826,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	// XELATEX
 	vcpu->is_kicked = false;
 	INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
-	vcpu->tm_turn = 0;
 
 	return 0;
 fail_free_wbinvd_dirty_mask:
@@ -6881,6 +6880,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 
 	// XELATEX
 	kvm->record_master = false;
+	kvm->tm_turn = 0;
 
 	return 0;
 }

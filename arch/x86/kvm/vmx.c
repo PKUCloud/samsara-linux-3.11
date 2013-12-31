@@ -5511,10 +5511,6 @@ int tm_commit(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 	int i;
 	struct kvm_vcpu *cur_vcpu;
-//	struct kvm_tm_page *tm_page;
-//	struct kvm_tm_page *tm_page_tmp;
-//	struct kvm_mmu_page *sp;
-//	struct kvm_mmu_page *sp_tmp;
 	bool master = false;
 
 	if (!kvm_record) {
@@ -5524,6 +5520,7 @@ int tm_commit(struct kvm_vcpu *vcpu)
 		vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 		kvm->record_master = false;
 		vcpu->is_kicked = false;
+		kvm->tm_turn = 0;
 		return 1;
 	}
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_preemption_timer_value);
@@ -5542,62 +5539,34 @@ int tm_commit(struct kvm_vcpu *vcpu)
 			kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
 			kvm_vcpu_kick(cur_vcpu);
 			cur_vcpu->is_kicked = true;
-			//printk(KERN_ERR "XELATEX - vcpu=%d, cur_vcpu->arch.mmu.root_hpa=0x%llx\n",
-			//	cur_vcpu->vcpu_id, cur_vcpu->arch.mmu.root_hpa);
 		}
 	}
-	//else printk(KERN_ERR "XELATEX - tm_commit, SLAVE, vcpu=%d, online_vcpu=%d\n",
-		//	vcpu->vcpu_id, kvm->online_vcpus.counter);
 	vcpu->is_kicked = false;
 	mutex_unlock(&preempt_mutex);
 
 	atomic_inc(&(kvm->vcpu_commit));
 
 	if (master) {
-		//printk(KERN_ERR "++++++++++kvm->arch.mmu_valid_gen=%lu\n", kvm->arch.mmu_valid_gen);
 		kvm->arch.mmu_valid_gen++;
+		(kvm->tm_turn) ++;
 	}
 
 	while (atomic_read(&(kvm->vcpu_commit)) != atomic_read(&(kvm->online_vcpus)) && kvm_record)
 		yield();
 
-	if (!kvm_record)
+	if (!kvm_record) {
+		kvm->tm_turn = 0;
 		return 1;
+	}
 
-	(vcpu->tm_turn) ++;
 	kvm_mmu_unload(vcpu);
 	if (master && kvm->arch.mmu_valid_gen == ~0ul) {
 		spin_lock(&kvm->mmu_lock);
 		kvm_zap_obsolete_pages(kvm);
 		spin_unlock(&kvm->mmu_lock);
 	}
-	//kvm_mmu_invalidate_zap_all_pages(kvm);
-	
-
-/*	if (master) {
-		for (i=0; i<KVM_NUM_MMU_PAGES; i++) {
-			hlist_for_each_entry_safe(sp, sp_tmp, &(kvm->arch.mmu_page_hash[i]), hash_link) {
-				kvm_mmu_free_page(sp);
-			}
-		}
-	}
-*/
-/*
-	list_for_each_entry_safe(tm_page, tm_page_tmp, &(vcpu->commit_sptep_list), queue) {
-		if (!kvm_record) {
-			INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
-			break;
-		}
-		//printk(KERN_ERR "XELATEX - tm_page gpa=0x%llx\n", tm_page->gpa);
-		*(tm_page->sptep) &= ~(0x7);
-		*(tm_page->sptep) |= PT_TM_RECORD;
-		list_del_init(&(tm_page->queue));
-		kmem_cache_free(kvm_tm_page_cache, tm_page);
-	}
-*/
 
 	mutex_lock(&preempt_commit);
-	//printk(KERN_ERR "XELATEX - commit, vcpu=%d\n", vcpu->vcpu_id);
 	atomic_inc(&(kvm->vcpu_finish));
 	if (atomic_read(&(kvm->vcpu_finish)) == atomic_read(&(kvm->online_vcpus))) {
 		printk(KERN_ERR "XELATEX ============================\n");
