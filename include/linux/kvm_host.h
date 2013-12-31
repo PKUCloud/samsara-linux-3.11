@@ -137,6 +137,7 @@ struct kvm_vcpu;
 extern struct kmem_cache *kvm_vcpu_cache;
 // XELATEX
 extern struct kmem_cache *kvm_tm_page_cache;
+extern u32 kvm_preemption_timer_value;
 
 extern raw_spinlock_t kvm_lock;
 extern struct list_head vm_list;

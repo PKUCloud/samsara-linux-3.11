@@ -96,6 +96,9 @@
 
 #define ASYNC_PF_PER_VCPU 64
 
+// XELATEX
+#define KVM_DEFAULT_PREEMPTION_VALUE 50000
+
 struct kvm_vcpu;
 struct kvm;
 struct kvm_async_pf;

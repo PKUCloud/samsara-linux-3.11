@@ -471,9 +471,7 @@ struct vcpu_vmx {
 	struct nested_vmx nested;
 
 	/* XELATEX */
-	bool preemption_timer;
 	bool preemption_begin;
-	u32 preemption_timer_value;
 };
 
 enum segment_cache_field {
@@ -4309,16 +4307,11 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 
 	// XELATEX
 	if (!(vmx->preemption_begin) && kvm_record) {
-		if (!vmx->preemption_timer) {
-			printk(KERN_ERR "XELATEX - preemption_timer doesn't init\n");
-			kvm_record = false;
-		} else {
-			printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
-			vmx->preemption_begin = true;
-			vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vmx->preemption_timer_value);
-			vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
-			vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
-		}
+		printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
+		vmx->preemption_begin = true;
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_preemption_timer_value);
+		vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
+		vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	}
 
 	return 0;
@@ -5533,7 +5526,7 @@ int tm_commit(struct kvm_vcpu *vcpu)
 		vcpu->is_kicked = false;
 		return 1;
 	}
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vmx->preemption_timer_value);
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_preemption_timer_value);
 
 	mutex_lock(&preempt_mutex);
 	if (kvm->record_master == false) {
@@ -6741,16 +6734,11 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 
 	// XELATEX
 	if (!(vmx->preemption_begin) && kvm_record) {
-		if (!vmx->preemption_timer) {
-			printk(KERN_ERR "XELATEX - preemption_timer doesn't init\n");
-			kvm_record = false;
-		} else {
-			printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
-			vmx->preemption_begin = true;
-			vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vmx->preemption_timer_value);
-			vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
-			vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
-		}
+		printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
+		vmx->preemption_begin = true;
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_preemption_timer_value);
+		vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
+		vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	}
 
 	/* If guest state is invalid, start emulating */
@@ -7323,11 +7311,9 @@ static void vmx_free_vcpu(struct kvm_vcpu *vcpu)
 }
 
 /* XELATEX */
-static void vmx_init_preemption_timer(struct vcpu_vmx *vmx, u32 v)
+static void vmx_init_preemption_timer(struct vcpu_vmx *vmx)
 {
-	vmx->preemption_timer = true;
 	vmx->preemption_begin = false;
-	vmx->preemption_timer_value = v;
 	return;
 }
 
@@ -7366,8 +7352,7 @@ static struct kvm_vcpu *vmx_create_vcpu(struct kvm *kvm, unsigned int id)
 	vmx_vcpu_load(&vmx->vcpu, cpu);
 	vmx->vcpu.cpu = cpu;
 	/* XELATEX */
-	//vmx_init_preemption_timer(vmx, 1000000);
-	vmx_init_preemption_timer(vmx, 50000);
+	vmx_init_preemption_timer(vmx);
 	err = vmx_vcpu_setup(vmx);
 	vmx_vcpu_put(&vmx->vcpu);
 	put_cpu();

@@ -15,6 +15,7 @@ int main(int argc, char **argv)
 	int record;
 	int ret;
 	long type;
+	unsigned long val;
 	fd = open("/dev/kvm", 0);
 	if (fd < 0) {
 		printf("Open /dev/kvm failed\n");
@@ -28,14 +29,20 @@ int main(int argc, char **argv)
 		else
 			record = 0;
 	}
+	if (argc > 2)
+		sscanf(argv[2], "%lu", &val);
+	else
+		val = 0;
 	if (record) {
-		ret = ioctl(fd, KVM_ENABLE_RECORD, 0);
+		ret = ioctl(fd, KVM_ENABLE_RECORD, val);
 		if (ret < 0)
 			printf("KVM_ENABLE_RECORD failed, errno = %d\n", errno);
+		printf("KVM_ENABLE_RECORD, preemption val = %lu\n", val);
 	} else {
 		ret = ioctl(fd, KVM_DISABLE_RECORD, 0);
 		if (ret < 0)
 			printf("KVM_DISABLE_RECORD failed, errno = %d\n", errno);
+		printf("KVM_DISABLE_RECORD\n");
 	}
 	return 0;
 }
