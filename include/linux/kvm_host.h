@@ -416,10 +416,11 @@ struct kvm {
 	struct list_head devices;
 	// XELATEX
 	bool record_master;
-	atomic_t vcpu_commit;
-	atomic_t vcpu_finish;
-	bool record_go;
 	u64 tm_turn;
+	struct mutex tm_lock;
+	struct semaphore tm_enter_sem;
+	struct semaphore tm_exit_sem;
+	atomic_t finished_slaves;
 };
 
 #define kvm_err(fmt, ...) \
