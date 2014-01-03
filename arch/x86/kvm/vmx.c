@@ -5563,7 +5563,7 @@ int tm_commit(struct kvm_vcpu *vcpu)
 		}
 
 		// Master, sync when enter, wait slaves enter
-		if (down_interruptible(&(kvm->tm_enter_sem))) {
+		if (online_vcpus > 1 && down_interruptible(&(kvm->tm_enter_sem))) {
 			printk(KERN_ERR "XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
 			goto record_disable;
@@ -5584,7 +5584,7 @@ int tm_commit(struct kvm_vcpu *vcpu)
 
 		// Slave, sync when exit, wait master's end
 		if (down_interruptible(&(kvm->tm_exit_sem))) {
-			printk(KERN_ERR "XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
+			printk(KERN_ERR "XELATEX - vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
 			goto record_disable;
 		}
@@ -5609,6 +5609,9 @@ record_exit:
 	kvm->record_master = false;
 	vcpu->is_kicked = false;
 	kvm->tm_turn = 0;
+	up(&(kvm->tm_enter_sem));
+	for (i=0; i<online_vcpus - 1; i++)
+		up(&(kvm->tm_exit_sem));
 	goto out;
 }
 EXPORT_SYMBOL(tm_commit);
