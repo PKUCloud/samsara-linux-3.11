@@ -4308,10 +4308,10 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 	set_cr4_guest_host_mask(vmx);
 
 	// XELATEX
-	if (!(vmx->preemption_begin) && kvm_record) {
+	if (!(vmx->preemption_begin) && kvm_record && kvm_record_type == KVM_RECORD_PREEMPTION) {
 		printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
 		vmx->preemption_begin = true;
-		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_preemption_timer_value);
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 		vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
 		vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	}
@@ -5539,7 +5539,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 
 	if (!kvm_record)
-		goto record_exit;
+		goto record_disable;
 
 	// The first vcpu enter is treated as master, other as slaves
 	mutex_lock(&(kvm->tm_lock));
@@ -5573,7 +5573,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 		}
 
 		if (__tm_commit(vcpu))
-			goto record_exit;
+			goto record_disable;
 		
 		// Master, sync when exit, let slaves go
 		for (i=0; i<online_vcpus - 1; i++)
@@ -5594,27 +5594,30 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 	}
 
 	if (!kvm_record)
-		goto record_exit;
+		goto record_disable;
 
 	// Prepare for new quantum
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_preemption_timer_value);
+	if (kvm_record_type == KVM_RECORD_PREEMPTION)
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 	kvm_mmu_unload(vcpu);
 	vcpu->is_kicked = false;
 out:
 	return 1;
 record_disable:
 	kvm_record = false;
-record_exit:
-	printk(KERN_ERR "XELATEX - disable kvm_record\n");
-	vmx->preemption_begin = false;
-	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
-	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	kvm->record_master = false;
 	vcpu->is_kicked = false;
 	kvm->tm_turn = 0;
 	up(&(kvm->tm_enter_sem));
 	for (i=0; i<online_vcpus - 1; i++)
 		up(&(kvm->tm_exit_sem));
+	if (kvm_record_type == KVM_RECORD_PREEMPTION)
+		goto preemption_exit;
+preemption_exit:
+	printk(KERN_ERR "XELATEX - disable kvm_record\n");
+	vmx->preemption_begin = false;
+	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
+	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	goto out;
 }
 EXPORT_SYMBOL(tm_commit);
@@ -6740,10 +6743,10 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	u32 vectoring_info = vmx->idt_vectoring_info;
 
 	// XELATEX
-	if (!(vmx->preemption_begin) && kvm_record) {
+	if (kvm_record && kvm_record_type == KVM_RECORD_PREEMPTION && !(vmx->preemption_begin)) {
 		printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
 		vmx->preemption_begin = true;
-		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_preemption_timer_value);
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 		vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
 		vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	}

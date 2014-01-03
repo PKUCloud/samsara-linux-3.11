@@ -83,11 +83,14 @@ EXPORT_SYMBOL_GPL(kvm_vcpu_cache);
 // XELATEX
 struct kmem_cache *kvm_tm_page_cache;
 EXPORT_SYMBOL_GPL(kvm_tm_page_cache);
-u32 kvm_preemption_timer_value;
-EXPORT_SYMBOL_GPL(kvm_preemption_timer_value);
 
 bool kvm_record;
 EXPORT_SYMBOL_GPL(kvm_record);
+int kvm_record_type;
+EXPORT_SYMBOL_GPL(kvm_record_type);
+u32 kvm_record_timer_value;
+EXPORT_SYMBOL_GPL(kvm_record_timer_value);
+
 
 static __read_mostly struct preempt_ops kvm_preempt_ops;
 
@@ -2652,10 +2655,11 @@ static long kvm_dev_ioctl(struct file *filp,
 	// XELATEX
 	case KVM_ENABLE_RECORD:
 		kvm_record = true;
+		kvm_record_type = KVM_RECORD_PREEMPTION;
 		printk(KERN_ERR "XELATEX - kvm_record ENABLED, arg=%lu\n", arg);
 		if (arg == 0)
 			arg = KVM_DEFAULT_PREEMPTION_VALUE;
-		kvm_preemption_timer_value = arg;
+		kvm_record_timer_value = arg;
 		r = 0;
 		break;
 	case KVM_DISABLE_RECORD:

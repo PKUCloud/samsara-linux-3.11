@@ -135,9 +135,6 @@ static inline bool is_error_page(struct page *page)
 struct kvm;
 struct kvm_vcpu;
 extern struct kmem_cache *kvm_vcpu_cache;
-// XELATEX
-extern struct kmem_cache *kvm_tm_page_cache;
-extern u32 kvm_preemption_timer_value;
 
 extern raw_spinlock_t kvm_lock;
 extern struct list_head vm_list;
@@ -1042,7 +1039,13 @@ static inline bool kvm_check_request(int req, struct kvm_vcpu *vcpu)
 
 extern bool kvm_rebooting;
 
+// XELATEX
+#define KVM_RECORD_PREEMPTION 0
+#define KVM_RECORD_TIMER 1
 extern bool kvm_record;
+extern int kvm_record_type;
+extern u32 kvm_record_timer_value;
+extern struct kmem_cache *kvm_tm_page_cache;
 
 struct kvm_device_ops;
 
