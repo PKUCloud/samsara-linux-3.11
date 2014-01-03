@@ -241,6 +241,9 @@ struct kvm_mmu_page {
 
 	/* Number of writes since the last time traversal visited this page.  */
 	int write_flooding_count;
+
+	// XELATEX
+	struct kvm_vcpu *vcpu;
 };
 
 struct kvm_pio_request {

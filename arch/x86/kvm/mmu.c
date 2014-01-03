@@ -1963,10 +1963,6 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 		role.quadrant = quadrant;
 	}
 	for_each_gfn_sp(vcpu->kvm, sp, gfn) {
-		// XELATEX
-		if (kvm_record)
-			break;
-
 		if (is_obsolete_sp(vcpu->kvm, sp))
 			continue;
 
@@ -1978,6 +1974,10 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 
 		if (sp->unsync && kvm_sync_page_transient(vcpu, sp))
 			break;
+
+		// XELATEX
+		if (kvm_record && sp->vcpu != vcpu)
+			continue;
 
 		mmu_page_add_parent_pte(vcpu, sp, parent_pte);
 		if (sp->unsync_children) {
@@ -1997,7 +1997,7 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 	sp->gfn = gfn;
 	sp->role = role;
 	// XELATEX
-	//sp->unsync = 1;
+	sp->vcpu = vcpu;
 	hlist_add_head(&sp->hash_link,
 		&vcpu->kvm->arch.mmu_page_hash[kvm_page_table_hashfn(gfn)]);
 	if (!direct) {
@@ -2703,7 +2703,6 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	gfn_t pseudo_gfn;
 	unsigned pte_access = 0;
 	struct kvm *kvm = vcpu->kvm;
-//	struct kvm_tm_page *tm_page;
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
@@ -2728,17 +2727,6 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					}
 				}
-				/*
-				tm_page = kmem_cache_zalloc(kvm_tm_page_cache, GFP_KERNEL);
-				tm_page->sptep = iterator.sptep;
-				tm_page->level = level;
-				tm_page->vcpu = vcpu;
-				tm_page->gpa = v;
-				tm_page->gfn = gfn;
-				tm_page->pfn = pfn;
-				tm_page->write = write;
-				list_add_tail(&(tm_page->queue), &(vcpu->commit_sptep_list));
-				*/
 			}
 
 			mmu_set_spte(vcpu, iterator.sptep, pte_access,

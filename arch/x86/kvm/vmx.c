@@ -3340,6 +3340,8 @@ static void vmx_set_cr3(struct kvm_vcpu *vcpu, unsigned long cr3)
 		guest_cr3 = is_paging(vcpu) ? kvm_read_cr3(vcpu) :
 			vcpu->kvm->arch.ept_identity_map_addr;
 		ept_load_pdptrs(vcpu);
+		// XELATEX
+		//printk(KERN_ERR "XELATEX - vcpu=%d, cr3=0x%lx\n", vcpu->vcpu_id, cr3);
 	}
 
 	vmx_flush_tlb(vcpu);
@@ -5536,6 +5538,8 @@ int tm_commit(struct kvm_vcpu *vcpu)
 		atomic_set(&(kvm->vcpu_finish), 0);
 		for (i=0; i<kvm->online_vcpus.counter; i++) {
 			cur_vcpu = kvm->vcpus[i];
+			if (cur_vcpu == vcpu)
+				continue;
 			kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
 			kvm_vcpu_kick(cur_vcpu);
 			cur_vcpu->is_kicked = true;
@@ -5560,7 +5564,7 @@ int tm_commit(struct kvm_vcpu *vcpu)
 	}
 
 	kvm_mmu_unload(vcpu);
-	if (master && kvm->arch.mmu_valid_gen == ~0ul) {
+	if (master && !(kvm->arch.mmu_valid_gen % 10000)) {
 		spin_lock(&kvm->mmu_lock);
 		kvm_zap_obsolete_pages(kvm);
 		spin_unlock(&kvm->mmu_lock);
@@ -5569,7 +5573,7 @@ int tm_commit(struct kvm_vcpu *vcpu)
 	mutex_lock(&preempt_commit);
 	atomic_inc(&(kvm->vcpu_finish));
 	if (atomic_read(&(kvm->vcpu_finish)) == atomic_read(&(kvm->online_vcpus))) {
-		printk(KERN_ERR "XELATEX ============================\n");
+		printk(KERN_ERR "XELATEX turn %d============================\n", kvm->tm_turn);
 		kvm->record_master = false;
 		kvm->record_go = true;
 	}
