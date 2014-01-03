@@ -5739,7 +5739,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		// XELATEX
 		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
 			//printk(KERN_ERR "XELATEX - get request KVM_REQ_RECORD");
-			kvm_x86_ops->tm_commit(vcpu);
+			kvm_x86_ops->tm_commit(vcpu, 0);
 		}
 		if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu))
 			kvm_mmu_unload(vcpu);

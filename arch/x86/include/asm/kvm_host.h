@@ -750,7 +750,7 @@ struct kvm_x86_ops {
 			       enum x86_intercept_stage stage);
 	void (*handle_external_intr)(struct kvm_vcpu *vcpu);
 	// XELATEX
-	int (*tm_commit)(struct kvm_vcpu *vcpu);
+	int (*tm_commit)(struct kvm_vcpu *vcpu, int kick);
 };
 
 struct kvm_arch_async_pf {

@@ -5529,7 +5529,7 @@ int __tm_commit(struct kvm_vcpu *vcpu)
 }
 
 // XELATEX
-int tm_commit(struct kvm_vcpu *vcpu)
+int tm_commit(struct kvm_vcpu *vcpu, int kick)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
@@ -5553,13 +5553,16 @@ int tm_commit(struct kvm_vcpu *vcpu)
 	mutex_unlock(&(kvm->tm_lock));
 
 	if (master) {
-		for (i=0; i<online_vcpus; i++) {
-			cur_vcpu = kvm->vcpus[i];
-			if (cur_vcpu == vcpu)
-				continue;
-			kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
-			kvm_vcpu_kick(cur_vcpu);
-			cur_vcpu->is_kicked = true;
+		// Kick all other vcpus if "kick" is set
+		if (kick) {
+			for (i=0; i<online_vcpus; i++) {
+				cur_vcpu = kvm->vcpus[i];
+				if (cur_vcpu == vcpu)
+					continue;
+				kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
+				kvm_vcpu_kick(cur_vcpu);
+				cur_vcpu->is_kicked = true;
+			}
 		}
 
 		// Master, sync when enter, wait slaves enter
@@ -5619,7 +5622,7 @@ EXPORT_SYMBOL(tm_commit);
 // XELATEX
 static int handle_preemption(struct kvm_vcpu *vcpu)
 {
-	return tm_commit(vcpu);
+	return tm_commit(vcpu, 1);
 }
 
 /*
