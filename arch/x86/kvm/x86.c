@@ -6857,6 +6857,17 @@ void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 		static_key_slow_dec(&kvm_no_apic_vcpu);
 }
 
+// XELATEX
+void kvm_arch_init_record(struct kvm *kvm)
+{
+	kvm->record_master = false;
+	kvm->tm_turn = 0;
+	mutex_init(&(kvm->tm_lock));
+	kvm->tm_timer_set = false;
+	kvm->tm_timer_ready = false;
+	spin_lock_init(&(kvm->tm_timer_lock));
+}
+
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 {
 	if (type)
@@ -6879,8 +6890,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	pvclock_update_vm_gtod_copy(kvm);
 
 	// XELATEX
-	kvm->record_master = false;
-	kvm->tm_turn = 0;
+	kvm_arch_init_record(kvm);
 
 	return 0;
 }

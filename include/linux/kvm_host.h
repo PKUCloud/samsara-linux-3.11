@@ -415,9 +415,15 @@ struct kvm {
 	bool record_master;
 	u64 tm_turn;
 	struct mutex tm_lock;
+	struct spinlock tm_timer_lock;
 	struct semaphore tm_enter_sem;
 	struct semaphore tm_exit_sem;
 	atomic_t finished_slaves;
+	struct hrtimer tm_timer;
+	bool tm_timer_set;
+	bool tm_timer_ready;
+	ktime_t tm_record_time;
+	atomic_t tm_trap_count;
 };
 
 #define kvm_err(fmt, ...) \

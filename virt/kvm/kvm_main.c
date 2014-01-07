@@ -526,9 +526,6 @@ static struct kvm *kvm_create_vm(unsigned long type)
 	list_add(&kvm->vm_list, &vm_list);
 	raw_spin_unlock(&kvm_lock);
 
-	// XELATEX
-	mutex_init(&kvm->tm_lock);
-
 	return kvm;
 
 out_err:
@@ -2656,6 +2653,7 @@ static long kvm_dev_ioctl(struct file *filp,
 	case KVM_ENABLE_RECORD:
 		kvm_record = true;
 		kvm_record_type = KVM_RECORD_PREEMPTION;
+		//kvm_record_type = KVM_RECORD_TIMER;
 		printk(KERN_ERR "XELATEX - kvm_record ENABLED, arg=%lu\n", arg);
 		if (arg == 0)
 			arg = KVM_DEFAULT_PREEMPTION_VALUE;
