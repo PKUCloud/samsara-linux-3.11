@@ -277,6 +277,7 @@ struct kvm_vcpu {
 	// XELATEX
 	bool is_kicked;
 	struct list_head commit_sptep_list;
+	unsigned long mmu_vcpu_valid_gen;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)

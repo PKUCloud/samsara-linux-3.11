@@ -1934,7 +1934,9 @@ static void clear_sp_write_flooding_count(u64 *spte)
 
 static bool is_obsolete_sp(struct kvm *kvm, struct kvm_mmu_page *sp)
 {
-	return unlikely(sp->mmu_valid_gen != kvm->arch.mmu_valid_gen);
+	// XELATEX
+	return unlikely(sp->mmu_valid_gen != kvm->arch.mmu_valid_gen) 
+		|| unlikely(sp->mmu_vcpu_valid_gen != sp->vcpu->mmu_vcpu_valid_gen);
 }
 
 static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
@@ -2009,6 +2011,8 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 		account_shadowed(vcpu->kvm, gfn);
 	}
 	sp->mmu_valid_gen = vcpu->kvm->arch.mmu_valid_gen;
+	// XELATEX
+	sp->mmu_vcpu_valid_gen = vcpu->mmu_vcpu_valid_gen;
 	init_shadow_page_table(sp);
 	trace_kvm_mmu_get_page(sp, true);
 	return sp;
