@@ -5586,8 +5586,10 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 	struct kvm_vcpu *cur_vcpu;
 	bool master = false;
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
+	bool ok = false;
 
 	atomic_dec(&(kvm->tm_trap_count));
+	vcpu->is_trapped = true;
 
 	if (!kvm_record)
 		goto record_disable;
@@ -5605,22 +5607,24 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 
 	if (master) {
 		// Kick all other vcpus if "kick" is set
-		//if (kick) {
-		if (true) {
+		while (kick && !ok) {
+			ok = true;
 			for (i=0; i<online_vcpus; i++) {
 				cur_vcpu = kvm->vcpus[i];
-				//printk(KERN_ERR "XELATEX - vcpu=%d, vcpu status=%d\n",
-				//	cur_vcpu->vcpu_id, cur_vcpu->arch.mp_state);
 				if (cur_vcpu == vcpu)
+					continue;
+				if (cur_vcpu->is_trapped)
 					continue;
 				kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
 				kvm_vcpu_kick(cur_vcpu);
 				cur_vcpu->is_kicked = true;
+				ok = false;
 			}
 		}
-//printk(KERN_ERR "XELATEX - master, wait slave, turn=%llu, vcpu=%d\n", kvm->tm_turn, vcpu->vcpu_id);
+
 		// Master, sync when enter, wait slaves enter
-		if (online_vcpus > 1 && down_interruptible(&(kvm->tm_enter_sem))) {
+		if (online_vcpus > 1 && kvm_record_type == KVM_RECORD_TIMER &&
+				down_interruptible(&(kvm->tm_enter_sem))) {
 			printk(KERN_ERR "XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
 			goto record_disable;
@@ -5642,9 +5646,8 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 		// Slave, sync when enter, let master go
 		if (atomic_inc_return(&(kvm->finished_slaves)) == online_vcpus - 1) {
 			up(&(kvm->tm_enter_sem));
-//printk(KERN_ERR "XELATEX - slave, free master, turn=%llu, vcpu=%d\n", kvm->tm_turn, vcpu->vcpu_id);
 		}
-//printk(KERN_ERR "XELATEX - slave, wait master, turn=%llu, vcpu=%d\n", kvm->tm_turn, vcpu->vcpu_id);
+
 		// Slave, sync when exit, wait master's end
 		if (down_interruptible(&(kvm->tm_exit_sem))) {
 			printk(KERN_ERR "XELATEX - vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
@@ -5661,6 +5664,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 	kvm_mmu_unload(vcpu);
 	vcpu->is_kicked = false;
+	vcpu->is_trapped = false;
 out:
 	return 1;
 record_disable:
@@ -5668,6 +5672,7 @@ record_disable:
 	kvm_record = false;
 	kvm->record_master = false;
 	vcpu->is_kicked = false;
+	vcpu->is_trapped = false;
 	kvm->tm_turn = 0;
 	up(&(kvm->tm_enter_sem));
 	for (i=0; i<online_vcpus - 1; i++)
