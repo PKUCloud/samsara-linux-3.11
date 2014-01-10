@@ -6867,6 +6867,7 @@ void kvm_arch_init_record(struct kvm *kvm)
 	kvm->tm_timer_set = false;
 	kvm->tm_timer_ready = false;
 	spin_lock_init(&(kvm->tm_timer_lock));
+	kvm->timestamp = 0;
 }
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)

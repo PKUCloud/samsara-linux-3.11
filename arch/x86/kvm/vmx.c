@@ -4238,13 +4238,15 @@ static void vmx_record_setup(struct vcpu_vmx *vmx)
 {
 	struct kvm *kvm = vmx->vcpu.kvm;
 
-	if (kvm_record_type == KVM_RECORD_PREEMPTION && !(vmx->preemption_begin)) {
-		printk(KERN_ERR "XELATEX - vmx_vcpu_setup, vcpu=%d\n", vmx->vcpu.vcpu_id);
+	if ((kvm_record_type == KVM_RECORD_PREEMPTION || kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION)
+			&& !(vmx->preemption_begin)) {
+		printk(KERN_ERR "XELATEX - vmx_vcpu_setup, KVM_RECORD_PREEMPTION, vcpu=%d\n", vmx->vcpu.vcpu_id);
 		vmx->preemption_begin = true;
 		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 		vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
 		vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	} else if (kvm_record_type == KVM_RECORD_TIMER && !(kvm->tm_timer_ready)) {
+		printk(KERN_ERR "XELATEX - vmx_vcpu_setup, KVM_RECORD_TIMER, vcpu=%d\n", vmx->vcpu.vcpu_id);
 		kvm->tm_record_time = ktime_set(0, US_TO_NS(kvm_record_timer_value));
 		hrtimer_init(&(kvm->tm_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		kvm->tm_timer.function = &vmx_record_timer_callback;
@@ -5694,9 +5696,47 @@ timer_exit:
 EXPORT_SYMBOL(tm_commit);
 
 // XELATEX
+int tm_unsync_commit(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct kvm *kvm = vcpu->kvm;
+	//int online_vcpus = atomic_read(&(kvm->online_vcpus));
+
+	if (!kvm_record)
+		goto record_disable;
+
+	mutex_lock(&(kvm->tm_lock));
+	printk(KERN_ERR "XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
+	kvm->timestamp ++;
+	mutex_unlock(&(kvm->tm_lock));
+
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
+	vcpu->mmu_vcpu_valid_gen ++;
+	kvm_mmu_unload(vcpu);
+out:
+	return 1;
+record_disable:
+	printk(KERN_ERR "XELATEX - disable kvm_record\n");
+	kvm_record = false;
+	kvm->record_master = false;
+	vcpu->is_kicked = false;
+	vcpu->is_trapped = false;
+	kvm->tm_turn = 0;
+	vmx->preemption_begin = false;
+	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
+	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
+	goto out;
+}
+EXPORT_SYMBOL(tm_unsync_commit);
+
+// XELATEX
 static int handle_preemption(struct kvm_vcpu *vcpu)
 {
-	return tm_commit(vcpu, 1);
+	if (kvm_record_type == KVM_RECORD_PREEMPTION)
+		return tm_commit(vcpu, 1);
+	else if (kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION)
+		return tm_unsync_commit(vcpu);
+	else return 1;
 }
 
 /*

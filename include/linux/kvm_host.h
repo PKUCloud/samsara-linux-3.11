@@ -415,7 +415,6 @@ struct kvm {
 	struct list_head devices;
 	// XELATEX
 	bool record_master;
-	u64 tm_turn;
 	struct mutex tm_lock;
 	struct spinlock tm_timer_lock;
 	struct semaphore tm_enter_sem;
@@ -426,6 +425,10 @@ struct kvm {
 	bool tm_timer_ready;
 	ktime_t tm_record_time;
 	atomic_t tm_trap_count;
+	union {
+		unsigned long long timestamp;
+		unsigned long long tm_turn;
+	};
 };
 
 #define kvm_err(fmt, ...) \
@@ -1050,6 +1053,7 @@ extern bool kvm_rebooting;
 // XELATEX
 #define KVM_RECORD_PREEMPTION 0
 #define KVM_RECORD_TIMER 1
+#define KVM_RECORD_UNSYNC_PREEMPTION 2
 extern bool kvm_record;
 extern int kvm_record_type;
 extern u32 kvm_record_timer_value;

@@ -2652,7 +2652,8 @@ static long kvm_dev_ioctl(struct file *filp,
 	// XELATEX
 	case KVM_ENABLE_RECORD:
 		kvm_record = true;
-		kvm_record_type = KVM_RECORD_PREEMPTION;
+		//kvm_record_type = KVM_RECORD_PREEMPTION;
+		kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
 		//kvm_record_type = KVM_RECORD_TIMER;
 		printk(KERN_ERR "XELATEX - kvm_record ENABLED, arg=%lu\n", arg);
 		if (arg == 0)
