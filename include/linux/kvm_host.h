@@ -1051,9 +1051,6 @@ static inline bool kvm_check_request(int req, struct kvm_vcpu *vcpu)
 extern bool kvm_rebooting;
 
 // XELATEX
-#define KVM_RECORD_PREEMPTION 0
-#define KVM_RECORD_TIMER 1
-#define KVM_RECORD_UNSYNC_PREEMPTION 2
 extern bool kvm_record;
 extern int kvm_record_type;
 extern u32 kvm_record_timer_value;

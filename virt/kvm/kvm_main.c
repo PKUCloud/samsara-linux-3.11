@@ -2638,6 +2638,8 @@ static long kvm_dev_ioctl(struct file *filp,
 			  unsigned int ioctl, unsigned long arg)
 {
 	long r = -EINVAL;
+	void __user *argp = (void __user *)arg;
+	struct kvm_record_ctrl kvm_rc;
 
 	switch (ioctl) {
 	case KVM_GET_API_VERSION:
@@ -2651,14 +2653,28 @@ static long kvm_dev_ioctl(struct file *filp,
 		break;
 	// XELATEX
 	case KVM_ENABLE_RECORD:
+		if (copy_from_user(&kvm_rc, argp, sizeof(struct kvm_record_ctrl))) {
+			r = -1;
+			break;
+		}
+		if (kvm_record && kvm_record_type != kvm_rc.kvm_record_type) {
+			printk(KERN_ERR "XELATEX - kvm_record already enabled, please disable first\n");
+			r = -1;
+			break;
+		}
 		kvm_record = true;
+		kvm_record_type = kvm_rc.kvm_record_type;
+		kvm_record_timer_value = kvm_rc.kvm_record_timer_value;
+		if (kvm_record_timer_value == 0)
+			kvm_record_timer_value = KVM_DEFAULT_PREEMPTION_VALUE;
 		//kvm_record_type = KVM_RECORD_PREEMPTION;
-		kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
+		//kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
 		//kvm_record_type = KVM_RECORD_TIMER;
-		printk(KERN_ERR "XELATEX - kvm_record ENABLED, arg=%lu\n", arg);
-		if (arg == 0)
-			arg = KVM_DEFAULT_PREEMPTION_VALUE;
-		kvm_record_timer_value = arg;
+		printk(KERN_ERR "XELATEX - kvm_record ENABLED, type=%d, arg=%u\n",
+				kvm_record_type, kvm_record_timer_value);
+		//if (arg == 0)
+		//	arg = KVM_DEFAULT_PREEMPTION_VALUE;
+		//kvm_record_timer_value = arg;
 		r = 0;
 		break;
 	case KVM_DISABLE_RECORD:
