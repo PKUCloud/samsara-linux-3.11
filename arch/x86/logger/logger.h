@@ -71,8 +71,4 @@ struct printf_spec {
 	s16	precision;	/* # of digits/chars */
 };
 
-
-extern struct module *log_util_mod;
-extern int (*print_record_ptr)(const char* fmt, ...);
-
 #endif

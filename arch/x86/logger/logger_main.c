@@ -228,10 +228,6 @@ int logger_init(void)
 		goto fail_add_dev;
 
 
-	//init the util in kernel
-	log_util_mod = THIS_MODULE;
-	print_record_ptr = print_record;
-
 	//init the seq interface
 	entry = proc_create("logger", 0, NULL, &logger_file_ops);
 
@@ -283,9 +279,6 @@ void logger_cleanup(void)
 	remove_proc_entry("logger", NULL);
 
 	unregister_chrdev_region(MKDEV(logger_major, 0), 1);
-
-	log_util_mod = NULL;
-	print_record_ptr = NULL;
 
 	printk(KERN_ALERT "Logger exit\n");
 }
@@ -1118,7 +1111,7 @@ static int __print_record(const char* fmt, va_list args)
 
 int print_record(const char* fmt, ...)
 {
-	va_list args;
+	va_list args;  
 	int r;
 
 	spin_lock(&logger_dev.dev_lock);
@@ -1131,8 +1124,10 @@ int print_record(const char* fmt, ...)
 	//printk(KERN_ALERT "print_record: size of the buffer is %d\n",logger_dev.size);
 	spin_unlock(&logger_dev.dev_lock);
 
-	return r;
+	return r;   
 }
+
+//EXPORT_SYMBOL_GPL(print_record);
 
 module_init(logger_init);
 module_exit(logger_cleanup);
