@@ -26,16 +26,20 @@ MODULE_LICENSE("GPL");
 
 struct logger_dev logger_dev;        //the device struct
 
-//declare one cache pointer
+//declare two cache pointer
 struct kmem_cache *data_cache;    //data page cache
 struct kmem_cache *quantum_cache;   //for struct logger_quantum
 
+struct proc_dir_entry *entry;
 //char buf[4096];
 //size_t size = 4096;
 
 
-void logger_cleanup(void);
-int print_record(const char* fmt, ...);
+EXPORT_SYMBOL_GPL(data_cache);
+EXPORT_SYMBOL_GPL(quantum_cache);
+EXPORT_SYMBOL_GPL(logger_quantum);
+
+
 
 // open function
 int logger_open(struct inode *inode, struct file *filp)
@@ -75,6 +79,7 @@ ssize_t logger_write(struct file *filp, const char __user *buf, size_t count,
 //mmap is available, but confined in a different file mmap.c
 extern int logger_mmap(struct file *filp, struct vm_area_struct *vma);
 
+
 //fops
 struct file_operations logger_fops = {
 	.owner =	THIS_MODULE,
@@ -86,6 +91,25 @@ struct file_operations logger_fops = {
 };
 
 
+static int logger_setup_cdev(struct logger_dev *dev)
+{
+	int err, devno = MKDEV(logger_major, 0);
+
+	cdev_init(&dev->cdev, &logger_fops);
+	dev->cdev.owner = THIS_MODULE;
+	dev->cdev.ops = &logger_fops;
+	err = cdev_add(&dev->cdev, devno, 1);
+
+	if(err)
+		printk(KERN_NOTICE "Error %d adding logger", err);
+
+	return err;
+}
+
+
+
+
+
 
 /**
 interfaces for seq_file
@@ -93,7 +117,12 @@ interfaces for seq_file
 static void *logger_seq_start(struct seq_file *s, loff_t *pos)
 {
 	int i = *pos;
-	struct logger_quantum *ptr = logger_dev.head;
+	struct logger_quantum *ptr;
+
+	//printk(KERN_ALERT "seq_start\n");
+
+	spin_lock(&logger_dev.dev_lock);
+	ptr = logger_dev.head;
 	while(ptr != NULL && i > 0){
 		ptr = ptr->next;
 		i--;
@@ -109,6 +138,9 @@ static void *logger_seq_next(struct seq_file *s, void *v, loff_t *pos)
 {
 	int i = ++(*pos);
 	struct logger_quantum *ptr = logger_dev.head;
+
+	//printk(KERN_ALERT "seq_next\n");
+
 	while(ptr != NULL && i > 0){
 		ptr = ptr->next;
 		i--;
@@ -121,7 +153,8 @@ static void *logger_seq_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void logger_seq_stop(struct seq_file *s, void *v)
 {
-
+	//printk(KERN_ALERT "seq_stop\n");
+	spin_unlock(&logger_dev.dev_lock);
 }
 
 static int logger_seq_show(struct seq_file *s, void *v)
@@ -129,10 +162,12 @@ static int logger_seq_show(struct seq_file *s, void *v)
 	char *str = (char*)v;
 	int i = 0;
 
+	//printk(KERN_ALERT "seq_show\n");
+
 	seq_puts(s, "<start>=================\n");
 	for(i = 0; i < 4096; i++)
 		seq_putc(s, str[i]);
-	seq_puts(s, "\n====================\n");
+	seq_puts(s, "\n<end>====================\n");
 
 	return 0;
 }
@@ -167,27 +202,9 @@ end of interfaces for seq_file
 
 
 
-
-static int logger_setup_cdev(struct logger_dev *dev)
-{
-	int err, devno = MKDEV(logger_major, 0);
-
-	cdev_init(&dev->cdev, &logger_fops);
-	dev->cdev.owner = THIS_MODULE;
-	dev->cdev.ops = &logger_fops;
-	err = cdev_add(&dev->cdev, devno, 1);
-
-	if(err)
-		printk(KERN_NOTICE "Error %d adding logger", err);
-
-	return err;
-}
-
-
 //init function
 int logger_init(void)
 {
-	struct proc_dir_entry *entry;
 	int result;
 	dev_t dev = MKDEV(logger_major, 0);
 
@@ -223,6 +240,7 @@ int logger_init(void)
 		goto fail_create_cache;
 	}
 
+	//setup cdev
 	result = logger_setup_cdev(&logger_dev);
 	if(result)
 		goto fail_add_dev;
@@ -230,26 +248,31 @@ int logger_init(void)
 
 	//init the seq interface
 	entry = proc_create("logger", 0, NULL, &logger_file_ops);
+	if(!entry)
+		printk(KERN_ALERT "proc_create():Fail to create proc entry\n");
 
 
 	printk(KERN_ALERT "Logger init successfully\n");
 	return 0;   //success
 
 	fail_add_dev:
-		kmem_cache_destroy(data_cache);
+		kmem_cache_destroy(quantum_cache);
 
 	fail_create_cache:
-		unregister_chrdev_region(dev, 1);
 		if(data_cache)
 			kmem_cache_destroy(data_cache);
+		unregister_chrdev_region(dev, 1);
+
 		return result;
 }
+
 
 
 //free the memory
 void logger_trim(void)
 {
 	struct logger_quantum *cur, *next;
+	spin_lock(&logger_dev.dev_lock);
 	cur = logger_dev.head;
 	if(cur) {
 		next = cur->next;
@@ -261,10 +284,13 @@ void logger_trim(void)
 	logger_dev.tail = NULL;
 	logger_dev.str = logger_dev.end = NULL;
 	logger_dev.size = 0;
+	spin_unlock(&logger_dev.dev_lock);
 }
 
 void logger_cleanup(void)
 {
+	if(entry)
+		remove_proc_entry("logger", NULL);   //remove the /proc/logger at first
 
 	cdev_del(&logger_dev.cdev);
 	
@@ -276,11 +302,11 @@ void logger_cleanup(void)
 	if(quantum_cache)
 		kmem_cache_destroy(quantum_cache);
 
-	remove_proc_entry("logger", NULL);
+	
 
 	unregister_chrdev_region(MKDEV(logger_major, 0), 1);
 
-	printk(KERN_ALERT "Logger exit\n");
+	printk(KERN_ALERT "Logger exit successfully\n");
 }
 
 
@@ -292,16 +318,20 @@ void logger_cleanup(void)
 static inline int logger_alloc_page(void)
 {
 	struct logger_quantum *ptr;
+	int result = 0;
 
 	ptr = kmem_cache_alloc(quantum_cache, GFP_ATOMIC);
-	if(!ptr)
-		return -ENOMEM;
+	if(!ptr) {
+		result = -ENOMEM;
+		goto err;
+	}
 
 	ptr->data = ptr->next = NULL;
 	ptr->data = kmem_cache_alloc(data_cache, GFP_ATOMIC);
 	if(!ptr->data) {
 		kmem_cache_free(quantum_cache, ptr);
-		return -ENOMEM;
+		result = -ENOMEM;
+		goto err;
 	}
 
 	memset(ptr->data, 0, logger_quantum);
@@ -316,6 +346,10 @@ static inline int logger_alloc_page(void)
 	logger_dev.end = logger_dev.str + logger_quantum;
 
 	return 0;
+
+err:
+	printk(KERN_ALERT "logger_alloc_page(): kmem_cache_alloc() fail\n");
+	return result;
 }
 
 
@@ -649,9 +683,10 @@ int number(char **buf, char **end, unsigned long long num,
 
 	//actual digits of result
 	while(--i >= 0) {
-		if(*buf >= *end)
+		if(unlikely(*buf >= *end))
 			logger_alloc_page();
-		(*buf)[0] = tmp[i];
+		//(*buf)[0] = tmp[i];
+		**buf = tmp[i];
 		++(*buf);
 		++length;
 	}
@@ -694,7 +729,7 @@ int string(char **buf, char **end, const char *s, struct printf_spec spec)
 		if(unlikely(*buf >= *end))
 			logger_alloc_page();
 		**buf = *s;
-		++*buf;++s;
+		++(*buf);++s;
 	}
 	length += len;
 
@@ -708,14 +743,6 @@ int string(char **buf, char **end, const char *s, struct printf_spec spec)
 
 	return length;
 }
-
-
-
-
-
-
-
-
 
 
 
@@ -909,9 +936,10 @@ qualifier:
 	return ++fmt - start;
 }
 
+
+//should get the lock before calling this function
 static int __print_record(const char* fmt, va_list args)
 {
-	
 	unsigned long long num;
 	char **str, **end;
 	struct printf_spec spec = {0};
@@ -944,15 +972,7 @@ static int __print_record(const char* fmt, va_list args)
 				*str += (copy - i);
 				length += read;
 				break;
-				/**
-				if(str < end) {
-					if(copy > end - str)
-						copy = end - str;
-					memcpy(str, old_fmt, copy);
-				}
-				str += read;
-				break;
-				*/
+
 			}
 
 			case FORMAT_TYPE_WIDTH: 
@@ -970,7 +990,7 @@ static int __print_record(const char* fmt, va_list args)
 				if(!(spec.flags & LEFT)) {
 					//space padding
 					while(--spec.field_width > 0) {
-						if(*str >= *end)
+						if(unlikely(*str >= *end))
 							logger_alloc_page();
 						**str = ' ';
 						++(*str);
@@ -1095,7 +1115,6 @@ static int __print_record(const char* fmt, va_list args)
 				}
 				i = number(str, end, num, spec);
 				length += i;
-				//length??
 		}
 	}
 
@@ -1112,22 +1131,22 @@ static int __print_record(const char* fmt, va_list args)
 int print_record(const char* fmt, ...)
 {
 	va_list args;  
-	int r;
+	int r; 
 
-	spin_lock(&logger_dev.dev_lock);
 	va_start(args, fmt);
+	
+	spin_lock(&logger_dev.dev_lock);
 	r = __print_record(fmt, args);
 	logger_dev.size += r;
 	//printk(KERN_NOTICE "r is %d, size is %ld\n", r, logger_dev.size);
-	va_end(args);
-
 	//printk(KERN_ALERT "print_record: size of the buffer is %d\n",logger_dev.size);
 	spin_unlock(&logger_dev.dev_lock);
 
+	va_end(args);
 	return r;   
 }
 
-//EXPORT_SYMBOL_GPL(print_record);
+EXPORT_SYMBOL_GPL(print_record);
 
 module_init(logger_init);
 module_exit(logger_cleanup);
