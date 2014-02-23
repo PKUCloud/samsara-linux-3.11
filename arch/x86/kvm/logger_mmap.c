@@ -151,7 +151,7 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct logger_quantum *ptr;
 
 	vma->vm_ops = &logger_vm_ops;
-	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
+	//vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
 	//vma->vm_flags |= VM_RESERVED;
 	vma->vm_private_data = filp->private_data;
 

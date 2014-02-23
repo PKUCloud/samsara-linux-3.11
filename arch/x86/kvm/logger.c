@@ -227,14 +227,14 @@ int logger_init(void)
 
 	//create cache   //3.11 is different from 2.6
 	data_cache = kmem_cache_create("logger_data", logger_quantum,
-		0, SLAB_HWCACHE_ALIGN, NULL);        //no ctor/dtor
+		0, 0, NULL);        //no ctor/dtor  SLAB_HWCACHE_ALIGN??
 	if(!data_cache) {
 		result = -ENOMEM;
 		goto fail_create_cache;
 	}
 
 	quantum_cache = kmem_cache_create("logger_quantum", sizeof(struct logger_quantum),
-		0, SLAB_HWCACHE_ALIGN, NULL);
+		0, 0, NULL);
 	if(!quantum_cache) {
 		result = -ENOMEM;
 		goto fail_create_cache;
@@ -262,7 +262,7 @@ int logger_init(void)
 		if(data_cache)
 			kmem_cache_destroy(data_cache);
 		unregister_chrdev_region(dev, 1);
-
+		printk(KERN_ALERT "logger_init(): fail to create cache\n");
 		return result;
 }
 
@@ -272,7 +272,7 @@ int logger_init(void)
 void logger_trim(void)
 {
 	struct logger_quantum *cur, *next;
-	spin_lock(&logger_dev.dev_lock);
+	
 	cur = logger_dev.head;
 	if(cur) {
 		next = cur->next;
@@ -284,7 +284,7 @@ void logger_trim(void)
 	logger_dev.tail = NULL;
 	logger_dev.str = logger_dev.end = NULL;
 	logger_dev.size = 0;
-	spin_unlock(&logger_dev.dev_lock);
+	
 }
 
 void logger_cleanup(void)
@@ -294,6 +294,8 @@ void logger_cleanup(void)
 
 	cdev_del(&logger_dev.cdev);
 	
+	spin_lock(&logger_dev.dev_lock);
+
 	logger_trim();
 
 	if(data_cache)
@@ -302,7 +304,7 @@ void logger_cleanup(void)
 	if(quantum_cache)
 		kmem_cache_destroy(quantum_cache);
 
-	
+	spin_unlock(&logger_dev.dev_lock);
 
 	unregister_chrdev_region(MKDEV(logger_major, 0), 1);
 
@@ -333,6 +335,9 @@ static inline int logger_alloc_page(void)
 		result = -ENOMEM;
 		goto err;
 	}
+
+	//printk(KERN_ALERT "ptr->data add: %lx\n", (unsigned long)ptr->data);
+	//if((unsigned long)ptr->data & (unsigned long)0xfff) printk(KERN_ALERT "ptr->data not page aligned\n");
 
 	memset(ptr->data, 0, logger_quantum);
 	if(logger_dev.head == NULL) {
