@@ -3,10 +3,15 @@
 
 #include <linux/cdev.h>
 #include <linux/spinlock.h>
+#include <linux/sched.h>
+#include <linux/wait.h>
+
 
 #define LOGGER_MAJOR 0  //dynamic major by default
 
 #define LOGGER_QUANTUM 4096   //use a quantum size of 4096
+
+#define BLOCK_VER          //to open mmap in block
 
 struct logger_quantum {
 	void *data;            //pointer to a page
@@ -22,6 +27,7 @@ struct logger_dev {
 	int vmas;              //active mappings
 	spinlock_t dev_lock;
 	struct cdev cdev;
+	wait_queue_head_t queue;   //queue to mmap
 };
 
 #define ZEROPAD	1		/* pad with zero */

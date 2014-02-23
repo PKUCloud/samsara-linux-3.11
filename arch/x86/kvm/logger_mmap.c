@@ -161,23 +161,33 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 	if(dev->size < logger_quantum) {
 		//printk(KERN_NOTICE "logger_mmap(): return -1, ptr:%ld, size:%ld\n", (long)ptr, dev->size);
 		//printk(KERN_NOTICE "logger_mmap(): size=%ld fail\n", dev->size);
-		spin_unlock(&dev->dev_lock);
-		return -ENODEV;
+#ifdef BLOCK_VER
+		while(dev->size < logger_quantum) {
+			spin_unlock(&dev->dev_lock);
+			if(filp->f_flags & O_NONBLOCK)
+				return -EAGAIN;
+			printk(KERN_NOTICE "%s mmap(): go to sleep\n", current->comm);
+			if(wait_event_interruptible(dev->queue, (dev->size >= logger_quantum)))
+				return -ERESTARTSYS;
+			spin_lock(&dev->dev_lock);
+		}
+		goto out;
+
+#endif
+		goto err;
 	}
 	
 
-	//printk(KERN_NOTICE "logger_mmap(): size=%ld\n", dev->size);
-
+out:
 	assert((ptr != dev->tail) || (dev->end == dev->str) );
 	//printk(KERN_NOTICE "ptr==dev->tail:%d dev->end - dev->str = %ld\n", (int)(ptr==dev->tail), dev->end - dev->str);
-
-
 	spin_unlock(&dev->dev_lock);
-
-
 	logger_vma_open(vma);
-
-	
 	//printk(KERN_NOTICE "logger_mmap():start:%lx, end:%lx\n", vma->vm_start, vma->vm_end);
 	return 0;
+
+
+err:
+	spin_unlock(&dev->dev_lock);
+	return -ENODEV;
 }

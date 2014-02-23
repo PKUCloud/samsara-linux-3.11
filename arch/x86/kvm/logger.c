@@ -222,7 +222,7 @@ int logger_init(void)
 	memset(&logger_dev, 0, sizeof(struct logger_dev));
 
 	spin_lock_init(&logger_dev.dev_lock);
-
+	init_waitqueue_head(&logger_dev.queue);
 
 
 	//create cache   //3.11 is different from 2.6
@@ -1145,6 +1145,11 @@ int print_record(const char* fmt, ...)
 	logger_dev.size += r;
 	//printk(KERN_NOTICE "r is %d, size is %ld\n", r, logger_dev.size);
 	//printk(KERN_ALERT "print_record: size of the buffer is %d\n",logger_dev.size);
+#ifdef BLOCK_VER
+	if(logger_dev.size >= logger_quantum) {
+		wake_up_interruptible(&logger_dev.queue);
+	}
+#endif
 	spin_unlock(&logger_dev.dev_lock);
 
 	va_end(args);
