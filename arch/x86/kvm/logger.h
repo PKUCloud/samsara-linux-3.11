@@ -13,6 +13,8 @@
 
 #define BLOCK_VER          //to open mmap in block
 
+#define PRINT_TIME 1      //1 - to print timestamp at the front of every message
+
 struct logger_quantum {
 	void *data;            //pointer to a page
 	struct logger_quantum *next;     //next listitem
@@ -28,6 +30,7 @@ struct logger_dev {
 	spinlock_t dev_lock;
 	struct cdev cdev;
 	wait_queue_head_t queue;   //queue to mmap
+	int print_time;         //if set, print timestamp at the front of every message
 };
 
 #define ZEROPAD	1		/* pad with zero */

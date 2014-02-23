@@ -166,7 +166,7 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 			spin_unlock(&dev->dev_lock);
 			if(filp->f_flags & O_NONBLOCK)
 				return -EAGAIN;
-			printk(KERN_NOTICE "%s mmap(): go to sleep\n", current->comm);
+			//printk(KERN_NOTICE "%s mmap(): go to sleep\n", current->comm);
 			if(wait_event_interruptible(dev->queue, (dev->size >= logger_quantum)))
 				return -ERESTARTSYS;
 			spin_lock(&dev->dev_lock);

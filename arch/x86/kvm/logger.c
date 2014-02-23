@@ -19,9 +19,11 @@
 
 int logger_major = LOGGER_MAJOR;          //device major number
 int logger_quantum = LOGGER_QUANTUM;         //quantum size
+int logger_print_time = PRINT_TIME;          //print timestamp
 
 module_param(logger_major, int, 0);
 module_param(logger_quantum, int, 0);
+module_param(logger_print_time, int, 1);
 MODULE_LICENSE("GPL");
 
 struct logger_dev logger_dev;        //the device struct
@@ -251,6 +253,7 @@ int logger_init(void)
 	if(!entry)
 		printk(KERN_ALERT "proc_create():Fail to create proc entry\n");
 
+	logger_dev.print_time = logger_print_time;
 
 	printk(KERN_ALERT "Logger init successfully\n");
 	return 0;   //success
@@ -950,8 +953,29 @@ static int __print_record(const char* fmt, va_list args)
 	struct printf_spec spec = {0};
 	int i, length = 0;
 
+
 	str = &logger_dev.str;
 	end = &logger_dev.end;
+
+	//print the timestamp at the front of every message
+	if(logger_dev.print_time) {
+		char tbuf[50];
+		unsigned long long t;
+		unsigned tlen;
+		unsigned long nanosec_rem;
+
+		t = local_clock();
+		nanosec_rem = do_div(t, 1000000000);
+		tlen = sprintf(tbuf, "[%5lu.%06lu] ", (unsigned long)t, nanosec_rem / 1000);
+
+		for(i = 0; i < tlen; ++i) {
+			if(unlikely(*str >= *end)) 
+				logger_alloc_page();
+			**str = tbuf[i];
+			++(*str);
+			++length;
+		}
+	}
 
 	while(*fmt) {
 		const char *old_fmt = fmt;
