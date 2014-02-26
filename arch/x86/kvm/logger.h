@@ -8,11 +8,7 @@
 
 
 #define LOGGER_MAJOR 0  //dynamic major by default
-
 #define LOGGER_QUANTUM 4096   //use a quantum size of 4096
-
-#define BLOCK_VER          //to open mmap in block
-
 #define PRINT_TIME 1      //1 - to print timestamp at the front of every message
 
 struct logger_quantum {
@@ -28,6 +24,7 @@ struct logger_dev {
 	char *end;          //the end of current page
 	int vmas;              //active mappings
 	spinlock_t dev_lock;
+	int state; //the state of the dev memory
 	struct cdev cdev;
 	wait_queue_head_t queue;   //queue to mmap
 	int print_time;         //if set, print timestamp at the front of every message
@@ -40,6 +37,14 @@ struct logger_dev {
 #define LEFT	16		/* left justified */
 #define SMALL	32		/* use lowercase in hex (must be 32 == 0x20) */
 #define SPECIAL	64		/* prefix hex with "0x", octal with "0" */
+
+#define NORMAL 0
+#define LAST_PAGE 1
+#define NO_PAGE 2
+
+
+#define LOGGER_IOC_MAGIC 0XAF
+#define LOGGER_FLUSH	_IO(LOGGER_IOC_MAGIC, 0)
 
 
 #define assert(expr) \

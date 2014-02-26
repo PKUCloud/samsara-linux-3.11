@@ -15,6 +15,9 @@
 #define KVM_RECORD_UNSYNC_PREEMPTION 2
 #define KVM_RECORD_MAX_TYPE 3
 
+#define LOGGER_IOC_MAGIC 0XAF
+#define LOGGER_FLUSH	_IO(LOGGER_IOC_MAGIC, 0)
+
 struct {
 	int type;
 	char *name;
@@ -38,6 +41,7 @@ int help() {
 int main(int argc, char **argv)
 {
 	int fd;
+	int fd_logger;
 	int record;
 	int ret;
 	long type;
@@ -49,6 +53,21 @@ int main(int argc, char **argv)
 	if (argc < 2)
 		return help();
 
+	if(strcmp(argv[1], "flush") == 0) {
+		//flush the logger
+		fd_logger = open("/dev/logger", 0);
+		if(fd_logger < 0) {
+			printf("Open /dev/logger failed\n");
+			return -1;
+		}
+		ret = ioctl(fd_logger, LOGGER_FLUSH);
+		if(ret < 0) {
+			printf("Flush failed\n");
+			return -1;
+		}
+		return 0;
+	}
+	
 	fd = open("/dev/kvm", 0);
 	if (fd < 0) {
 		printf("Open /dev/kvm failed\n");

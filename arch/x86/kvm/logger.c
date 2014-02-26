@@ -82,6 +82,64 @@ ssize_t logger_write(struct file *filp, const char __user *buf, size_t count,
 extern int logger_mmap(struct file *filp, struct vm_area_struct *vma);
 
 
+/*
+* The ioctl() implementation
+*/
+long logger_ioctl(struct file *filp,
+	unsigned int cmd, unsigned long arg)
+{
+	int ret = 0;
+	struct logger_dev *dev = filp->private_data;
+
+	if(_IOC_TYPE(cmd) != LOGGER_IOC_MAGIC) return -ENOTTY;
+
+	switch(cmd) {
+		case LOGGER_FLUSH:
+		//fill the remaining page of NULL, 
+		//then awake the userspace program to mmap() the last page out
+		//always it means the vm has stopped and flush all the log to userspace
+			spin_lock(&dev->dev_lock);
+
+			if(dev->size > logger_quantum) {
+				//more than one page in the dev
+				//do nothing
+				goto out;
+			}
+			//check if there is no data
+			if(likely(dev->tail)) {
+				//fill the rest of the last page with 0
+				char *str, *end;
+				str = dev->str;
+				end = dev->end;
+				while(str < end) {
+					*str = '\0';
+					++str;
+					++dev->size;
+				}
+				dev->str = str;
+			}
+
+			if(dev->size == logger_quantum) {
+				// filled the last page
+				//wake up
+				dev->state = LAST_PAGE;
+				wake_up_interruptible(&dev->queue);
+			}else if(dev->size == 0) {
+				//all the data has been flushed out
+				dev->state = NO_PAGE;
+				dev->size = logger_quantum;  //just fulfil the wake up condition
+				wake_up_interruptible(&dev->queue);
+			}
+out:
+			spin_unlock(&dev->dev_lock);
+			break;
+
+		default:
+			return -ENOTTY;
+	}
+	return ret;
+}
+
 //fops
 struct file_operations logger_fops = {
 	.owner =	THIS_MODULE,
@@ -90,7 +148,9 @@ struct file_operations logger_fops = {
 	.open =		logger_open,
 	.release = 	logger_release,
 	.mmap = logger_mmap,
+	.unlocked_ioctl = logger_ioctl
 };
+
 
 
 static int logger_setup_cdev(struct logger_dev *dev)
@@ -1165,17 +1225,20 @@ int print_record(const char* fmt, ...)
 	va_start(args, fmt);
 	
 	spin_lock(&logger_dev.dev_lock);
+	if(logger_dev.state != NORMAL) {
+		r = -1;
+		goto out;
+	}
 	r = __print_record(fmt, args);
 	logger_dev.size += r;
 	//printk(KERN_NOTICE "r is %d, size is %ld\n", r, logger_dev.size);
 	//printk(KERN_ALERT "print_record: size of the buffer is %d\n",logger_dev.size);
-#ifdef BLOCK_VER
 	if(logger_dev.size >= logger_quantum) {
 		wake_up_interruptible(&logger_dev.queue);
 	}
-#endif
-	spin_unlock(&logger_dev.dev_lock);
 
+out:
+	spin_unlock(&logger_dev.dev_lock);
 	va_end(args);
 	return r;   
 }

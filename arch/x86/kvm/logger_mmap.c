@@ -158,10 +158,22 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 	//no page or only an incomplete page
 	spin_lock(&dev->dev_lock);
 	ptr = dev->head;
+
+		if(dev->state == NO_PAGE) {
+		dev->size = 0;
+		dev->state = NORMAL;
+
+		goto no_dev;
+	}
+	
+	if(dev->size == 0 && dev->state == LAST_PAGE) {
+		//the last page has been flushed out last time
+		dev->state = NORMAL;
+		
+		goto no_dev;
+	}
+
 	if(dev->size < logger_quantum) {
-		//printk(KERN_NOTICE "logger_mmap(): return -1, ptr:%ld, size:%ld\n", (long)ptr, dev->size);
-		//printk(KERN_NOTICE "logger_mmap(): size=%ld fail\n", dev->size);
-#ifdef BLOCK_VER
 		while(dev->size < logger_quantum) {
 			spin_unlock(&dev->dev_lock);
 			if(filp->f_flags & O_NONBLOCK)
@@ -169,12 +181,15 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 			//printk(KERN_NOTICE "%s mmap(): go to sleep\n", current->comm);
 			if(wait_event_interruptible(dev->queue, (dev->size >= logger_quantum)))
 				return -ERESTARTSYS;
+			if(dev->state == NO_PAGE) {
+				dev->size = 0;
+				dev->state = NORMAL;
+				// all the data has been flushed out
+				return -ENODEV;
+			}
 			spin_lock(&dev->dev_lock);
 		}
 		goto out;
-
-#endif
-		goto err;
 	}
 	
 
@@ -187,7 +202,7 @@ out:
 	return 0;
 
 
-err:
+no_dev:
 	spin_unlock(&dev->dev_lock);
 	return -ENODEV;
 }
