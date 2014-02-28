@@ -149,6 +149,7 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 	/* don't do anything here: "nopage" will set up page table entried*/
 	struct logger_dev *dev = (struct logger_dev *)filp->private_data;
 	struct logger_quantum *ptr;
+	int retval = 0;
 
 	vma->vm_ops = &logger_vm_ops;
 	//vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
@@ -159,50 +160,22 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 	spin_lock(&dev->dev_lock);
 	ptr = dev->head;
 
-		if(dev->state == NO_PAGE) {
-		dev->size = 0;
-		dev->state = NORMAL;
-
-		goto no_dev;
+	if(unlikely(dev->size < logger_quantum)) {
+		//error
+		//the data has been less than one page
+		//the program should have not called the mmap()
+		retval = -EPERM;
+		goto err;
 	}
 	
-	if(dev->size == 0 && dev->state == LAST_PAGE) {
-		//the last page has been flushed out last time
-		dev->state = NORMAL;
-		
-		goto no_dev;
-	}
-
-	if(dev->size < logger_quantum) {
-		while(dev->size < logger_quantum) {
-			spin_unlock(&dev->dev_lock);
-			if(filp->f_flags & O_NONBLOCK)
-				return -EAGAIN;
-			//printk(KERN_NOTICE "%s mmap(): go to sleep\n", current->comm);
-			if(wait_event_interruptible(dev->queue, (dev->size >= logger_quantum)))
-				return -ERESTARTSYS;
-			if(dev->state == NO_PAGE) {
-				dev->size = 0;
-				dev->state = NORMAL;
-				// all the data has been flushed out
-				return -ENODEV;
-			}
-			spin_lock(&dev->dev_lock);
-		}
-		goto out;
-	}
-	
-
-out:
 	assert((ptr != dev->tail) || (dev->end == dev->str) );
 	//printk(KERN_NOTICE "ptr==dev->tail:%d dev->end - dev->str = %ld\n", (int)(ptr==dev->tail), dev->end - dev->str);
 	spin_unlock(&dev->dev_lock);
 	logger_vma_open(vma);
 	//printk(KERN_NOTICE "logger_mmap():start:%lx, end:%lx\n", vma->vm_start, vma->vm_end);
-	return 0;
+	return retval;
 
-
-no_dev:
+err:
 	spin_unlock(&dev->dev_lock);
 	return -ENODEV;
 }

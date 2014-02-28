@@ -66,7 +66,87 @@ int logger_release(struct inode *inode, struct file *filp)
 ssize_t logger_read(struct file *filp, char __user *buf, size_t count,
 	loff_t *f_pos)
 {
-	return count;
+	struct logger_dev *dev = filp->private_data;
+	int ret = count;
+	char tmp[logger_quantum];
+
+	spin_lock(&dev->dev_lock);
+	if(likely(dev->size >= logger_quantum)) {
+		//there are more than one page data
+		//tell the program to use mmap to transfer data
+		*f_pos += count;
+		goto out;
+	}else {
+
+		if(likely(dev->state == NORMAL)) {
+			if(unlikely(filp->f_flags & O_NONBLOCK)) {
+				ret = -EAGAIN;
+				goto out;
+			}
+			while(dev->size < logger_quantum) {
+				if(unlikely(dev->state == FLUSHED)) {
+					//return remaining data to user directly
+					goto flushed;
+				}
+				spin_unlock(&dev->dev_lock);
+
+				//maybe there is some question here with ioctl(flush)
+				//maybe need to flush twice
+				if(wait_event_interruptible(dev->queue, (dev->size >= logger_quantum || dev->state == FLUSHED)))
+					return -ERESTARTSYS;
+
+				spin_lock(&dev->dev_lock);
+			}
+			
+			//has more than one page data
+			goto out;
+
+		}else if(unlikely(dev->state == FLUSHED)) {
+			//return remaining data to user directly
+			goto flushed;
+		}
+	}
+	
+flushed:
+	//maybe some problems here
+	//spin_lock vs sleep
+	//flush all the data to user space
+	ret = dev->size;
+	if(ret == 0) {
+		dev->state = NORMAL;
+		goto out;    //EOF
+	}
+	memcpy(tmp, (char*)(dev->head->data), ret);
+	spin_unlock(&dev->dev_lock);
+
+	//though not holding the lock
+	//but the state is flushed, and no one else can add new data
+	//proc can read the data yet, but doesn't matter
+	if(copy_to_user(buf, tmp, ret)) {
+		return -EFAULT;
+	}
+	
+	spin_lock(&dev->dev_lock);
+	//data has been flushed out
+	//delete the last page
+	assert((dev->head == dev->tail));
+
+
+	if(likely(dev->size < logger_quantum)) {
+		kmem_cache_free(data_cache, dev->head->data);
+		kmem_cache_free(quantum_cache, dev->head);
+
+		dev->head = dev->tail = NULL;
+		dev->str = dev->end = NULL;
+		dev->size = 0;
+	}
+
+	*f_pos += ret;
+
+	
+out:
+	spin_unlock(&dev->dev_lock);
+	return ret;
 }
 
 
@@ -95,42 +175,12 @@ long logger_ioctl(struct file *filp,
 
 	switch(cmd) {
 		case LOGGER_FLUSH:
-		//fill the remaining page of NULL, 
-		//then awake the userspace program to mmap() the last page out
+		//stop kernel to log into device
+		//flushed all the data out to userspace
 		//always it means the vm has stopped and flush all the log to userspace
 			spin_lock(&dev->dev_lock);
-
-			if(dev->size > logger_quantum) {
-				//more than one page in the dev
-				//do nothing
-				goto out;
-			}
-			//check if there is no data
-			if(likely(dev->tail)) {
-				//fill the rest of the last page with 0
-				char *str, *end;
-				str = dev->str;
-				end = dev->end;
-				while(str < end) {
-					*str = '\0';
-					++str;
-					++dev->size;
-				}
-				dev->str = str;
-			}
-
-			if(dev->size == logger_quantum) {
-				// filled the last page
-				//wake up
-				dev->state = LAST_PAGE;
-				wake_up_interruptible(&dev->queue);
-			}else if(dev->size == 0) {
-				//all the data has been flushed out
-				dev->state = NO_PAGE;
-				dev->size = logger_quantum;  //just fulfil the wake up condition
-				wake_up_interruptible(&dev->queue);
-			}
-out:
+			dev->state = FLUSHED;
+			wake_up_interruptible(&dev->queue);         //maybe there is some question here with read
 			spin_unlock(&dev->dev_lock);
 			break;
 

@@ -26,7 +26,7 @@ struct logger_dev {
 	spinlock_t dev_lock;
 	int state; //the state of the dev memory
 	struct cdev cdev;
-	wait_queue_head_t queue;   //queue to mmap
+	wait_queue_head_t queue;   //queue to mmap  //maybe change to sem?
 	int print_time;         //if set, print timestamp at the front of every message
 };
 
@@ -39,8 +39,7 @@ struct logger_dev {
 #define SPECIAL	64		/* prefix hex with "0x", octal with "0" */
 
 #define NORMAL 0
-#define LAST_PAGE 1
-#define NO_PAGE 2
+#define FLUSHED 1
 
 
 #define LOGGER_IOC_MAGIC 0XAF
