@@ -5697,22 +5697,37 @@ timer_exit:
 EXPORT_SYMBOL(tm_commit);
 
 // XELATEX
+#define COUNT 3
+extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
 int tm_unsync_commit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
 	//int online_vcpus = atomic_read(&(kvm->online_vcpus));
+	//static int count = COUNT;
 
 	if (!kvm_record)
 		goto record_disable;
 
 	mutex_lock(&(kvm->tm_lock));
-	print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
+	/*
+	// TODO: Here is just for test
+	if (vcpu->vcpu_id == 0 && count) {
+		if (count != COUNT)
+			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+		count --;
+	}
+	*/
+	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
+			kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
+		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+	printk(KERN_ERR "XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
 	kvm->timestamp ++;
 	mutex_unlock(&(kvm->tm_lock));
 
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
-	vcpu->mmu_vcpu_valid_gen ++;
+	if (kvm_record_mode == KVM_RECORD_SOFTWARE)
+		vcpu->mmu_vcpu_valid_gen ++;
 	kvm_mmu_unload(vcpu);
 out:
 	return 1;
