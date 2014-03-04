@@ -5563,7 +5563,8 @@ int __tm_commit(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 
 	// Commit pages
-	kvm->arch.mmu_valid_gen++;
+	if (kvm_record_mode == KVM_RECORD_SOFTWARE)
+		kvm->arch.mmu_valid_gen++;
 	(kvm->tm_turn) ++;
 
 	// Zap all mmu pages every TM_MMU_INVALID_GEN turns
