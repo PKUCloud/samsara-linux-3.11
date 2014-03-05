@@ -5555,6 +5555,8 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 
 // XELATEX
 extern void kvm_zap_obsolete_pages(struct kvm *kvm);
+extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
+
 #define TM_MMU_INVALID_GEN	10000
 
 // XELATEX, real commit
@@ -5563,6 +5565,9 @@ int __tm_commit(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 
 	// Commit pages
+	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
+			kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
+		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE)
 		kvm->arch.mmu_valid_gen++;
 	(kvm->tm_turn) ++;
@@ -5699,7 +5704,6 @@ EXPORT_SYMBOL(tm_commit);
 
 // XELATEX
 #define COUNT 3
-extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
 int tm_unsync_commit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -5729,6 +5733,13 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE)
 		vcpu->mmu_vcpu_valid_gen ++;
+
+	// Zap all mmu pages every TM_MMU_INVALID_GEN turns
+	if (!(vcpu->mmu_vcpu_valid_gen % TM_MMU_INVALID_GEN)) {
+		spin_lock(&kvm->mmu_lock);
+		kvm_zap_obsolete_pages(kvm);
+		spin_unlock(&kvm->mmu_lock);
+	}
 	kvm_mmu_unload(vcpu);
 out:
 	return 1;
