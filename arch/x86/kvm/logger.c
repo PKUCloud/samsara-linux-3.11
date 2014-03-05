@@ -14,6 +14,7 @@
 #include <linux/string.h>
 #include <linux/seq_file.h>
 #include <linux/types.h>
+#include <linux/device.h>
 
 #include "logger.h"
 
@@ -214,6 +215,10 @@ static int logger_setup_cdev(struct logger_dev *dev)
 
 	if(err)
 		printk(KERN_NOTICE "Error %d adding logger", err);
+
+	//err control?
+	dev->logger_class = class_create(THIS_MODULE, "logger");
+	device_create(dev->logger_class, NULL, devno, NULL, "logger");
 
 	return err;
 }
@@ -418,6 +423,11 @@ void logger_cleanup(void)
 		kmem_cache_destroy(quantum_cache);
 
 	spin_unlock(&logger_dev.dev_lock);
+
+	if(logger_dev.logger_class) {
+		device_destroy(logger_dev.logger_class, MKDEV(logger_major, 0));
+		class_destroy(logger_dev.logger_class);
+	}
 
 	unregister_chrdev_region(MKDEV(logger_major, 0), 1);
 
@@ -1280,9 +1290,13 @@ int print_record(const char* fmt, ...)
 		goto out;
 	}
 	r = __print_record(fmt, args);
+
+	//just for test
+	//va_end(args);
+	//va_start(args, fmt);
+	//vprintk_emit(0, -1, NULL, 0, fmt, args);
+
 	logger_dev.size += r;
-	//printk(KERN_NOTICE "r is %d, size is %ld\n", r, logger_dev.size);
-	//printk(KERN_ALERT "print_record: size of the buffer is %d\n",logger_dev.size);
 	if(logger_dev.size >= logger_quantum) {
 		wake_up_interruptible(&logger_dev.queue);
 	}

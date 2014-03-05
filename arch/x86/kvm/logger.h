@@ -5,6 +5,7 @@
 #include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
+#include <linux/device.h>
 
 
 #define LOGGER_MAJOR 0  //dynamic major by default
@@ -26,6 +27,7 @@ struct logger_dev {
 	spinlock_t dev_lock;
 	int state; //the state of the dev memory
 	struct cdev cdev;
+	struct class *logger_class;
 	wait_queue_head_t queue;   //queue to mmap  //maybe change to sem?
 	int print_time;         //if set, print timestamp at the front of every message
 };

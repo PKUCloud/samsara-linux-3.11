@@ -60,87 +60,13 @@ void logger_vma_close(struct vm_area_struct *vma)
 		spin_unlock(&dev->dev_lock);
 	}
 
-	//printk(KERN_NOTICE "logger_vma_close()\n");
-
-	//printk(KERN_NOTICE "logger_vma_close():start:%lx, end:%lx, vmas:%d\n", vma->vm_start, vma->vm_end, dev->vmas);
 }
-
-/*
-*the nopage method has been replaced by fault method. It retrieves the
-*page required from the device and returns
-*it to the user. The count for the page must be incremented,
-*because it is automatically decremented at page unmap.
-*Actually we just map an intact page, and always the first page
-*/
-int logger_vma_fault(struct vm_area_struct *vma,
-	struct vm_fault *vmf)
-{
-	unsigned long offset;
-	struct logger_dev *dev = vma->vm_private_data;
-	struct logger_quantum *ptr;
-	struct page *page;
-	void *pageptr = NULL;
-
-	//printk(KERN_NOTICE "logger_vma_fault()\n");
-
-	spin_lock(&dev->dev_lock);
-	offset = (vmf->pgoff << PAGE_SHIFT) + (vma->vm_pgoff << PAGE_SHIFT);
-	if(offset >= dev->size) goto err;   //out of range
-
-	offset >>= PAGE_SHIFT;     // the number of pages
-
-	//printk(KERN_NOTICE "logger_vma_fault():vmf->pgoff:%lud,start:%lx,pgoff:%lu,offset:%lu\n",
-	//	vmf->pgoff, vma->vm_start, vma->vm_pgoff, offset);
-
-	for(ptr = dev->head; ptr && offset;) {
-		ptr = ptr->next;
-		--offset;
-	}
-	//if(ptr) pageptr = ptr->data;
-	if(ptr) {
-		/*
-		if(ptr == dev->tail) {
-			//only one page left
-			//See if it is intact
-			if(dev->size == logger_quantum) {
-				pageptr = ptr->data;
-			}else {
-				printk(KERN_NOTICE "Not an intact page");
-				goto err;
-			}
-		}else pageptr = ptr->data;
-		*/
-		pageptr = ptr->data;
-	}
-
-	if(!pageptr) goto err;    //end of file
-	page = virt_to_page(pageptr);
-
-	assert(page != NULL);
-
-	if(!page) {
-		goto err;
-	}
-
-	//increment the count
-	get_page(page);
-	vmf->page = page;
-
-	spin_unlock(&dev->dev_lock);
-	return 0;
-
-err:
-	spin_unlock(&dev->dev_lock);
-	return VM_FAULT_SIGBUS;
-}
-
 
 
 
 struct vm_operations_struct logger_vm_ops = {
 	.open = logger_vma_open,
 	.close = logger_vma_close,
-	.fault = logger_vma_fault,
 };
 
 
@@ -150,13 +76,14 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct logger_dev *dev = (struct logger_dev *)filp->private_data;
 	struct logger_quantum *ptr;
 	int retval = 0;
+	struct page *page;
+	void *pageptr = NULL;
+	unsigned long offset;
 
 	vma->vm_ops = &logger_vm_ops;
-	//vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
-	//vma->vm_flags |= VM_RESERVED;
+	vma->vm_flags = VM_LOCKED;
 	vma->vm_private_data = filp->private_data;
 
-	//no page or only an incomplete page
 	spin_lock(&dev->dev_lock);
 	ptr = dev->head;
 
@@ -167,9 +94,32 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 		retval = -EPERM;
 		goto err;
 	}
-	
 	assert((ptr != dev->tail) || (dev->end == dev->str) );
 	//printk(KERN_NOTICE "ptr==dev->tail:%d dev->end - dev->str = %ld\n", (int)(ptr==dev->tail), dev->end - dev->str);
+	
+	offset = vma->vm_pgoff;
+	for(ptr = dev->head; ptr && offset;) {
+		ptr = ptr->next;
+		--offset;
+	}
+
+	if(ptr) {
+		pageptr = ptr->data;
+	}
+	if(!pageptr) {
+		retval = -ENODEV;
+		goto err;      //end of file
+	}
+	page = virt_to_page(pageptr);
+
+	if(remap_pfn_range(vma, vma->vm_start,
+		page_to_pfn(page), logger_quantum, vma->vm_page_prot)) {
+		printk(KERN_ERR "logger_mmap() remap_pfn_range fail\n");
+		retval = -ENXIO;
+		goto err;
+	}
+
+
 	spin_unlock(&dev->dev_lock);
 	logger_vma_open(vma);
 	//printk(KERN_NOTICE "logger_mmap():start:%lx, end:%lx\n", vma->vm_start, vma->vm_end);
@@ -177,5 +127,5 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 
 err:
 	spin_unlock(&dev->dev_lock);
-	return -ENODEV;
+	return retval;
 }

@@ -52,7 +52,8 @@ void log2file(const char *fname, const char *fname_log)
 		exit(1);
 	}
 
-	printf("Logging...\n");
+	printf("Logging...\n"
+		"Use flush command to stop logging\n");
 	//i = 0;
 	while(1) {
 		//i++;
@@ -131,15 +132,43 @@ struct kvm_record_ctrl {
 };
 
 int help() {
-	fprintf(stderr, "Usage: record_ctrl <enable/disable> <record_type> <value>\n"
-			"\t<record_type> : PREEMPTION, UNSYNC_PREEMPTION, TIMER\n");
+	fprintf(stderr, "Usage: \n"
+			"record_ctrl <enable/disable> <record_type> <value> [log_file]\n"
+			"\t<record_type> : PREEMPTION, UNSYNC_PREEMPTION, TIMER\n"
+			"record_ctrl flush\n"
+			"\tFlushes all the data out to the <log_file>. This will stop writting more data\n"
+			"\tto the logger module and flush all the remaining data out to the <log_file>. \n"
+			"\tAfter that the record_ctrl will stop working and return. This command is normally\n"
+			"\tused when the virtual machine has been shutdown.\n"
+			"record_ctrl clean\n"
+			"\tDelete all the data in the logger module and sotp the record_ctrl program working in\n"
+			"\tthe userspace(if any).!NOT IMPLEMENTED YET!\n"
+			"record_ctrl help\n"
+			"\tDisplay the help infomation.\n");
+
 	return -1;
+}
+
+int flush(void)
+{
+	int fd_logger;
+	int ret;
+	fd_logger = open("/dev/logger", 0);
+		if(fd_logger < 0) {
+			printf("Open /dev/logger failed\n");
+			return -1;
+		}
+		ret = ioctl(fd_logger, LOGGER_FLUSH);
+		if(ret < 0) {
+			printf("Flush failed\n");
+			return -1;
+		}
+		return 0;
 }
 
 int main(int argc, char **argv)
 {
 	int fd;
-	int fd_logger;
 	int record;
 	int ret;
 	long type;
@@ -153,20 +182,17 @@ int main(int argc, char **argv)
 
 	if(strcmp(argv[1], "flush") == 0) {
 		//flush the logger
-		fd_logger = open("/dev/logger", 0);
-		if(fd_logger < 0) {
-			printf("Open /dev/logger failed\n");
-			return -1;
-		}
-		ret = ioctl(fd_logger, LOGGER_FLUSH);
-		if(ret < 0) {
-			printf("Flush failed\n");
-			return -1;
-		}
+		return flush();
+	} else if(strcmp(argv[1], "clean") == 0) {
+		//clean all the data in the logger and stop swapping to file
+		printf("record_ctrl clean not implemented yet\n");
 		return 0;
-	}
-
-	if(strcmp(argv[1], "test") == 0) {
+	}else if(strcmp(argv[1], "help") == 0) {
+		//print help info
+		return help();
+	}else if(strcmp(argv[1], "test") == 0) {
+		//just for test
+		//should be deleted when it is stable
 		char *fname_log = "kern.log";
 		char *fname = "/dev/logger";
 
@@ -190,13 +216,14 @@ int main(int argc, char **argv)
 
 	if (record) {
 		char *fname_log = "kern.log";
-		char *fname = "/dev/logger";
 
 		if (argc < 4)
 			return help();
 
 		if(argc == 5) {
 			fname_log = argv[4];
+		} else {
+			printf("Use default output log file name: kern.log");
 		}
 
 		kvm_rc.kvm_record_type = -1;
@@ -216,7 +243,7 @@ int main(int argc, char **argv)
 		}
 		printf("KVM_ENABLE_RECORD, type = %s, val = %u\n", argv[2], kvm_rc.kvm_record_timer_value);
 
-		//log2file(fname, fname_log);
+		//log2file("/dev/logger", fname_log);
 
 	} else {
 		ret = ioctl(fd, KVM_DISABLE_RECORD, 0);
