@@ -1056,6 +1056,7 @@ extern int kvm_record_type;
 extern int kvm_record_mode;
 extern u32 kvm_record_timer_value;
 extern struct kmem_cache *kvm_tm_page_cache;
+extern int kvm_record_print_log;
 
 struct kvm_device_ops;
 

@@ -92,6 +92,8 @@ int kvm_record_mode;
 EXPORT_SYMBOL_GPL(kvm_record_mode);
 u32 kvm_record_timer_value;
 EXPORT_SYMBOL_GPL(kvm_record_timer_value);
+int kvm_record_print_log;
+EXPORT_SYMBOL_GPL(kvm_record_print_log);
 
 
 static __read_mostly struct preempt_ops kvm_preempt_ops;
@@ -2668,7 +2670,9 @@ static long kvm_dev_ioctl(struct file *filp,
 		kvm_record_type = kvm_rc.kvm_record_type;
 		//kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MMU;
 		//kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MEMSLOT;
-		kvm_record_mode = KVM_RECORD_SOFTWARE;
+		//kvm_record_mode = KVM_RECORD_SOFTWARE;
+		kvm_record_mode = kvm_rc.kvm_record_mode;
+		kvm_record_print_log = kvm_rc.print_log;
 		kvm_record_timer_value = kvm_rc.kvm_record_timer_value;
 		if (kvm_record_timer_value == 0)
 			kvm_record_timer_value = KVM_DEFAULT_PREEMPTION_VALUE;

@@ -2698,9 +2698,6 @@ static void direct_pte_prefetch(struct kvm_vcpu *vcpu, u64 *sptep)
 	__direct_pte_prefetch(vcpu, sp, sptep);
 }
 
-// TODO: This compiling flag need a proper place
-//#define RECORD_DEBUG 1
-
 static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			int map_writable, int level, gfn_t gfn, pfn_t pfn,
 			bool prefault)
@@ -2718,26 +2715,26 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			if (kvm_record && kvm_record_mode == KVM_RECORD_SOFTWARE) {
 				if (write) {
 					pte_access = ACC_ALL;
-#ifdef RECORD_DEBUG
-					if (!(*iterator.sptep & PT_WRITABLE_MASK)) {
-						print_record("\tXELATEX - W turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
-					} else {
-						print_record("\tXELATEX - UW turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
+					if (kvm_record_print_log) {
+						if (!(*iterator.sptep & PT_WRITABLE_MASK)) {
+							print_record("\tXELATEX - W turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
+						} else {
+							print_record("\tXELATEX - UW turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
+						}
 					}
-#endif
 				} else {
 					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
-#ifdef RECORD_DEBUG
-					if (!(*iterator.sptep & PT_PRESENT_MASK)) {
-						print_record("\tXELATEX - R turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
-					} else {
-						print_record("\tXELATEX - UR turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
+					if (kvm_record_print_log) {
+						if (!(*iterator.sptep & PT_PRESENT_MASK)) {
+							print_record("\tXELATEX - R turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
+						} else {
+							print_record("\tXELATEX - UR turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
+						}
 					}
-#endif
 				}
 			}
 
@@ -2788,10 +2785,9 @@ static void __mmu_walk_spt(hpa_t shadow_addr, int level, gpa_t gpa)
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 		if (is_last_spte(*sptep, level)) {
-#ifdef RECORD_DEBUG
-			printk(KERN_ERR "\tpfn = 0x%llx gfn = 0x%llx\n",
-					new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
-#endif
+			if (kvm_record_print_log)
+				printk(KERN_ERR "\tpfn = 0x%llx gfn = 0x%llx\n",
+						new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
 		} else {
 			__mmu_walk_spt(new_addr, level - 1, new_gpa);
 		}
@@ -2810,54 +2806,50 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.mmu.root_level < PT64_ROOT_LEVEL &&
 			!vcpu->arch.mmu.direct_map)
 		--level;
-#ifdef RECORD_DEBUG
-	printk(KERN_ERR "XELATEX - mmu spt info\n");
-#endif
+	if (kvm_record_print_log)
+		printk(KERN_ERR "XELATEX - mmu spt info\n");
+
 	__mmu_walk_spt(shadow_addr, level, 0);
 }
 
 static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
 {
-		struct kvm *kvm = vcpu->kvm;
-		struct kvm_memory_slot *slot;
-		struct kvm_shadow_walk_iterator iterator;
-		//struct kvm_mmu_page *sp = NULL;
-		//bool get_sp = false;
-		gfn_t gfn;
-		u64 spte;
-		pfn_t pfn;
+	struct kvm *kvm = vcpu->kvm;
+	struct kvm_memory_slot *slot;
+	struct kvm_shadow_walk_iterator iterator;
+	//struct kvm_mmu_page *sp = NULL;
+	//bool get_sp = false;
+	gfn_t gfn;
+	u64 spte;
+	pfn_t pfn;
 
-#ifdef RECORD_DEBUG
+	if (kvm_record_print_log)
 		printk(KERN_ERR "XELATEX - slot spt info\n");
-#endif
-		kvm_for_each_memslot(slot, kvm->memslots) {
-#ifdef RECORD_DEBUG
-			printk(KERN_ERR "\tXELATEX -slot, id=%u, base_gfn=0x%llx, npages=%lu\n",
-				slot->id, slot->base_gfn, slot->npages);
-#endif
-			for (gfn = slot->base_gfn; gfn < slot->base_gfn+slot->npages; gfn++) {
-				for_each_shadow_entry_lockless(vcpu, (u64)gfn << PAGE_SHIFT, iterator, spte) {
-					if (!is_shadow_present_pte(*iterator.sptep))
-						break;
-	//				get_sp = false;
-	//				for_each_gfn_sp(vcpu->kvm, sp, gfn) {
-	//					if (is_obsolete_sp(vcpu->kvm, sp) || sp->vcpu != vcpu)
-	//						continue;
-	//					get_sp = true;
-	//					break;
-	//				}
-	//				if (!get_sp) break;
-
-					if (iterator.level == level && is_shadow_present_pte(*iterator.sptep)) {
-						pfn = (*iterator.sptep & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT;
-#ifdef RECORD_DEBUG
+	kvm_for_each_memslot(slot, kvm->memslots) {
+	if (kvm_record_print_log)
+		printk(KERN_ERR "\tXELATEX -slot, id=%u, base_gfn=0x%llx, npages=%lu\n",
+			slot->id, slot->base_gfn, slot->npages);
+		for (gfn = slot->base_gfn; gfn < slot->base_gfn+slot->npages; gfn++) {
+			for_each_shadow_entry_lockless(vcpu, (u64)gfn << PAGE_SHIFT, iterator, spte) {
+				if (!is_shadow_present_pte(*iterator.sptep))
+					break;
+//				get_sp = false;
+//				for_each_gfn_sp(vcpu->kvm, sp, gfn) {
+//					if (is_obsolete_sp(vcpu->kvm, sp) || sp->vcpu != vcpu)
+//						continue;
+//					get_sp = true;
+//					break;
+//				}
+//				if (!get_sp) break;
+				if (iterator.level == level && is_shadow_present_pte(*iterator.sptep)) {
+					pfn = (*iterator.sptep & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT;
+					if (kvm_record_print_log)
 						printk(KERN_ERR "\tpfn = 0x%llx gfn = 0x%llx\n", pfn, gfn);
-#endif
-						break;
-					}
+					break;
 				}
 			}
 		}
+	}
 }
 
 // XELATEX

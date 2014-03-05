@@ -21,6 +21,11 @@
 #define KVM_RECORD_UNSYNC_PREEMPTION 2
 #define KVM_RECORD_MAX_TYPE 3
 
+#define KVM_RECORD_SOFTWARE 0
+#define KVM_RECORD_HARDWARE_WALK_MMU 1
+#define KVM_RECORD_HARDWARE_WALK_MEMSLOT 2
+#define KVM_RECORD_MAX_MODE 3
+
 #define LOGGER_IOC_MAGIC 0XAF
 #define LOGGER_FLUSH	_IO(LOGGER_IOC_MAGIC, 0)
 
@@ -116,7 +121,6 @@ void log2file(const char *fname, const char *fname_log)
 	fclose(f_log);
 }
 
-
 struct {
 	int type;
 	char *name;
@@ -126,15 +130,28 @@ struct {
   {KVM_RECORD_UNSYNC_PREEMPTION, "UNSYNC_PREEMPTION"}
 };
 
+struct {
+	int type;
+	char *name;
+} kvm_record_mode[] =
+{ {KVM_RECORD_SOFTWARE, "SOFT"},
+  {KVM_RECORD_HARDWARE_WALK_MMU, "HARD_MMU"},
+  {KVM_RECORD_HARDWARE_WALK_MEMSLOT, "HARD_MEMSLOT"},
+};
+
 struct kvm_record_ctrl {
 	int kvm_record_type;
 	unsigned kvm_record_timer_value;
+	int kvm_record_mode;
+	int print_log;
 };
 
 int help() {
 	fprintf(stderr, "Usage: \n"
-			"record_ctrl <enable/disable> <record_type> <value> [log_file]\n"
+			"record_ctrl <enable/disable> <record_type> <value> <log_file> [<record_mode> <print_log>]\n"
 			"\t<record_type> : PREEMPTION, UNSYNC_PREEMPTION, TIMER\n"
+			"\t<record_mode> : SOFT, HARD_MMU, HARD_MEMSLOT; default is SOFT\n"
+			"\t<print_log> : ON/OFF, default is on\n"
 			"record_ctrl flush\n"
 			"\tFlushes all the data out to the <log_file>. This will stop writting more data\n"
 			"\tto the logger module and flush all the remaining data out to the <log_file>. \n"
@@ -145,7 +162,6 @@ int help() {
 			"\tthe userspace(if any).!NOT IMPLEMENTED YET!\n"
 			"record_ctrl help\n"
 			"\tDisplay the help infomation.\n");
-
 	return -1;
 }
 
@@ -209,14 +225,10 @@ int main(int argc, char **argv)
 	if (record) {
 		char *fname_log = "kern.log";
 
-		if (argc < 4)
+		if (argc < 5)
 			return help();
 
-		if(argc == 5) {
-			fname_log = argv[4];
-		} else {
-			printf("Use default output log file name: kern.log");
-		}
+		fname_log = argv[4];
 
 		kvm_rc.kvm_record_type = -1;
 		for (i=0; i<KVM_RECORD_MAX_TYPE; i++)
@@ -227,6 +239,15 @@ int main(int argc, char **argv)
 			return help();
 		}
 		sscanf(argv[3], "%u", &(kvm_rc.kvm_record_timer_value));
+		kvm_rc.kvm_record_mode = KVM_RECORD_SOFTWARE;
+		if (argc >= 6)
+			for (i=0; i<KVM_RECORD_MAX_MODE; i++)
+				if (strcmp(argv[5], kvm_record_mode[i].name) == 0)
+					kvm_rc.kvm_record_mode = kvm_record_mode[i].type;
+		kvm_rc.print_log = 1;
+		if (argc >= 7)
+			if (strcmp(argv[6], "OFF") == 0 || strcmp(argv[6], "off") == 0)
+				kvm_rc.print_log = 0;
 		ret = ioctl(fd, KVM_ENABLE_RECORD, &kvm_rc);
 		if (ret < 0) {
 			printf("KVM_ENABLE_RECORD failed, errno = %d\n"

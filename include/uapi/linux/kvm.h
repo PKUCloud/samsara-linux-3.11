@@ -1079,6 +1079,8 @@ struct kvm_assigned_msix_entry {
 struct kvm_record_ctrl {
 	int kvm_record_type;
 	__u32 kvm_record_timer_value;
+	int kvm_record_mode;
+	int print_log;
 };
 
 #endif /* __LINUX_KVM_H */
