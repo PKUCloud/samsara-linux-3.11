@@ -2712,7 +2712,9 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
 			pte_access = ACC_ALL;
-			if (kvm_record && kvm_record_mode == KVM_RECORD_SOFTWARE) {
+			// TODO:
+			if (kvm_record && vcpu->vcpu_id == 0) {
+			//if (kvm_record && kvm_record_mode == KVM_RECORD_SOFTWARE) {
 				if (write) {
 					pte_access = ACC_ALL;
 					if (kvm_record_print_log) {
@@ -2785,12 +2787,26 @@ static void __mmu_walk_spt(hpa_t shadow_addr, int level, gpa_t gpa)
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 		if (is_last_spte(*sptep, level)) {
-			if (kvm_record_print_log)
-				printk(KERN_ERR "\tpfn = 0x%llx gfn = 0x%llx\n",
-						new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
+			if (kvm_record_print_log) {
+				if (*sptep & VMX_EPT_DIRTY_BIT && *sptep & VMX_EPT_ACCESS_BIT)
+					printk(KERN_ERR "\tAD pfn = 0x%llx gfn = 0x%llx\n",
+							new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
+				else {
+					if (*sptep & VMX_EPT_DIRTY_BIT)
+						printk(KERN_ERR "\tD pfn = 0x%llx gfn = 0x%llx\n",
+								new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
+					else if (*sptep & VMX_EPT_ACCESS_BIT)
+						printk(KERN_ERR "\tA pfn = 0x%llx gfn = 0x%llx\n",
+								new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
+					else
+						printk(KERN_ERR "\tU pfn = 0x%llx gfn = 0x%llx\n",
+								new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
+				}
+			}
 		} else {
 			__mmu_walk_spt(new_addr, level - 1, new_gpa);
 		}
+		*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
 	}
 }
 

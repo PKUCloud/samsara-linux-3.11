@@ -94,6 +94,8 @@ u32 kvm_record_timer_value;
 EXPORT_SYMBOL_GPL(kvm_record_timer_value);
 int kvm_record_print_log;
 EXPORT_SYMBOL_GPL(kvm_record_print_log);
+int kvm_record_count;
+EXPORT_SYMBOL_GPL(kvm_record_count);
 
 
 static __read_mostly struct preempt_ops kvm_preempt_ops;
@@ -2666,6 +2668,7 @@ static long kvm_dev_ioctl(struct file *filp,
 			r = -1;
 			break;
 		}
+		kvm_record_count = KVM_RECORD_COUNT;
 		kvm_record = true;
 		kvm_record_type = kvm_rc.kvm_record_type;
 		//kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MMU;
