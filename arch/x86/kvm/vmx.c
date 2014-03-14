@@ -5815,6 +5815,12 @@ EXPORT_SYMBOL(tm_unsync_commit);
 // XELATEX
 static int handle_preemption(struct kvm_vcpu *vcpu)
 {
+
+	//kvm_vcpu_checkpoint_rollback rsr
+	//1 TODO: just for debug
+	make_vcpu_checkpoint(vcpu);
+	//end kvm_vcpu_checkpoint_rollback rsr
+	
 	if (kvm_record_type == KVM_RECORD_PREEMPTION)
 		return tm_commit(vcpu, 1);
 	else if (kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION)

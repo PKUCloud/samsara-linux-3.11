@@ -64,6 +64,10 @@
 #include <asm/pvclock.h>
 #include <asm/div64.h>
 
+//kvm_vcpu_checkpoint_rollback rsr
+#include <asm/kvm_checkpoint_rollback.h>
+//end kvm_vcpu_checkpoint_rollback rsr
+
 #define MAX_IO_MSRS 256
 #define KVM_MAX_MCE_BANKS 32
 #define KVM_MCE_CAP_SUPPORTED (MCG_CTL_P | MCG_SER_P)
@@ -3322,6 +3326,105 @@ out:
 	kfree(u.buffer);
 	return r;
 }
+
+//kvm_vcpu_checkpoint_rollback rsr
+int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
+					 int type, void *arg)
+{
+	int ret;
+	ret = 0;
+	
+	switch (type){
+	case KVM_GET_REGS: {
+		ret = kvm_arch_vcpu_ioctl_get_regs(vcpu, arg);
+		break;
+	}
+	case KVM_GET_FPU: {
+		ret = kvm_arch_vcpu_ioctl_get_fpu(vcpu, arg);
+		break;
+	}
+	case KVM_GET_XSAVE: {
+		kvm_vcpu_ioctl_x86_get_xsave(vcpu, arg);	//void
+		break;
+	}
+	case KVM_GET_SREGS: {
+		ret = kvm_arch_vcpu_ioctl_get_sregs(vcpu, arg);
+		break;
+	}
+	case KVM_GET_XCRS: {
+		kvm_vcpu_ioctl_x86_get_xcrs(vcpu, arg);		//void
+		break;
+	}
+	case KVM_GET_MSRS: {
+		//4 All parameters are kernel addresses, so use __msr_io
+		struct kvm_msrs *msrs = arg;
+		struct kvm_msr_entry *entries = msrs->entries;
+		ret = __msr_io(vcpu, arg, entries, kvm_get_msr);
+		break;
+	}
+	case KVM_GET_MP_STATE: {
+		ret = kvm_arch_vcpu_ioctl_get_mpstate(vcpu, arg);
+		break;
+	}
+	case KVM_GET_LAPIC: {
+		ret = kvm_vcpu_ioctl_get_lapic(vcpu, arg);
+		break;
+	}
+	case KVM_GET_VCPU_EVENTS: {
+		kvm_vcpu_ioctl_x86_get_vcpu_events(vcpu, arg);
+		break;
+	}
+	case KVM_GET_DEBUGREGS: {
+		kvm_vcpu_ioctl_x86_get_debugregs(vcpu, arg);
+		break;
+	}
+
+	//set vcpu status
+	case KVM_SET_REGS: {
+		ret = kvm_arch_vcpu_ioctl_set_regs(vcpu, arg);
+		break;
+	}
+	case KVM_SET_XSAVE: {
+		ret = kvm_vcpu_ioctl_x86_set_xsave(vcpu, arg);
+		break;
+	}
+	case KVM_SET_FPU:{
+		ret = kvm_arch_vcpu_ioctl_set_fpu(vcpu, arg);
+		break;
+	}
+	case KVM_SET_XCRS:{
+		ret = kvm_vcpu_ioctl_x86_set_xcrs(vcpu, arg);
+		break;
+	}
+	case KVM_SET_SREGS:{
+		ret = kvm_arch_vcpu_ioctl_set_sregs(vcpu, arg);
+		break;
+	}
+	case KVM_SET_MSRS:{
+		//All parameters are kernel addresses, so use __msr_io
+		struct kvm_msrs *msrs = arg;
+		struct kvm_msr_entry *entries = msrs->entries;
+		ret = __msr_io(vcpu, arg, entries, do_set_msr);
+		break;
+	}
+	case KVM_SET_MP_STATE:{
+		ret = kvm_arch_vcpu_ioctl_set_mpstate(vcpu, arg);
+		break;
+	}
+	case KVM_SET_LAPIC: {
+		ret = kvm_vcpu_ioctl_get_lapic(vcpu, arg);
+		break;
+	}
+
+
+	
+	
+	default:
+		ret = -EINVAL;
+	}
+	return ret;
+}
+//end kvm_vcpu_checkpoint_rollback rsr
 
 int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf)
 {

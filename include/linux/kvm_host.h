@@ -33,6 +33,11 @@
 
 #include <asm/kvm_host.h>
 
+//kvm_vcpu_checkpoint_rollback rsr
+#include <asm/kvm_checkpoint_rollback.h>
+//end kvm_vcpu_checkpoint_rollback rsr
+
+
 #ifndef KVM_MMIO_SIZE
 #define KVM_MMIO_SIZE 8
 #endif
@@ -294,6 +299,10 @@ struct kvm_vcpu {
 	gfn_t access_size;
 	gfn_t dirty_size;
 	gfn_t conflict_size;
+
+	//kvm_vcpu_checkpoint_rollback rsr
+	struct CPUX86State vcpu_checkpoint;
+	//end kvm_vcpu_checkpoint_rollback rsr
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
@@ -633,6 +642,13 @@ long kvm_arch_dev_ioctl(struct file *filp,
 			unsigned int ioctl, unsigned long arg);
 long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg);
+
+//kvm_vcpu_checkpoint_rollback rsr
+int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
+					 int type, void *arg);
+//end kvm_vcpu_checkpoint_rollback rsr
+
+
 int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf);
 
 int kvm_dev_ioctl_check_extension(long ext);
