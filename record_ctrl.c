@@ -190,14 +190,6 @@ int main(int argc, char **argv)
 	}else if(strcmp(argv[1], "help") == 0) {
 		//print help info
 		return help();
-	}else if(strcmp(argv[1], "test") == 0) {
-		//just for test
-		//should be deleted when it is stable
-		char *fname_log = "kern.log";
-		char *fname = "/dev/logger";
-
-		log2file(fname, fname_log);
-		return 0;
 	}
 
 	fd = open("/dev/kvm", 0);
@@ -243,7 +235,8 @@ int main(int argc, char **argv)
 		}
 		printf("KVM_ENABLE_RECORD, type = %s, val = %u\n", argv[2], kvm_rc.kvm_record_timer_value);
 
-		//log2file("/dev/logger", fname_log);
+		//record to file
+		log2file("/dev/logger", fname_log);
 
 	} else {
 		ret = ioctl(fd, KVM_DISABLE_RECORD, 0);
