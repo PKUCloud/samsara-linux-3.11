@@ -3415,9 +3415,14 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		ret = kvm_vcpu_ioctl_get_lapic(vcpu, arg);
 		break;
 	}
-
-
-	
+	case KVM_SET_VCPU_EVENTS: {
+		kvm_vcpu_ioctl_x86_set_vcpu_events(vcpu, arg);
+		break;
+	}
+	case KVM_SET_DEBUGREGS: {
+		kvm_vcpu_ioctl_x86_set_debugregs(vcpu, arg);
+		break;
+	}
 	
 	default:
 		ret = -EINVAL;
@@ -6940,6 +6945,11 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+
+	//kvm_vcpu_checkpoint_rollback rsr
+	vcpu->check_rollback = 0;
+	//end kvm_vcpu_checkpoint_rollback rsr
+
 
 	return 0;
 fail_free_wbinvd_dirty_mask:

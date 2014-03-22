@@ -302,6 +302,7 @@ struct kvm_vcpu {
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
+	int check_rollback;
 	//end kvm_vcpu_checkpoint_rollback rsr
 };
 
