@@ -216,8 +216,13 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
          * huge jump-backs that would occur without any writeback at all.
          */
 
-		msrs[n++].index = MSR_KVM_SYSTEM_TIME;
-		msrs[n++].index = MSR_KVM_WALL_CLOCK;
+		/*same as MSR_KVM_WALL_CLOCK_NEW. Use that instead.
+		  *The hypervisor is only guaranteed to update this data at the moment of MSR write.
+		  *Note that although MSRs are per-CPU entities, the effect of this particular MSR is global.
+		  */
+		//msrs[n++].index = MSR_KVM_WALL_CLOCK;
+		//same as MSR_KVM_SYSTEM_TIME_NEW. Use that instead.
+		//msrs[n++].index = MSR_KVM_SYSTEM_TIME;
 		if (kvm_has_feature(KVM_FEATURE_ASYNC_PF)) {
 			msrs[n++].index = MSR_KVM_ASYNC_PF_EN;
 		}
