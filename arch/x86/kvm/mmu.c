@@ -22,6 +22,7 @@
 #include "mmu.h"
 #include "x86.h"
 #include "kvm_cache_regs.h"
+#include "logger.h"
 
 #include <linux/kvm_host.h>
 #include <linux/types.h>
@@ -2715,19 +2716,19 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				if (write) {
 					pte_access = ACC_ALL;
 					if (!(*iterator.sptep & PT_WRITABLE_MASK)) {
-						printk(KERN_ERR "\tXELATEX - W turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+						print_record("\tXELATEX - W turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
 							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					} else {
-						printk(KERN_ERR "\tXELATEX - UW turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+						print_record("\tXELATEX - UW turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
 							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					}
 				} else {
 					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
 					if (!(*iterator.sptep & PT_PRESENT_MASK)) {
-						printk(KERN_ERR "\tXELATEX - R turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+						print_record("\tXELATEX - R turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
 							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					} else {
-						printk(KERN_ERR "\tXELATEX - UR turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
+						print_record("\tXELATEX - UR turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
 							kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
 					}
 				}

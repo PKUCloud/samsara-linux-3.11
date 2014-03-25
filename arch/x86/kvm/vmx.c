@@ -19,6 +19,7 @@
 #include "irq.h"
 #include "mmu.h"
 #include "cpuid.h"
+#include "logger.h"
 
 #include <linux/kvm_host.h>
 #include <linux/module.h>
@@ -5573,7 +5574,7 @@ int __tm_commit(struct kvm_vcpu *vcpu)
 	}
 
 	// Reset variants
-	printk(KERN_ERR "XELATEX turn %llu============================\n", kvm->tm_turn);
+	print_record("XELATEX turn %llu============================\n", kvm->tm_turn);
 	kvm->record_master = false;
 
 	return 0;
@@ -5627,7 +5628,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 		// Master, sync when enter, wait slaves enter
 		if (online_vcpus > 1 && kvm_record_type == KVM_RECORD_TIMER &&
 				down_interruptible(&(kvm->tm_enter_sem))) {
-			printk(KERN_ERR "XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
+			print_record("XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
 			goto record_disable;
 		}
@@ -5652,7 +5653,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 
 		// Slave, sync when exit, wait master's end
 		if (down_interruptible(&(kvm->tm_exit_sem))) {
-			printk(KERN_ERR "XELATEX - vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
+			print_record("XELATEX - vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
 			goto record_disable;
 		}
@@ -5706,7 +5707,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 		goto record_disable;
 
 	mutex_lock(&(kvm->tm_lock));
-	printk(KERN_ERR "XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
+	print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
 	kvm->timestamp ++;
 	mutex_unlock(&(kvm->tm_lock));
 
