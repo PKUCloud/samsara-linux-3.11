@@ -2836,6 +2836,7 @@ static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
 	gfn_t gfn;
 	u64 spte;
 	pfn_t pfn;
+	u64 *sptep;
 
 	//if (kvm_record_print_log)
 	//	printk(KERN_ERR "XELATEX - slot spt info\n");
@@ -2845,7 +2846,8 @@ static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
 		//	slot->id, slot->base_gfn, slot->npages);
 		for (gfn = slot->base_gfn; gfn < slot->base_gfn+slot->npages; gfn++) {
 			for_each_shadow_entry_lockless(vcpu, (u64)gfn << PAGE_SHIFT, iterator, spte) {
-				if (!is_shadow_present_pte(*iterator.sptep))
+				sptep = iterator.sptep;
+				if (!is_shadow_present_pte(*sptep))
 					break;
 //				get_sp = false;
 //				for_each_gfn_sp(vcpu->kvm, sp, gfn) {
@@ -2857,10 +2859,25 @@ static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
 //				if (!get_sp) break;
 				if (iterator.level == level && is_shadow_present_pte(*iterator.sptep)) {
 					pfn = (*iterator.sptep & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT;
-					if (kvm_record_print_log)
-						print_record("\tpfn = 0x%llx gfn = 0x%llx\n", pfn, gfn);
+					if (kvm_record_print_log) {
+						if (*sptep & VMX_EPT_DIRTY_BIT && *sptep & VMX_EPT_ACCESS_BIT)
+							print_record("\tAD pfn = 0x%llx gfn = 0x%llx\n",
+									pfn, gfn);
+						else {
+							if (*sptep & VMX_EPT_DIRTY_BIT)
+								print_record("\tD pfn = 0x%llx gfn = 0x%llx\n",
+										pfn, gfn);
+							else if (*sptep & VMX_EPT_ACCESS_BIT)
+								print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
+										pfn, gfn);
+							else
+								print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
+										pfn, gfn);
+						}
+					}
 					break;
 				}
+				*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
 			}
 		}
 	}
