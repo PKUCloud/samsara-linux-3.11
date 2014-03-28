@@ -2796,9 +2796,9 @@ static void __mmu_walk_spt(hpa_t shadow_addr, int level, gpa_t gpa)
 					else if (*sptep & VMX_EPT_ACCESS_BIT)
 						print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
 								new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
-					else
-						print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
-								new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
+					//else
+					//	print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
+					//			new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
 				}
 			}
 		} else {
@@ -2870,9 +2870,9 @@ static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
 							else if (*sptep & VMX_EPT_ACCESS_BIT)
 								print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
 										pfn, gfn);
-							else
-								print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
-										pfn, gfn);
+							//else
+							//	print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
+							//			pfn, gfn);
 						}
 					}
 					break;
