@@ -279,6 +279,8 @@ struct kvm_vcpu {
 	struct list_head commit_sptep_list;
 	unsigned long mmu_vcpu_valid_gen;
 	bool is_trapped;
+	unsigned long long nr_vmexit;
+	unsigned long long nr_sync;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)

@@ -5744,10 +5744,13 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 	vmx_flush_tlb(vcpu);
 
 	kvm_mmu_unload(vcpu);
+
+	vcpu->nr_sync ++;
 out:
 	return 1;
 record_disable:
-	printk(KERN_ERR "XELATEX - disable kvm_record\n");
+	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu, nr_vmexit=%llu\n",
+		vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit);
 	kvm_record = false;
 	kvm->record_master = false;
 	vcpu->is_kicked = false;
@@ -5756,6 +5759,8 @@ record_disable:
 	vmx->preemption_begin = false;
 	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
 	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
+	vcpu->nr_vmexit = 0;
+	vcpu->nr_sync = 0;
 	goto out;
 }
 EXPORT_SYMBOL(tm_unsync_commit);
@@ -7458,6 +7463,9 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	vmx_complete_atomic_exit(vmx);
 	vmx_recover_nmi_blocking(vmx);
 	vmx_complete_interrupts(vmx);
+
+	// XELATEX
+	vcpu->nr_vmexit ++;
 }
 
 static void vmx_free_vcpu(struct kvm_vcpu *vcpu)
