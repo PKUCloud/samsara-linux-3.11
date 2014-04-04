@@ -281,6 +281,7 @@ struct kvm_vcpu {
 	bool is_trapped;
 	unsigned long long nr_vmexit;
 	unsigned long long nr_sync;
+	bool is_recording;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)

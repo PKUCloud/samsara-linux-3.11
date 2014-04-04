@@ -5720,14 +5720,18 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 	//	kvm_record_count --;
 	//}
 
-	if (kvm_record_count != KVM_RECORD_COUNT) {
+	//if (kvm_record_count != KVM_RECORD_COUNT) {
+	if (vcpu->is_recording) {
+		print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
 		if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
 				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+		kvm->timestamp ++;
+	} else {
+		vcpu->mmu_vcpu_valid_gen ++;
+		//kvm_record_count = KVM_RECORD_COUNT - 1;
+		vcpu->is_recording = true;
 	}
-	kvm_record_count = KVM_RECORD_COUNT - 1;
-	print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
-	kvm->timestamp ++;
 	mutex_unlock(&(kvm->tm_lock));
 
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
@@ -5755,6 +5759,7 @@ record_disable:
 	kvm->record_master = false;
 	vcpu->is_kicked = false;
 	vcpu->is_trapped = false;
+	vcpu->is_recording = false;
 	kvm->tm_turn = 0;
 	vmx->preemption_begin = false;
 	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
