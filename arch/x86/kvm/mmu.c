@@ -2768,7 +2768,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 #define SHADOW_PT_ADDR(address, index, level) \
 	(address + (index << PT64_LEVEL_SHIFT(level)))
 
-static void __mmu_walk_spt(hpa_t shadow_addr, int level, gpa_t gpa)
+static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, gpa_t gpa)
 {
 	u64 index;
 	gpa_t new_gpa;
@@ -2801,8 +2801,18 @@ static void __mmu_walk_spt(hpa_t shadow_addr, int level, gpa_t gpa)
 					//			new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
 				}
 			}
+
+			// Set access and dirty bitmap
+			if (*sptep & VMX_EPT_DIRTY_BIT || *sptep & VMX_EPT_ACCESS_BIT) {
+				set_bit(new_gpa >> PAGE_SHIFT, vcpu->access_bitmap);
+				vcpu->access_size = (new_gpa >> PAGE_SHIFT) + 1;
+				if (*sptep & VMX_EPT_DIRTY_BIT) {
+					set_bit(new_gpa >> PAGE_SHIFT, vcpu->dirty_bitmap);
+					vcpu->dirty_size = (new_gpa >> PAGE_SHIFT) + 1;
+				}
+			}
 		} else {
-			__mmu_walk_spt(new_addr, level - 1, new_gpa);
+			__mmu_walk_spt(vcpu, new_addr, level - 1, new_gpa);
 		}
 		*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
 	}
@@ -2823,7 +2833,7 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 	//if (kvm_record_print_log)
 	//	printk(KERN_ERR "XELATEX - mmu spt info\n");
 
-	__mmu_walk_spt(shadow_addr, level, 0);
+	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
 }
 
 static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)

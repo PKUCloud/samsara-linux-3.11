@@ -5702,61 +5702,99 @@ timer_exit:
 }
 EXPORT_SYMBOL(tm_commit);
 
+int tm_detect_conflict(unsigned long *access_bm, unsigned long *conflict_bm, int nbits)
+{
+	int k;
+	int nr = BITS_TO_LONGS(nbits);
+
+	for (k = 0; k < nr; k++) {
+		if (access_bm[k] & conflict_bm[k])
+			return 1;
+	}
+	return 0;
+}
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
-	//int online_vcpus = atomic_read(&(kvm->online_vcpus));
+	int i;
+	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 
 	if (!kvm_record)
 		goto record_disable;
 
-	mutex_lock(&(kvm->tm_lock));
-	// TODO: Here is just for test
-	//if (vcpu->vcpu_id == 0 && kvm_record_count) {
-	//	if (kvm_record_count != KVM_RECORD_COUNT)
-	//		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-	//	kvm_record_count --;
-	//}
+	// Reset bitmaps
+	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
 
-	//if (kvm_record_count != KVM_RECORD_COUNT) {
 	if (vcpu->is_recording) {
-		print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n", vcpu->vcpu_id, kvm->timestamp);
 		if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
 				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
+
+		mutex_lock(&(kvm->tm_lock));
+		if (!(kvm->timestamp % 1000))
+			print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n",
+					vcpu->vcpu_id, kvm->timestamp);
+
+		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
+			// Detect conflict
+			if (tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
+				//print_record("XELATEX - conflict, vcpu=%d\n", vcpu->vcpu_id);
+				vcpu->nr_conflict++;
+			}
+			// Clear conflict bitmap
+			bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+			//vcpu->conflict_size = 1;
+		}
+
+		// Set dirty bit
+		for (i=0; i<online_vcpus; i++) {
+			if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
+				continue;
+			bitmap_or(kvm->vcpus[i]->conflict_bitmap, vcpu->dirty_bitmap,
+				kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
+			//if (kvm->vcpus[i]->conflict_size < vcpu->dirty_size + 1)
+			//	kvm->vcpus[i]->conflict_size = vcpu->dirty_size + 1;
+		}
+
+		// Set last commit vcpu
+		kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
+		mutex_unlock(&(kvm->tm_lock));
+
 	} else {
 		vcpu->mmu_vcpu_valid_gen ++;
+		kvm_mmu_unload(vcpu);
 		//kvm_record_count = KVM_RECORD_COUNT - 1;
 		vcpu->is_recording = true;
 	}
-	mutex_unlock(&(kvm->tm_lock));
 
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
-	if (kvm_record_mode == KVM_RECORD_SOFTWARE)
+	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
 		vcpu->mmu_vcpu_valid_gen ++;
-
-	// Zap all mmu pages every TM_MMU_INVALID_GEN turns
-	if (!(vcpu->mmu_vcpu_valid_gen % TM_MMU_INVALID_GEN)) {
-		spin_lock(&kvm->mmu_lock);
-		kvm_zap_obsolete_pages(kvm);
-		spin_unlock(&kvm->mmu_lock);
+		// Zap all mmu pages every TM_MMU_INVALID_GEN turns
+		if (!(vcpu->mmu_vcpu_valid_gen % TM_MMU_INVALID_GEN)) {
+			spin_lock(&kvm->mmu_lock);
+			kvm_zap_obsolete_pages(kvm);
+			spin_unlock(&kvm->mmu_lock);
+		}
+		kvm_mmu_unload(vcpu);
 	}
-	
-	vmx_flush_tlb(vcpu);
 
-	kvm_mmu_unload(vcpu);
+	vmx_flush_tlb(vcpu);
 
 	vcpu->nr_sync ++;
 out:
 	return 1;
 record_disable:
-	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu, nr_vmexit=%llu\n",
-		vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit);
+	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu,"
+			"nr_vmexit=%llu, nr_conflict=%llu\n",
+			vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
 	kvm_record = false;
 	kvm->record_master = false;
+	kvm->tm_last_commit_vcpu = -1;
 	vcpu->is_kicked = false;
 	vcpu->is_trapped = false;
 	vcpu->is_recording = false;
@@ -5766,6 +5804,10 @@ record_disable:
 	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	vcpu->nr_vmexit = 0;
 	vcpu->nr_sync = 0;
+	vcpu->nr_conflict = 0;
+	vcpu->access_size = 1;
+	vcpu->dirty_size = 1;
+	vcpu->conflict_size = 1;
 	goto out;
 }
 EXPORT_SYMBOL(tm_unsync_commit);

@@ -6828,6 +6828,15 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
 	vcpu->is_trapped = false;
 	vcpu->is_recording = false;
+	vcpu->nr_vmexit = 0;
+	vcpu->nr_sync = 0;
+	vcpu->nr_conflict = 0;
+	vcpu->access_size = 1;
+	vcpu->dirty_size = 1;
+	vcpu->conflict_size = 1;
+	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
 
 	return 0;
 fail_free_wbinvd_dirty_mask:
@@ -6869,6 +6878,7 @@ void kvm_arch_init_record(struct kvm *kvm)
 	kvm->tm_timer_ready = false;
 	spin_lock_init(&(kvm->tm_timer_lock));
 	kvm->timestamp = 0;
+	kvm->tm_last_commit_vcpu = -1;
 }
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)

@@ -219,6 +219,10 @@ struct kvm_tm_page {
 	int write;
 };
 
+// 2G mem is 2G/4K=512K
+// 500M mem is 128K
+#define TM_BITMAP_SIZE 512*1024
+
 struct kvm_vcpu {
 	struct kvm *kvm;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -281,7 +285,15 @@ struct kvm_vcpu {
 	bool is_trapped;
 	unsigned long long nr_vmexit;
 	unsigned long long nr_sync;
+	unsigned long long nr_conflict;
+	bool is_conflict;
 	bool is_recording;
+	DECLARE_BITMAP(access_bitmap, TM_BITMAP_SIZE);
+	DECLARE_BITMAP(dirty_bitmap, TM_BITMAP_SIZE);
+	DECLARE_BITMAP(conflict_bitmap, TM_BITMAP_SIZE);
+	gfn_t access_size;
+	gfn_t dirty_size;
+	gfn_t conflict_size;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
@@ -432,6 +444,7 @@ struct kvm {
 		unsigned long long timestamp;
 		unsigned long long tm_turn;
 	};
+	int tm_last_commit_vcpu;
 };
 
 #define kvm_err(fmt, ...) \
