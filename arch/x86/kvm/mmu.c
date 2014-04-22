@@ -322,12 +322,12 @@ static int is_nx(struct kvm_vcpu *vcpu)
 	return vcpu->arch.efer & EFER_NX;
 }
 
-static int is_shadow_present_pte(u64 pte)
+static int inline is_shadow_present_pte(u64 pte)
 {
 	return pte & PT_PRESENT_MASK && !is_mmio_spte(pte);
 }
 
-static int is_large_pte(u64 pte)
+static int inline is_large_pte(u64 pte)
 {
 	return pte & PT_PAGE_SIZE_MASK;
 }
@@ -342,7 +342,7 @@ static int is_rmap_spte(u64 pte)
 	return is_shadow_present_pte(pte);
 }
 
-static int is_last_spte(u64 pte, int level)
+static int inline is_last_spte(u64 pte, int level)
 {
 	if (level == PT_PAGE_TABLE_LEVEL)
 		return 1;
@@ -2768,6 +2768,38 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 #define SHADOW_PT_ADDR(address, index, level) \
 	(address + (index << PT64_LEVEL_SHIFT(level)))
 
+static void __always_inline __mmu_print_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t addr)
+{
+	if (*sptep & VMX_EPT_DIRTY_BIT && *sptep & VMX_EPT_ACCESS_BIT)
+		print_record("\tAD pfn = 0x%llx gfn = 0x%llx\n",
+				addr >> PAGE_SHIFT, gpa >> PAGE_SHIFT);
+	else {
+		if (*sptep & VMX_EPT_DIRTY_BIT)
+			print_record("\tD pfn = 0x%llx gfn = 0x%llx\n",
+					addr >> PAGE_SHIFT, gpa >> PAGE_SHIFT);
+		else if (*sptep & VMX_EPT_ACCESS_BIT)
+			print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
+					addr >> PAGE_SHIFT, gpa >> PAGE_SHIFT);
+		//else
+		//	print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
+		//			new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
+	}
+}
+
+// Set access and dirty bitmap
+static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t addr)
+{
+	if (*sptep & VMX_EPT_DIRTY_BIT || *sptep & VMX_EPT_ACCESS_BIT) {
+		set_bit(gpa >> PAGE_SHIFT, vcpu->access_bitmap);
+		vcpu->access_size = (gpa >> PAGE_SHIFT) + 1;
+		if (*sptep & VMX_EPT_DIRTY_BIT) {
+			set_bit(gpa >> PAGE_SHIFT, vcpu->dirty_bitmap);
+			vcpu->dirty_size = (gpa >> PAGE_SHIFT) + 1;
+		}
+	}
+	*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
+}
+
 static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, gpa_t gpa)
 {
 	u64 index;
@@ -2785,36 +2817,56 @@ static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, 
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 		if (is_last_spte(*sptep, level)) {
-			if (kvm_record_print_log) {
-				if (*sptep & VMX_EPT_DIRTY_BIT && *sptep & VMX_EPT_ACCESS_BIT)
-					print_record("\tAD pfn = 0x%llx gfn = 0x%llx\n",
-							new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
-				else {
-					if (*sptep & VMX_EPT_DIRTY_BIT)
-						print_record("\tD pfn = 0x%llx gfn = 0x%llx\n",
-								new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
-					else if (*sptep & VMX_EPT_ACCESS_BIT)
-						print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
-								new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
-					//else
-					//	print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
-					//			new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
-				}
-			}
-
-			// Set access and dirty bitmap
-			if (*sptep & VMX_EPT_DIRTY_BIT || *sptep & VMX_EPT_ACCESS_BIT) {
-				set_bit(new_gpa >> PAGE_SHIFT, vcpu->access_bitmap);
-				vcpu->access_size = (new_gpa >> PAGE_SHIFT) + 1;
-				if (*sptep & VMX_EPT_DIRTY_BIT) {
-					set_bit(new_gpa >> PAGE_SHIFT, vcpu->dirty_bitmap);
-					vcpu->dirty_size = (new_gpa >> PAGE_SHIFT) + 1;
-				}
-			}
-		} else {
-			__mmu_walk_spt(vcpu, new_addr, level - 1, new_gpa);
+			if (kvm_record_print_log)
+				__mmu_print_AD_bit(vcpu, sptep, new_gpa, new_addr);
+			__mmu_set_AD_bit(vcpu, sptep, new_gpa, new_addr);
 		}
-		*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
+		else
+			__mmu_walk_spt(vcpu, new_addr, level - 1, new_gpa);
+	}
+}
+
+static void __mmu_walk_spt_fast(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int top_level)
+{
+	u64 index[PT64_ROOT_LEVEL + 2] = {0};
+	gpa_t gpa[PT64_ROOT_LEVEL + 2] = {0};
+	hpa_t addr[PT64_ROOT_LEVEL + 2] = {0};
+	u64 *sptep;
+	int level = top_level;
+
+	if (level < PT_PAGE_TABLE_LEVEL)
+		return;
+
+	addr[top_level + 1] = shadow_addr;
+	gpa[top_level + 1] = 0;
+	while (level <= top_level) {			
+		while (index[level] < PT64_NR_PT_ENTRY) {
+			sptep = ((u64 *)__va(addr[level+1])) + index[level];
+			if (is_shadow_present_pte(*sptep)) {
+				addr[level] = *sptep & PT64_BASE_ADDR_MASK;
+				gpa[level] = SHADOW_PT_ADDR(gpa[level+1], index[level], level);
+				if (!is_last_spte(*sptep, level)) {
+					index[level]++;
+					level --;
+					continue;
+				}
+				if (kvm_record_print_log)
+					__mmu_print_AD_bit(vcpu, sptep, gpa[level], addr[level]);
+				__mmu_set_AD_bit(vcpu, sptep, gpa[level], addr[level]);
+/*				if (*sptep & VMX_EPT_DIRTY_BIT || *sptep & VMX_EPT_ACCESS_BIT) {
+					set_bit(gpa[level] >> PAGE_SHIFT, vcpu->access_bitmap);
+					vcpu->access_size = (gpa[level] >> PAGE_SHIFT) + 1;
+					if (*sptep & VMX_EPT_DIRTY_BIT) {
+						set_bit(gpa[level] >> PAGE_SHIFT, vcpu->dirty_bitmap);
+						vcpu->dirty_size = (gpa[level] >> PAGE_SHIFT) + 1;
+					}
+				}
+				*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT); */
+			}
+			index[level]++;
+		}
+		index[level] = 0;
+		level++;
 	}
 }
 
@@ -2833,7 +2885,10 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 	//if (kvm_record_print_log)
 	//	printk(KERN_ERR "XELATEX - mmu spt info\n");
 
+	//print_record("XELATEX - first\n");
 	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
+	//print_record("XELATEX - second\n");
+	//__mmu_walk_spt_fast(vcpu, shadow_addr, level);
 }
 
 static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
