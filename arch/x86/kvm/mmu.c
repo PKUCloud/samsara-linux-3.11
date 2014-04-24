@@ -2698,76 +2698,7 @@ static void direct_pte_prefetch(struct kvm_vcpu *vcpu, u64 *sptep)
 	__direct_pte_prefetch(vcpu, sp, sptep);
 }
 
-static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
-			int map_writable, int level, gfn_t gfn, pfn_t pfn,
-			bool prefault)
-{
-	struct kvm_shadow_walk_iterator iterator;
-	struct kvm_mmu_page *sp;
-	int emulate = 0;
-	gfn_t pseudo_gfn;
-	unsigned pte_access = 0;
-	struct kvm *kvm = vcpu->kvm;
-
-	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
-		if (iterator.level == level) {
-			pte_access = ACC_ALL;
-			if (kvm_record && kvm_record_mode == KVM_RECORD_SOFTWARE) {
-				if (write) {
-					pte_access = ACC_ALL;
-					if (kvm_record_print_log) {
-						if (!(*iterator.sptep & PT_WRITABLE_MASK)) {
-							print_record("\tXELATEX - W turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
-						} else {
-							print_record("\tXELATEX - UW turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
-						}
-					}
-				} else {
-					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
-					if (kvm_record_print_log) {
-						if (!(*iterator.sptep & PT_PRESENT_MASK)) {
-							print_record("\tXELATEX - R turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
-						} else {
-							print_record("\tXELATEX - UR turn %lld\tvcpu %d\tpfn 0x%llx\tgfn 0x%llx\n",
-								kvm->tm_turn, vcpu->vcpu_id, pfn, gfn);
-						}
-					}
-				}
-			}
-
-			mmu_set_spte(vcpu, iterator.sptep, pte_access,
-			//mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
-				     write, &emulate, level, gfn, pfn,
-				     prefault, map_writable);
-			// XELATEX
-			//*iterator.sptep |= PT_TM_RECORD;
-			direct_pte_prefetch(vcpu, iterator.sptep);
-			++vcpu->stat.pf_fixed;
-			break;
-		}
-
-		if (!is_shadow_present_pte(*iterator.sptep)) {
-			u64 base_addr = iterator.addr;
-
-			base_addr &= PT64_LVL_ADDR_MASK(iterator.level);
-			pseudo_gfn = base_addr >> PAGE_SHIFT;
-			sp = kvm_mmu_get_page(vcpu, pseudo_gfn, iterator.addr,
-					      iterator.level - 1,
-					      1, ACC_ALL, iterator.sptep);
-
-			link_shadow_page(iterator.sptep, sp);
-		}
-	}
-	return emulate;
-}
-
-#define PT64_NR_PT_ENTRY	512
-#define SHADOW_PT_ADDR(address, index, level) \
-	(address + (index << PT64_LEVEL_SHIFT(level)))
-
+// XELATEX
 static void __always_inline __mmu_print_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t addr)
 {
 	if (*sptep & VMX_EPT_DIRTY_BIT && *sptep & VMX_EPT_ACCESS_BIT)
@@ -2799,6 +2730,64 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 	}
 	*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
 }
+
+static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
+			int map_writable, int level, gfn_t gfn, pfn_t pfn,
+			bool prefault)
+{
+	struct kvm_shadow_walk_iterator iterator;
+	struct kvm_mmu_page *sp;
+	int emulate = 0;
+	gfn_t pseudo_gfn;
+	unsigned pte_access = 0;
+	struct kvm *kvm = vcpu->kvm;
+	u64 spte = 0;
+
+	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
+		if (iterator.level == level) {
+			pte_access = ACC_ALL;
+			if (kvm_record && kvm_record_mode == KVM_RECORD_SOFTWARE) {
+				if (write) {
+					pte_access = ACC_ALL;
+					spte = VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT;
+				} else {
+					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
+					spte = VMX_EPT_ACCESS_BIT;
+				}
+				if (kvm_record_print_log)
+					__mmu_print_AD_bit(vcpu, &spte, gfn<<PAGE_SHIFT, pfn<<PAGE_SHIFT);
+				__mmu_set_AD_bit(vcpu, &spte, gfn<<PAGE_SHIFT, pfn<<PAGE_SHIFT);
+			}
+
+			mmu_set_spte(vcpu, iterator.sptep, pte_access,
+			//mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
+				     write, &emulate, level, gfn, pfn,
+				     prefault, map_writable);
+			// XELATEX
+			//*iterator.sptep |= PT_TM_RECORD;
+			direct_pte_prefetch(vcpu, iterator.sptep);
+			++vcpu->stat.pf_fixed;
+			break;
+		}
+
+		if (!is_shadow_present_pte(*iterator.sptep)) {
+			u64 base_addr = iterator.addr;
+
+			base_addr &= PT64_LVL_ADDR_MASK(iterator.level);
+			pseudo_gfn = base_addr >> PAGE_SHIFT;
+			sp = kvm_mmu_get_page(vcpu, pseudo_gfn, iterator.addr,
+					      iterator.level - 1,
+					      1, ACC_ALL, iterator.sptep);
+
+			link_shadow_page(iterator.sptep, sp);
+		}
+	}
+	return emulate;
+}
+
+#define PT64_NR_PT_ENTRY	512
+#define SHADOW_PT_ADDR(address, index, level) \
+	(address + (index << PT64_LEVEL_SHIFT(level)))
 
 static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, gpa_t gpa)
 {

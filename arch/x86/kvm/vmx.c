@@ -5724,10 +5724,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 	if (!kvm_record)
 		goto record_disable;
 
-	// Reset bitmaps
-	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
-	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
-
 	if (vcpu->is_recording) {
 		if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
 				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
@@ -5770,6 +5766,10 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 		//kvm_record_count = KVM_RECORD_COUNT - 1;
 		vcpu->is_recording = true;
 	}
+
+	// Reset bitmaps
+	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
 
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
