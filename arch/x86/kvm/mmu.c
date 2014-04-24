@@ -2740,7 +2740,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	int emulate = 0;
 	gfn_t pseudo_gfn;
 	unsigned pte_access = 0;
-	struct kvm *kvm = vcpu->kvm;
+	//struct kvm *kvm = vcpu->kvm;
 	u64 spte = 0;
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
@@ -2815,6 +2815,7 @@ static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, 
 	}
 }
 
+#if 0
 static void __mmu_walk_spt_fast(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int top_level)
 {
 	u64 index[PT64_ROOT_LEVEL + 2] = {0};
@@ -2858,6 +2859,7 @@ static void __mmu_walk_spt_fast(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int to
 		level++;
 	}
 }
+#endif
 
 static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 {

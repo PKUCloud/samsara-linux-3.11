@@ -298,9 +298,10 @@ int kvm_arch_getset_registers(struct kvm_vcpu *vcpu, int set)
 void print_vcpu_status_info_for_debugging(CPUX86State *env)
 {
 	int i = 0, j = 0;
+	struct kvm_regs *kvm_regs = &env->kvm_regs;
+	struct kvm_fpu *fpu = &env->fpu;
 
 	printk("------------------standard registers-----------------\n");
-	struct kvm_regs *kvm_regs = &env->kvm_regs;
 	printk("rax: %llx\n", kvm_regs->rax);
 	printk("rbx: %llx\n", kvm_regs->rbx);
 	printk("rcx: %llx\n", kvm_regs->rcx);
@@ -322,32 +323,31 @@ void print_vcpu_status_info_for_debugging(CPUX86State *env)
 	printk("rflags: %llx\n", kvm_regs->rflags);
 
 	printk("----------------------FPU state---------------------\n");
-	struct kvm_fpu *fpu = &env->fpu;
 	for (i=0; i<8; i++) {
 		for(j=0; j<16; j++){
-			printk("fpr[%d][%d]=%llx ", i, j, fpu->fpr[i][j]);
+			printk("fpr[%d][%d]=0x%x ", i, j, fpu->fpr[i][j]);
 		}
 		printk("\n");
 	}
-	printk("fcw: %llx\n", fpu->fcw);
-	printk("fsw: %llx\n", fpu->fsw);
-	printk("ftwx: %llx\n", fpu->ftwx);
-	printk("pad1: %llx\n", fpu->pad1);
-	printk("last_opcode: %llx\n", fpu->last_opcode);
-	printk("last_ip: %llx\n", fpu->last_ip);	
-	printk("last_dp: %llx\n", fpu->last_dp);
+	printk("fcw: 0x%x\n", fpu->fcw);
+	printk("fsw: 0x%x\n", fpu->fsw);
+	printk("ftwx: 0x%x\n", fpu->ftwx);
+	printk("pad1: 0x%x\n", fpu->pad1);
+	printk("last_opcode: 0x%x\n", fpu->last_opcode);
+	printk("last_ip: 0x%llx\n", fpu->last_ip);	
+	printk("last_dp: 0x%llx\n", fpu->last_dp);
 	for (i=0; i<16; i++) {
 		for(j=0; j<16; j++){
-			printk("xmm[%d][%d]=%llx ", i, j, fpu->xmm[i][j]);
+			printk("xmm[%d][%d]=0x%x ", i, j, fpu->xmm[i][j]);
 		}
 		printk("\n");
 	}	
-	printk("mxcsr: %llx\n", fpu->mxcsr);
-	printk("pad2: %llx\n", fpu->pad2);	
+	printk("mxcsr: 0x%x\n", fpu->mxcsr);
+	printk("pad2: 0x%x\n", fpu->pad2);	
 
 	printk("------------------------XSAVE---------------------\n");
 	for(j=0; j<1024; j++){
-		printk("region[%d]=%llx ", j, env->xsave.region[i]);
+		printk("region[%d]=0x%x ", j, env->xsave.region[i]);
 	}
 	printk("\n");
 	
@@ -355,9 +355,10 @@ void print_vcpu_status_info_for_debugging(CPUX86State *env)
 
 int make_vcpu_checkpoint(struct kvm_vcpu *vcpu)
 {
+	int ret = kvm_arch_getset_registers(vcpu, 0);
+
 	printk( "Make checkpoint\n" );
 
-	int ret = kvm_arch_getset_registers(vcpu, 0);
 	if ( ret < 0 ){
 		printk( "Some Error Occured During Macking Checkpoint!\n" );
 		return ret;
@@ -369,9 +370,10 @@ EXPORT_SYMBOL_GPL(make_vcpu_checkpoint);
 
 int vcpu_rollback(struct kvm_vcpu *vcpu)
 {
+	int ret = kvm_arch_getset_registers(vcpu, 1);
+
 	printk( "Roll back\n" );
 
-	int ret = kvm_arch_getset_registers(vcpu, 1);
 	if ( ret < 0 ){
 		printk( "Some Error Occured During Rolling Back!\n" );
 		return ret;
