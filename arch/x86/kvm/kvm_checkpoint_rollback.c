@@ -7,6 +7,8 @@
 
 #include <asm/kvm_checkpoint_rollback.h>
 #include <asm/processor.h>
+#include <asm/kvm_para.h>
+#include <asm/msr-index.h>
 
 #include "irq.h"
 
@@ -175,7 +177,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		msrs[n++].index = MSR_IA32_SYSENTER_CS;
 		msrs[n++].index = MSR_IA32_SYSENTER_ESP;
 		msrs[n++].index = MSR_IA32_SYSENTER_EIP;
-		msrs[n++].index = MSR_PAT;
+		msrs[n++].index = MSR_IA32_CR_PAT;
 
 		//need to check if our vcpu really has these msrs ! 
 		//if you really want to check this, use ioctl "KVM_GET_MSR_INDEX_LIST"
@@ -197,8 +199,8 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 #ifdef CONFIG_X86_64
 
 		msrs[n++].index = MSR_CSTAR;
-		msrs[n++].index = MSR_KERNELGSBASE;
-		msrs[n++].index = MSR_FMASK;
+		msrs[n++].index = MSR_KERNEL_GS_BASE;
+		msrs[n++].index = MSR_SYSCALL_MASK;
 		msrs[n++].index = MSR_LSTAR;
 		
 #endif
@@ -233,10 +235,10 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		mcg_cap = vcpu->arch.mcg_cap;	//need to confirm!!!
 
 #ifdef KVM_CAP_MCE
-		msrs[n++].index = MSR_MCG_STATUS;
-		msrs[n++].index = MSR_MCG_CTL;
+		msrs[n++].index = MSR_IA32_MCG_STATUS;
+		msrs[n++].index = MSR_IA32_MCG_CTL;
 		for (i = 0; i < (mcg_cap & 0xff) * 4; i++) {
-			msrs[n++].index = MSR_MC0_CTL + i;
+			msrs[n++].index = MSR_IA32_MC0_CTL + i;
 		}
 #endif
 	}
