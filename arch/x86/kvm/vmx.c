@@ -5818,6 +5818,7 @@ static int handle_preemption(struct kvm_vcpu *vcpu)
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	//1 TODO: just for debug
+	/*
 	if (vcpu->check_rollback == 100){
 		vcpu_rollback(vcpu);
 		vcpu->check_rollback = 0;
@@ -5825,6 +5826,7 @@ static int handle_preemption(struct kvm_vcpu *vcpu)
 	else
 		make_vcpu_checkpoint(vcpu);
 	vcpu->check_rollback++;
+	*/
 	//end kvm_vcpu_checkpoint_rollback rsr
 	
 	if (kvm_record_type == KVM_RECORD_PREEMPTION)

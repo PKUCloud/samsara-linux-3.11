@@ -37,7 +37,7 @@ typedef struct CPUX86State {
 	
 } CPUX86State;
 
-int make_vcpu_checkpoint(struct kvm_vcpu *vcpu);
+int vcpu_checkpoint(struct kvm_vcpu *vcpu);
 
 int vcpu_rollback(struct kvm_vcpu *vcpu);
 
