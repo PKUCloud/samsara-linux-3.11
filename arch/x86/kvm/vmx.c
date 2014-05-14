@@ -4235,9 +4235,22 @@ enum hrtimer_restart vmx_record_timer_callback(struct hrtimer *timer)
 
 // XELATEX
 #define US_TO_NS(usec)		((usec) * 1000)
+int tm_commit(struct kvm_vcpu *vcpu, int kick);
+int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick);
+
 static void vmx_record_setup(struct vcpu_vmx *vmx)
 {
 	struct kvm *kvm = vmx->vcpu.kvm;
+
+	switch (kvm_record_type) {
+		case KVM_RECORD_PREEMPTION:
+		case KVM_RECORD_TIMER:
+			kvm_x86_ops->tm_commit = tm_commit;
+			break;
+		case KVM_RECORD_UNSYNC_PREEMPTION:
+			kvm_x86_ops->tm_commit = tm_unsync_commit;
+			break;
+	}
 
 	if ((kvm_record_type == KVM_RECORD_PREEMPTION || kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION)
 			&& !(vmx->preemption_begin)) {
@@ -5560,9 +5573,15 @@ extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
 #define TM_MMU_INVALID_GEN	10000
 
 // XELATEX, real commit
-int __tm_commit(struct kvm_vcpu *vcpu)
+int __tm_commit(void *opaque)
 {
+	struct kvm_vcpu *vcpu = (struct kvm_vcpu *) opaque;
 	struct kvm *kvm = vcpu->kvm;
+
+	if (!opaque) {
+		printk(KERN_ERR "XELATEX - ERROR - __tm_commit, opaque==NULL\n");
+		return -1;
+	}
 
 	// Commit pages
 	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
@@ -5586,22 +5605,23 @@ int __tm_commit(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-// XELATEX
-int tm_commit(struct kvm_vcpu *vcpu, int kick)
+int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
+		int (*func_master)(void *opaque), void *opaque_master,
+		int (*func_slave)(void *opaque), void *opaque_slave)
 {
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
 	int i;
 	struct kvm_vcpu *cur_vcpu;
 	bool master = false;
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 	bool ok = false;
+	int ret = 0;
 
 	atomic_dec(&(kvm->tm_trap_count));
 	vcpu->is_trapped = true;
 
 	if (!kvm_record)
-		goto record_disable;
+		return -1;
 
 	// The first vcpu enter is treated as master, other as slaves
 	mutex_lock(&(kvm->tm_lock));
@@ -5616,7 +5636,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 
 	if (master) {
 		// Kick all other vcpus if "kick" is set
-		while (kick && !ok) {
+		while (kick_time-- && !ok){
 			ok = true;
 			for (i=0; i<online_vcpus; i++) {
 				cur_vcpu = kvm->vcpus[i];
@@ -5632,15 +5652,14 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 		}
 
 		// Master, sync when enter, wait slaves enter
-		if (online_vcpus > 1 && kvm_record_type == KVM_RECORD_TIMER &&
-				down_interruptible(&(kvm->tm_enter_sem))) {
+		if (online_vcpus > 1 && down_interruptible(&(kvm->tm_enter_sem))) {
 			print_record("XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
-			goto record_disable;
+			return -1;
 		}
 
-		if (__tm_commit(vcpu))
-			goto record_disable;
+		if (func_master && func_master(opaque_master))
+			ret = -1;
 
 		// Let timer go
 		if (kvm_record_type == KVM_RECORD_TIMER)
@@ -5657,15 +5676,29 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick)
 			up(&(kvm->tm_enter_sem));
 		}
 
+		if (func_slave && func_slave(opaque_slave))
+			ret = -1;
+
 		// Slave, sync when exit, wait master's end
 		if (down_interruptible(&(kvm->tm_exit_sem))) {
 			print_record("XELATEX - vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
-			goto record_disable;
+			ret = -1;
 		}
 	}
 
-	if (!kvm_record)
+	return ret;
+}
+
+// XELATEX
+int tm_commit(struct kvm_vcpu *vcpu, int kick_time)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct kvm *kvm = vcpu->kvm;
+	int i;
+	int online_vcpus = atomic_read(&(kvm->online_vcpus));
+
+	if (tm_sync(vcpu, kick_time, __tm_commit, (void *)vcpu, NULL, NULL))
 		goto record_disable;
 
 	// Prepare for new quantum
@@ -5714,7 +5747,19 @@ int tm_detect_conflict(unsigned long *access_bm, unsigned long *conflict_bm, int
 	return 0;
 }
 
-int tm_unsync_commit(struct kvm_vcpu *vcpu)
+int tm_unsync_init(void *opaque)
+{
+	struct kvm_vcpu *vcpu = (struct kvm_vcpu *)opaque;
+
+	vcpu->mmu_vcpu_valid_gen ++;
+	kvm_mmu_unload(vcpu);
+	//kvm_record_count = KVM_RECORD_COUNT - 1;
+	vcpu->is_recording = true;
+
+	return 0;
+}
+
+int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
@@ -5761,10 +5806,11 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 		mutex_unlock(&(kvm->tm_lock));
 
 	} else {
-		vcpu->mmu_vcpu_valid_gen ++;
-		kvm_mmu_unload(vcpu);
-		//kvm_record_count = KVM_RECORD_COUNT - 1;
-		vcpu->is_recording = true;
+		printk(KERN_ERR "XELATEX - before sync - vcpu=%d\n", vcpu->vcpu_id);
+		if (tm_sync(vcpu, kick_time, tm_unsync_init, (void *)vcpu,
+				tm_unsync_init, (void *)vcpu))
+			goto record_disable;
+		printk(KERN_ERR "XELATEX - after sync - vcpu=%d\n", vcpu->vcpu_id);
 	}
 
 	// Reset bitmaps
@@ -5832,7 +5878,7 @@ static int handle_preemption(struct kvm_vcpu *vcpu)
 	if (kvm_record_type == KVM_RECORD_PREEMPTION)
 		return tm_commit(vcpu, 1);
 	else if (kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION)
-		return tm_unsync_commit(vcpu);
+		return tm_unsync_commit(vcpu, 1);
 	else return 1;
 }
 
@@ -8599,7 +8645,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 
 	.check_intercept = vmx_check_intercept,
 	.handle_external_intr = vmx_handle_external_intr,
-	.tm_commit = tm_commit,
+	.tm_commit = NULL,
 };
 
 static int __init vmx_init(void)
