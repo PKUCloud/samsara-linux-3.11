@@ -5690,14 +5690,50 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 	return ret;
 }
 
-// XELATEX
-int tm_commit(struct kvm_vcpu *vcpu, int kick_time)
+void tm_disable(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
 	int i;
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 
+	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu,"
+			"nr_vmexit=%llu, nr_conflict=%llu\n",
+			vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
+	kvm_record = false;
+	kvm->record_master = false;
+	kvm->tm_last_commit_vcpu = -1;
+	vcpu->is_kicked = false;
+	vcpu->is_trapped = false;
+	vcpu->is_recording = false;
+	kvm->tm_turn = 0;
+	vcpu->nr_vmexit = 0;
+	vcpu->nr_sync = 0;
+	vcpu->nr_conflict = 0;
+	vcpu->access_size = 1;
+	vcpu->dirty_size = 1;
+	vcpu->conflict_size = 1;
+
+	up(&(kvm->tm_enter_sem));
+	for (i=0; i<online_vcpus - 1; i++)
+		up(&(kvm->tm_exit_sem));
+
+	switch (kvm_record_type){
+		case KVM_RECORD_PREEMPTION:
+		case KVM_RECORD_UNSYNC_PREEMPTION:
+			vmx->preemption_begin = false;
+			vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
+			vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
+			break;
+		case KVM_RECORD_TIMER:
+			kvm->tm_timer_set = false;
+			kvm->tm_timer_ready = false;
+	}
+}
+
+// XELATEX
+int tm_commit(struct kvm_vcpu *vcpu, int kick_time)
+{
 	if (tm_sync(vcpu, kick_time, __tm_commit, (void *)vcpu, NULL, NULL))
 		goto record_disable;
 
@@ -5710,27 +5746,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick_time)
 out:
 	return 1;
 record_disable:
-	printk(KERN_ERR "XELATEX - disable kvm_record\n");
-	kvm_record = false;
-	kvm->record_master = false;
-	vcpu->is_kicked = false;
-	vcpu->is_trapped = false;
-	kvm->tm_turn = 0;
-	up(&(kvm->tm_enter_sem));
-	for (i=0; i<online_vcpus - 1; i++)
-		up(&(kvm->tm_exit_sem));
-	if (kvm_record_type == KVM_RECORD_PREEMPTION)
-		goto preemption_exit;
-	if (kvm_record_type == KVM_RECORD_TIMER)
-		goto timer_exit;
-preemption_exit:
-	vmx->preemption_begin = false;
-	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
-	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
-	goto out;
-timer_exit:
-	kvm->tm_timer_set = false;
-	kvm->tm_timer_ready = false;
+	tm_disable(vcpu);
 	goto out;
 }
 EXPORT_SYMBOL(tm_commit);
@@ -5761,7 +5777,6 @@ int tm_unsync_init(void *opaque)
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
 	int i;
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
@@ -5835,25 +5850,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 out:
 	return 1;
 record_disable:
-	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu,"
-			"nr_vmexit=%llu, nr_conflict=%llu\n",
-			vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
-	kvm_record = false;
-	kvm->record_master = false;
-	kvm->tm_last_commit_vcpu = -1;
-	vcpu->is_kicked = false;
-	vcpu->is_trapped = false;
-	vcpu->is_recording = false;
-	kvm->tm_turn = 0;
-	vmx->preemption_begin = false;
-	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
-	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
-	vcpu->nr_vmexit = 0;
-	vcpu->nr_sync = 0;
-	vcpu->nr_conflict = 0;
-	vcpu->access_size = 1;
-	vcpu->dirty_size = 1;
-	vcpu->conflict_size = 1;
+	tm_disable(vcpu);
 	goto out;
 }
 EXPORT_SYMBOL(tm_unsync_commit);
