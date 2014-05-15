@@ -96,6 +96,8 @@ int kvm_record_print_log;
 EXPORT_SYMBOL_GPL(kvm_record_print_log);
 int kvm_record_count;
 EXPORT_SYMBOL_GPL(kvm_record_count);
+int kvm_record_separate_mem;
+EXPORT_SYMBOL_GPL(kvm_record_separate_mem);
 
 
 static __read_mostly struct preempt_ops kvm_preempt_ops;
@@ -2679,6 +2681,7 @@ static long kvm_dev_ioctl(struct file *filp,
 		kvm_record_timer_value = kvm_rc.kvm_record_timer_value;
 		if (kvm_record_timer_value == 0)
 			kvm_record_timer_value = KVM_DEFAULT_PREEMPTION_VALUE;
+		kvm_record_separate_mem = kvm_rc.separate_mem;
 		//kvm_record_type = KVM_RECORD_PREEMPTION;
 		//kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
 		//kvm_record_type = KVM_RECORD_TIMER;

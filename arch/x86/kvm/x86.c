@@ -6953,6 +6953,9 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->check_rollback = 0;
 	//end kvm_vcpu_checkpoint_rollback rsr
 
+	/* Tamlok */
+	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+	vcpu->arch.nr_private_pages = 0;
 
 	return 0;
 fail_free_wbinvd_dirty_mask:

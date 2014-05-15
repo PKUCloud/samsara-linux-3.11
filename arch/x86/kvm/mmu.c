@@ -2729,7 +2729,78 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 		}
 	}
 	*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
+
+	/* Tamlok
+	 * Move the write mask
+	 * *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
+	 * Need to mark the page clean?
+	 * mmu_spte_update()?
+	 */
+	*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
 }
+
+/* Tamlok
+ * Modified the spte's pfn fields
+ * Must flush tlb after this function call
+ */
+void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn)
+{
+	u64 spte;
+
+	spte = *sptep;
+	spte &= ~PT64_BASE_ADDR_MASK;
+	spte |= (u64)pfn << PAGE_SHIFT;
+	print_record("spte was %lx and is %lx\n", *sptep, spte);
+	*sptep = spte;
+}
+EXPORT_SYMBOL_GPL(kvm_record_spte_set_pfn);
+
+/* Tamlok
+ * Just add write trap page to vcpu->arch.private_pages, not replacing it
+ * with private page yet.
+ * Used for test.
+ */
+void kvm_record_add_private_memory_stub(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
+{
+	struct kvm_private_mem_page *private_mem_page;
+
+	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
+	private_mem_page->original_pfn = pfn;
+	private_mem_page->private_pfn = 0;
+	private_mem_page->sptep = sptep;
+
+	/* Add to the list */
+	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
+	vcpu->arch.nr_private_pages++;
+}
+
+/* Tamlok
+ * Show the elements of vcpu->arch.private_pages and delete all the entries
+ * if @delete is 1.
+ * Used for test.
+ */
+void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete)
+{
+	struct kvm_private_mem_page *private_page;
+	struct kvm_private_mem_page *temp;
+
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages
+		, link) {
+		print_record("private_mem: vcpu %d origin_pfn %lx private_pfn %lx\n",
+			vcpu->vcpu_id, private_page->original_pfn, private_page->private_pfn,
+			*(private_page->sptep));
+
+		if (delete) {
+			list_del(&private_page->link);
+			kfree(private_page);
+		}
+	}
+	if (delete) {
+		INIT_LIST_HEAD(&vcpu->arch.private_pages);
+		vcpu->arch.nr_private_pages = 0;
+	}
+}
+EXPORT_SYMBOL_GPL(kvm_record_show_private_memory_stub);
 
 static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			int map_writable, int level, gfn_t gfn, pfn_t pfn,
@@ -2759,6 +2830,17 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				__mmu_set_AD_bit(vcpu, &spte, gfn<<PAGE_SHIFT, pfn<<PAGE_SHIFT);
 			}
 
+			if (vcpu->is_recording && kvm_record_separate_mem &&
+				likely(!is_noslot_pfn(pfn))) {
+				if (!write) {
+					/* Read trap
+					 * Do not give the write mask so that vcpu will trap when
+					 * it writes to this page next time.
+					 */
+					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
+				}
+			}
+
 			mmu_set_spte(vcpu, iterator.sptep, pte_access,
 			//mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
 				     write, &emulate, level, gfn, pfn,
@@ -2767,6 +2849,20 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			//*iterator.sptep |= PT_TM_RECORD;
 			direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
+
+			if (vcpu->is_recording && kvm_record_separate_mem &&
+				likely(!is_noslot_pfn(pfn))) {
+				if (!write) {
+					// print_record("read_trap: vcpu %d gfn 0x%lx pfn 0x%lx spte 0x%lx\n",
+					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep);
+				} else {
+					// print_record("write_trap: vcpu %d gfn 0x%lx pfn 0x%lx spte 0x%lx\n",
+					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep);
+					// kvm_record_add_private_memory_stub(vcpu, iterator.sptep,
+					// 	pfn);
+				}
+			}
+
 			break;
 		}
 

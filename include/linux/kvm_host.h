@@ -1091,6 +1091,7 @@ extern u32 kvm_record_timer_value;
 extern struct kmem_cache *kvm_tm_page_cache;
 extern int kvm_record_print_log;
 extern int kvm_record_count;
+extern int kvm_record_separate_mem;
 #define KVM_RECORD_COUNT 10
 
 struct kvm_device_ops;

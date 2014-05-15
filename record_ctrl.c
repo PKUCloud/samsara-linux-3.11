@@ -144,14 +144,16 @@ struct kvm_record_ctrl {
 	unsigned kvm_record_timer_value;
 	int kvm_record_mode;
 	int print_log;
+	int separate_mem;
 };
 
 int help() {
 	fprintf(stderr, "Usage: \n"
-			"record_ctrl <enable/disable> <record_type> <value> <log_file> [<record_mode> <print_log>]\n"
+			"record_ctrl <enable/disable> <record_type> <value> <log_file> [<record_mode> <print_log> <separate_memory>]\n"
 			"\t<record_type> : PREEMPTION, UNSYNC_PREEMPTION, TIMER\n"
 			"\t<record_mode> : SOFT, HARD_MMU, HARD_MEMSLOT; default is SOFT\n"
 			"\t<print_log> : ON/OFF, default is on\n"
+			"\t<separate_memory> : ON/OFF, default is OFF; valid only under HARD_MMU\n"
 			"record_ctrl flush\n"
 			"\tFlushes all the data out to the <log_file>. This will stop writting more data\n"
 			"\tto the logger module and flush all the remaining data out to the <log_file>. \n"
@@ -248,6 +250,17 @@ int main(int argc, char **argv)
 		if (argc >= 7)
 			if (strcmp(argv[6], "OFF") == 0 || strcmp(argv[6], "off") == 0)
 				kvm_rc.print_log = 0;
+
+		kvm_rc.separate_mem = 0;
+		if (argc >= 8)
+			if (strcmp(argv[7], "ON") == 0 || strcmp(argv[7], "on") == 0) {
+				if (kvm_rc.kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU)
+					kvm_rc.separate_mem = 1;
+				else
+					fprintf(stderr, "Can't turn on separate_memory under this mode\n");
+			}
+		printf("separate_mem=%d\n", kvm_rc.separate_mem);
+		
 		ret = ioctl(fd, KVM_ENABLE_RECORD, &kvm_rc);
 		if (ret < 0) {
 			printf("KVM_ENABLE_RECORD failed, errno = %d\n"

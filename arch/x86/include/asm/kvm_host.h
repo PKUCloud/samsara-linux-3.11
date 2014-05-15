@@ -339,6 +339,18 @@ struct kvm_pmu {
 	u64 reprogram_pmi;
 };
 
+
+/* Tamlok
+ * Structure used for keeping info about private memory page
+ */
+struct kvm_private_mem_page {
+	struct list_head link;
+	pfn_t original_pfn;
+	pfn_t private_pfn;
+	u64 *sptep;	/*Pointer of the spte that references this pfn */
+};
+
+
 struct kvm_vcpu_arch {
 	/*
 	 * rip and regs accesses must go through
@@ -520,6 +532,11 @@ struct kvm_vcpu_arch {
 	 * instruction.
 	 */
 	bool write_fault_to_shadow_pgtable;
+
+
+	/* Tamlok */
+	struct list_head private_pages;
+	int nr_private_pages;
 };
 
 struct kvm_lpage_info {

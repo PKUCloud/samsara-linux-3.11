@@ -1081,6 +1081,7 @@ struct kvm_record_ctrl {
 	__u32 kvm_record_timer_value;
 	int kvm_record_mode;
 	int print_log;
+	int separate_mem;
 };
 
 #endif /* __LINUX_KVM_H */

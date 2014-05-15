@@ -5772,8 +5772,15 @@ int tm_unsync_init(void *opaque)
 	//kvm_record_count = KVM_RECORD_COUNT - 1;
 	vcpu->is_recording = true;
 
+	if (kvm_record_separate_mem) {
+		print_record("Start HARD_MMU record vcpu %d ---------------------\n",
+				vcpu->vcpu_id);
+	}
+
 	return 0;
 }
+
+extern void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete);
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
@@ -5781,14 +5788,19 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 	int i;
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 
-	if (!kvm_record)
-		goto record_disable;
-
 	if (vcpu->is_recording) {
 		if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
 				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
+
+		if (kvm_record_separate_mem) {
+			print_record("tm_unsync_commit: vcpu %d timestamp %llu =======================\n",
+				vcpu->vcpu_id, kvm->timestamp);
+			//kvm_record_show_private_memory_stub(vcpu, 1);
+			print_record("-----------------------------------------------\n");
+		}
+
 
 		mutex_lock(&(kvm->tm_lock));
 		if (!(kvm->timestamp % 1000))
@@ -5827,10 +5839,14 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			goto record_disable;
 		printk(KERN_ERR "XELATEX - after sync - vcpu=%d\n", vcpu->vcpu_id);
 	}
-
 	// Reset bitmaps
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+
+	if (!kvm_record) {
+		goto record_disable;
+	}
+		
 
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
