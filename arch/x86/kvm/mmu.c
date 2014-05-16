@@ -2750,7 +2750,7 @@ void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn)
 	spte = *sptep;
 	spte &= ~PT64_BASE_ADDR_MASK;
 	spte |= (u64)pfn << PAGE_SHIFT;
-	print_record("spte was %lx and is %lx\n", *sptep, spte);
+	print_record("spte was 0x%llx and is 0x%llx\n", *sptep, spte);
 	*sptep = spte;
 }
 EXPORT_SYMBOL_GPL(kvm_record_spte_set_pfn);
@@ -2786,21 +2786,51 @@ void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete)
 
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages
 		, link) {
-		print_record("private_mem: vcpu %d origin_pfn %lx private_pfn %lx\n",
+		print_record("private_mem: vcpu %d origin_pfn 0x%llx private_pfn 0x%llx\n",
 			vcpu->vcpu_id, private_page->original_pfn, private_page->private_pfn,
 			*(private_page->sptep));
 
 		if (delete) {
 			list_del(&private_page->link);
 			kfree(private_page);
+			vcpu->arch.nr_private_pages--;
 		}
 	}
 	if (delete) {
 		INIT_LIST_HEAD(&vcpu->arch.private_pages);
-		vcpu->arch.nr_private_pages = 0;
 	}
 }
 EXPORT_SYMBOL_GPL(kvm_record_show_private_memory_stub);
+
+
+/* Tamlok
+ * Separate memory with copy-on-write
+ * Alloc a new page to replace the original page and update the spte, then add
+ * an item to vcpu->arch.private_pages list.
+ */
+void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
+{
+	void *new_page;
+	struct kvm_private_mem_page *private_mem_page;
+
+	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
+	//new_page = mmu_memory_cache_alloc(&vcpu->arch.mmu_page_cache);
+	new_page = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	private_mem_page->original_pfn = pfn;
+	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
+	private_mem_page->sptep = sptep;
+	copy_page(new_page, pfn_to_kaddr(pfn));
+	
+	print_record("cow: vcpu %d origin_pfn 0x%llx new_pfn 0x%llx pages %d\n",
+		vcpu->vcpu_id, pfn, private_mem_page->private_pfn, vcpu->arch.nr_private_pages);
+	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
+
+	/* Add it to the list */
+	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
+	vcpu->arch.nr_private_pages++;
+}
+
+
 
 static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			int map_writable, int level, gfn_t gfn, pfn_t pfn,
@@ -2811,7 +2841,6 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	int emulate = 0;
 	gfn_t pseudo_gfn;
 	unsigned pte_access = 0;
-	//struct kvm *kvm = vcpu->kvm;
 	u64 spte = 0;
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
@@ -2847,7 +2876,11 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				     prefault, map_writable);
 			// XELATEX
 			//*iterator.sptep |= PT_TM_RECORD;
-			direct_pte_prefetch(vcpu, iterator.sptep);
+
+			/* Tamlok
+			 * Disable prefetch
+			 */
+			//direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
 
 			if (vcpu->is_recording && kvm_record_separate_mem &&
@@ -2858,8 +2891,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				} else {
 					// print_record("write_trap: vcpu %d gfn 0x%lx pfn 0x%lx spte 0x%lx\n",
 					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep);
-					// kvm_record_add_private_memory_stub(vcpu, iterator.sptep,
-					// 	pfn);
+					kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
 				}
 			}
 

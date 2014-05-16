@@ -5749,7 +5749,7 @@ record_disable:
 	tm_disable(vcpu);
 	goto out;
 }
-EXPORT_SYMBOL(tm_commit);
+EXPORT_SYMBOL_GPL(tm_commit);
 
 int tm_detect_conflict(unsigned long *access_bm, unsigned long *conflict_bm, int nbits)
 {
@@ -5780,6 +5780,39 @@ int tm_unsync_init(void *opaque)
 	return 0;
 }
 
+extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
+/* Tamlok
+ * Commit the private pages to the original ones. Called when a quantum is
+ * finished and can commit.
+ */
+void tm_memory_commit(struct kvm_vcpu *vcpu)
+{
+	struct kvm_private_mem_page *private_page;
+	struct kvm_private_mem_page *temp;
+	void *origin, *private;
+	int i = 0;
+
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
+		link)
+	{
+		origin = pfn_to_kaddr(private_page->original_pfn);
+		private = pfn_to_kaddr(private_page->private_pfn);
+		copy_page(origin, private);
+
+		print_record("commit: vcpu %d orgin_pfn 0x%llx private_pfn 0x%llx pages %d\n",
+			vcpu->vcpu_id, private_page->original_pfn,
+			private_page->private_pfn, i++);
+
+		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
+
+		kfree(private);
+		list_del(&private_page->link);
+		kfree(private_page);
+		vcpu->arch.nr_private_pages--;
+	}
+	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+}
+
 extern void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete);
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
@@ -5794,18 +5827,21 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
 
-		if (kvm_record_separate_mem) {
-			print_record("tm_unsync_commit: vcpu %d timestamp %llu =======================\n",
-				vcpu->vcpu_id, kvm->timestamp);
-			//kvm_record_show_private_memory_stub(vcpu, 1);
-			print_record("-----------------------------------------------\n");
-		}
-
 
 		mutex_lock(&(kvm->tm_lock));
 		if (!(kvm->timestamp % 1000))
 			print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n",
 					vcpu->vcpu_id, kvm->timestamp);
+
+		if (kvm_record_separate_mem) {
+			print_record("tm_unsync_commit: vcpu %d timestamp %llu =======================\n",
+				vcpu->vcpu_id, kvm->timestamp);
+
+			tm_memory_commit(vcpu);
+
+			print_record("-----------------------------------------------\n");
+		}
+
 
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
 			// Detect conflict
@@ -5869,7 +5905,7 @@ record_disable:
 	tm_disable(vcpu);
 	goto out;
 }
-EXPORT_SYMBOL(tm_unsync_commit);
+EXPORT_SYMBOL_GPL(tm_unsync_commit);
 
 // XELATEX
 static int handle_preemption(struct kvm_vcpu *vcpu)
