@@ -421,14 +421,14 @@ int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq,
 static int pv_eoi_put_user(struct kvm_vcpu *vcpu, u8 val)
 {
 
-	return kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.pv_eoi.data, &val,
+	return kvm_write_guest_cached(vcpu, &vcpu->arch.pv_eoi.data, &val,
 				      sizeof(val));
 }
 
 static int pv_eoi_get_user(struct kvm_vcpu *vcpu, u8 *val)
 {
 
-	return kvm_read_guest_cached(vcpu->kvm, &vcpu->arch.pv_eoi.data, val,
+	return kvm_read_guest_cached(vcpu, &vcpu->arch.pv_eoi.data, val,
 				      sizeof(*val));
 }
 

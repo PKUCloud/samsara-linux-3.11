@@ -602,18 +602,20 @@ void kvm_set_pfn_dirty(pfn_t pfn);
 void kvm_set_pfn_accessed(pfn_t pfn);
 void kvm_get_pfn(pfn_t pfn);
 
-int kvm_read_guest_page(struct kvm *kvm, gfn_t gfn, void *data, int offset,
+int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset,
 			int len);
 int kvm_read_guest_atomic(struct kvm *kvm, gpa_t gpa, void *data,
 			  unsigned long len);
-int kvm_read_guest(struct kvm *kvm, gpa_t gpa, void *data, unsigned long len);
-int kvm_read_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
+int kvm_read_guest(struct kvm_vcpu *vcpu, gpa_t gpa, void *data, unsigned long len);
+int kvm_read_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 			   void *data, unsigned long len);
-int kvm_write_guest_page(struct kvm *kvm, gfn_t gfn, const void *data,
+int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 			 int offset, int len);
-int kvm_write_guest(struct kvm *kvm, gpa_t gpa, const void *data,
+int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
+			 int offset, int len);
+int kvm_write_guest(struct kvm_vcpu *vcpu, gpa_t gpa, const void *data,
 		    unsigned long len);
-int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
+int kvm_write_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 			   void *data, unsigned long len);
 int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 			      gpa_t gpa, unsigned long len);
@@ -649,6 +651,8 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 					 int type, void *arg);
 //end kvm_vcpu_checkpoint_rollback rsr
 
+// XELATEX
+void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
 
 int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf);
 

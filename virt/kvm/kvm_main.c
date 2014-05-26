@@ -1461,23 +1461,42 @@ static int next_segment(unsigned long len, int offset)
 		return len;
 }
 
-int kvm_read_guest_page(struct kvm *kvm, gfn_t gfn, void *data, int offset,
+int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset,
 			int len)
 {
+	struct kvm *kvm = vcpu->kvm;
 	int r;
 	unsigned long addr;
+	void *kaddr;
 
+	if (kvm_record) {
+		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 0);
+		if (kaddr == NULL) {
+			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
+					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
+			return -EFAULT;
+			//goto normal;
+		}
+		memcpy(data, kaddr + offset, len);
+		return 0;
+	}
+
+	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 	addr = gfn_to_hva_read(kvm, gfn);
-	if (kvm_is_error_hva(addr))
+	if (kvm_is_error_hva(addr)) {
+		printk(KERN_ERR "XELATEX - %s normal fault, is error hva.\n", __func__);
 		return -EFAULT;
+	}
 	r = kvm_read_hva(data, (void __user *)addr + offset, len);
-	if (r)
+	if (r) {
+		printk(KERN_ERR "XELATEX - %s normal fault, kvm_read_hva fail.\n", __func__);
 		return -EFAULT;
+	}
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_read_guest_page);
 
-int kvm_read_guest(struct kvm *kvm, gpa_t gpa, void *data, unsigned long len)
+int kvm_read_guest(struct kvm_vcpu *vcpu, gpa_t gpa, void *data, unsigned long len)
 {
 	gfn_t gfn = gpa >> PAGE_SHIFT;
 	int seg;
@@ -1485,7 +1504,7 @@ int kvm_read_guest(struct kvm *kvm, gpa_t gpa, void *data, unsigned long len)
 	int ret;
 
 	while ((seg = next_segment(len, offset)) != 0) {
-		ret = kvm_read_guest_page(kvm, gfn, data, offset, seg);
+		ret = kvm_read_guest_page(vcpu, gfn, data, offset, seg);
 		if (ret < 0)
 			return ret;
 		offset = 0;
@@ -1517,24 +1536,54 @@ int kvm_read_guest_atomic(struct kvm *kvm, gpa_t gpa, void *data,
 }
 EXPORT_SYMBOL(kvm_read_guest_atomic);
 
-int kvm_write_guest_page(struct kvm *kvm, gfn_t gfn, const void *data,
+// XELATEX
+int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 			 int offset, int len)
 {
 	int r;
 	unsigned long addr;
+	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 
 	addr = gfn_to_hva(kvm, gfn);
-	if (kvm_is_error_hva(addr))
+	if (kvm_is_error_hva(addr)) {
+		if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, is error hva\n", __func__, __LINE__);
 		return -EFAULT;
+	}
 	r = __copy_to_user((void __user *)addr + offset, data, len);
-	if (r)
+	if (r) {
+		if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, copy_to_user fault\n", __func__, __LINE__);
 		return -EFAULT;
+	}
 	mark_page_dirty(kvm, gfn);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(kvm_write_guest_page_kvm);
+
+// XELATEX
+int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
+			 int offset, int len)
+{
+	struct kvm *kvm = vcpu->kvm;
+	void *kaddr;
+
+	if (kvm_record) {
+		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
+		if (kaddr == NULL) {
+			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
+					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
+			return -EFAULT;
+			//goto normal;
+		}
+		memcpy(kaddr + offset, data, len);
+		return 0;
+	}
+
+	//if(kvm_record) printk(KERN_ERR "%s, %d\n", __func__, __LINE__);
+	return kvm_write_guest_page_kvm(kvm, gfn, data, offset, len);
+}
 EXPORT_SYMBOL_GPL(kvm_write_guest_page);
 
-int kvm_write_guest(struct kvm *kvm, gpa_t gpa, const void *data,
+int kvm_write_guest(struct kvm_vcpu *vcpu, gpa_t gpa, const void *data,
 		    unsigned long len)
 {
 	gfn_t gfn = gpa >> PAGE_SHIFT;
@@ -1543,7 +1592,7 @@ int kvm_write_guest(struct kvm *kvm, gpa_t gpa, const void *data,
 	int ret;
 
 	while ((seg = next_segment(len, offset)) != 0) {
-		ret = kvm_write_guest_page(kvm, gfn, data, offset, seg);
+		ret = kvm_write_guest_page(vcpu, gfn, data, offset, seg);
 		if (ret < 0)
 			return ret;
 		offset = 0;
@@ -1591,9 +1640,10 @@ int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 }
 EXPORT_SYMBOL_GPL(kvm_gfn_to_hva_cache_init);
 
-int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
+int kvm_write_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 			   void *data, unsigned long len)
 {
+	struct kvm *kvm = vcpu->kvm;
 	struct kvm_memslots *slots = kvm_memslots(kvm);
 	int r;
 
@@ -1602,8 +1652,12 @@ int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 	if (slots->generation != ghc->generation)
 		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa, ghc->len);
 
+	// XELATEX
+	if (kvm_record)
+		return kvm_write_guest(vcpu, ghc->gpa, data, len);
+
 	if (unlikely(!ghc->memslot))
-		return kvm_write_guest(kvm, ghc->gpa, data, len);
+		return kvm_write_guest(vcpu, ghc->gpa, data, len);
 
 	if (kvm_is_error_hva(ghc->hva))
 		return -EFAULT;
@@ -1617,9 +1671,10 @@ int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 }
 EXPORT_SYMBOL_GPL(kvm_write_guest_cached);
 
-int kvm_read_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
+int kvm_read_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 			   void *data, unsigned long len)
 {
+	struct kvm *kvm = vcpu->kvm;
 	struct kvm_memslots *slots = kvm_memslots(kvm);
 	int r;
 
@@ -1628,8 +1683,12 @@ int kvm_read_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 	if (slots->generation != ghc->generation)
 		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa, ghc->len);
 
+	// XELATEX
+	if (kvm_record)
+		return kvm_read_guest(vcpu, ghc->gpa, data, len);
+
 	if (unlikely(!ghc->memslot))
-		return kvm_read_guest(kvm, ghc->gpa, data, len);
+		return kvm_read_guest(vcpu, ghc->gpa, data, len);
 
 	if (kvm_is_error_hva(ghc->hva))
 		return -EFAULT;
@@ -1644,8 +1703,24 @@ EXPORT_SYMBOL_GPL(kvm_read_guest_cached);
 
 int kvm_clear_guest_page(struct kvm *kvm, gfn_t gfn, int offset, int len)
 {
-	return kvm_write_guest_page(kvm, gfn, (const void *) empty_zero_page,
+	// XELATEX
+	int i;
+	int online_vcpus = atomic_read(&(kvm->online_vcpus));
+	int ret;
+
+	if (kvm->vcpus[0] == NULL)
+		return kvm_write_guest_page_kvm(kvm, gfn, (const void *) empty_zero_page,
 				    offset, len);
+
+	for (i=0; i<online_vcpus; i++) {
+		ret = kvm_write_guest_page(kvm->vcpus[i], gfn, (const void *) empty_zero_page,
+				    offset, len);
+		if (ret)
+			return ret;
+	}
+	return 0;
+	//return kvm_write_guest_page(kvm, gfn, (const void *) empty_zero_page,
+	//			    offset, len);
 }
 EXPORT_SYMBOL_GPL(kvm_clear_guest_page);
 

@@ -2750,7 +2750,7 @@ void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn)
 	spte = *sptep;
 	spte &= ~PT64_BASE_ADDR_MASK;
 	spte |= (u64)pfn << PAGE_SHIFT;
-	print_record("spte was 0x%llx and is 0x%llx\n", *sptep, spte);
+	//print_record("spte was 0x%llx and is 0x%llx\n", *sptep, spte);
 	*sptep = spte;
 }
 EXPORT_SYMBOL_GPL(kvm_record_spte_set_pfn);
@@ -2816,20 +2816,23 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
 	//new_page = mmu_memory_cache_alloc(&vcpu->arch.mmu_page_cache);
 	new_page = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	//print_record("kvm_record_memory_cow - new_pfn=0x%llx, original_pfn=0x%llx\n",
+	//		__pa(new_page) >> PAGE_SHIFT, pfn);
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
 	copy_page(new_page, pfn_to_kaddr(pfn));
-	
-	print_record("cow: vcpu %d origin_pfn 0x%llx new_pfn 0x%llx pages %d\n",
-		vcpu->vcpu_id, pfn, private_mem_page->private_pfn, vcpu->arch.nr_private_pages);
+	// TODO: Set all bytes to HLT, only for test, need remove afterwards
+	//memset(pfn_to_kaddr(pfn), 0xF4, PAGE_SIZE);
+
+	//print_record("cow: vcpu %d origin_pfn 0x%llx new_pfn 0x%llx pages %d\n",
+	//	vcpu->vcpu_id, pfn, private_mem_page->private_pfn, vcpu->arch.nr_private_pages);
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
 
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages++;
 }
-
 
 
 static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
@@ -2859,8 +2862,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				__mmu_set_AD_bit(vcpu, &spte, gfn<<PAGE_SHIFT, pfn<<PAGE_SHIFT);
 			}
 
-			if (vcpu->is_recording && kvm_record_separate_mem &&
-				likely(!is_noslot_pfn(pfn))) {
+			if (vcpu->is_recording && kvm_record_separate_mem) {
 				if (!write) {
 					/* Read trap
 					 * Do not give the write mask so that vcpu will trap when
@@ -2884,17 +2886,34 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			++vcpu->stat.pf_fixed;
 
 			if (vcpu->is_recording && kvm_record_separate_mem &&
-				likely(!is_noslot_pfn(pfn))) {
+				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
 				if (!write) {
 					// print_record("read_trap: vcpu %d gfn 0x%lx pfn 0x%lx spte 0x%lx\n",
 					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep);
 				} else {
-					// print_record("write_trap: vcpu %d gfn 0x%lx pfn 0x%lx spte 0x%lx\n",
-					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep);
-					kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
+					//printk(KERN_ERR "write_trap: vcpu %d gfn 0x%llx pfn 0x%llx spte 0x%llx pages=%d\n",
+					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep, vcpu->arch.nr_private_pages);
+					//printk(KERN_ERR "XELATEX - memslot_id=%x\n", memslot_id(vcpu->kvm, gfn));
+
+					//if (memslot_id(vcpu->kvm, gfn) == 8) {
+						kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
+						kvm_mmu_flush_tlb(vcpu);
+					//}
 				}
 			}
 
+/*
+			if (kvm_record) {
+				if (vcpu->is_recording && kvm_record_separate_mem &&
+					likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep))
+				if (write)
+				if (memslot_id(vcpu->kvm, gfn) != 8) {
+					printk(KERN_ERR "XELATEX - %s, %d, vcpu %d gfn 0x%llx pfn 0x%llx spte 0x%llx memslot=%d\n",
+						__func__, __LINE__,
+					 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep, memslot_id(vcpu->kvm, gfn));
+				}
+			}
+*/
 			break;
 		}
 
@@ -3816,6 +3835,72 @@ out_unlock:
 	return 0;
 }
 
+// XELATEX
+void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t addr = (u64)gfn << PAGE_SHIFT;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+	unsigned index;
+	u64 *sptep;
+
+	if (level != PT64_ROOT_LEVEL) {
+		printk(KERN_ERR "XELATEX - NO PT64_ROOT_LEVEL support\n");
+		return NULL;
+	}
+
+	//printk(KERN_ERR "addr=0x%llx\n", addr);
+	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
+		index = SHADOW_PT_INDEX(addr, level);
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		//printk(KERN_ERR "index=0x%x, sptep=0x%llx, *sptep=0x%llx, shadow_addr=0x%llx, va(shadow_addr)=0x%llx\n",
+		//		index, sptep, *sptep, shadow_addr, __va(shadow_addr));
+		if (!is_shadow_present_pte(*sptep)) {
+			//printk(KERN_ERR "XELATEX - %s, %d, spte=0x%llx\n", __func__, __LINE__, *sptep);
+			//dump_stack();
+			return NULL;
+		}
+		*sptep |= VMX_EPT_ACCESS_BIT;
+		if (level == PT_PAGE_TABLE_LEVEL || *sptep & PT_PAGE_SIZE_MASK) {
+			if (write)
+				*sptep |= PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE | PT_USER_MASK | VMX_EPT_DIRTY_BIT;
+			else
+				*sptep |= PT_USER_MASK;
+			return (u64 *)__va(*sptep & PT64_BASE_ADDR_MASK);
+		}
+		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
+	}
+
+	printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
+	return NULL;
+}
+
+void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
+{
+	void *kaddr;
+	int r;
+	u32 error_code = 0;
+
+	kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
+	if (kaddr == NULL) {
+		if (write)
+			error_code |= PFERR_WRITE_MASK;
+		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
+		if (r < 0) {
+			printk(KERN_ERR "XELATEX - %s, %d, tdp_page_fault2 error\n", __func__, __LINE__);
+			return NULL;
+		}
+		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
+		if (kaddr == NULL) {
+			printk(KERN_ERR "XELATEX - %s, %d, __gfn_to_kaddr_ept error.\n", __func__, __LINE__);
+			return NULL;
+		}
+	}
+
+	return kaddr;
+}
+EXPORT_SYMBOL_GPL(gfn_to_kaddr_ept);
+
 static void nonpaging_free(struct kvm_vcpu *vcpu)
 {
 	mmu_free_roots(vcpu);
@@ -4321,7 +4406,7 @@ static u64 mmu_pte_write_fetch_gpte(struct kvm_vcpu *vcpu, gpa_t *gpa,
 		/* Handle a 32-bit guest writing two halves of a 64-bit gpte */
 		*gpa &= ~(gpa_t)7;
 		*bytes = 8;
-		r = kvm_read_guest(vcpu->kvm, *gpa, &gentry, 8);
+		r = kvm_read_guest(vcpu, *gpa, &gentry, 8);
 		if (r)
 			gentry = 0;
 		new = (const u8 *)&gentry;

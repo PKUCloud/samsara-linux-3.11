@@ -140,6 +140,9 @@ static int FNAME(update_accessed_dirty_bits)(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
+// XELATEX
+void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
+
 /*
  * Fetch a guest pte for a guest virtual address
  */
@@ -160,6 +163,7 @@ static int FNAME(walk_addr_generic)(struct guest_walker *walker,
 	u16 errcode = 0;
 	gpa_t real_gpa;
 	gfn_t gfn;
+	void *kaddr;
 
 	trace_kvm_mmu_pagetable_walk(addr, access);
 retry_walk:
@@ -204,14 +208,29 @@ retry_walk:
 			goto error;
 		real_gfn = gpa_to_gfn(real_gfn);
 
-		host_addr = gfn_to_hva(vcpu->kvm, real_gfn);
-		if (unlikely(kvm_is_error_hva(host_addr)))
-			goto error;
+		//print_record("XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
+		// XELATEX
+		if (kvm_record && (kaddr = gfn_to_kaddr_ept(vcpu, real_gfn, 0)) != NULL) {
+			memcpy(&pte, kaddr + offset, sizeof(pte));
+		} else {
+			if (kvm_record){
+				printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, kaddr=0x%llx\n",
+						__func__, real_gfn, (u64)kaddr);
+			}
 
-		ptep_user = (pt_element_t __user *)((void *)host_addr + offset);
-		if (unlikely(__copy_from_user(&pte, ptep_user, sizeof(pte))))
-			goto error;
+			host_addr = gfn_to_hva(vcpu->kvm, real_gfn);
+			if (unlikely(kvm_is_error_hva(host_addr)))
+				goto error;
+
+			ptep_user = (pt_element_t __user *)((void *)host_addr + offset);
+			if (unlikely(__copy_from_user(&pte, ptep_user, sizeof(pte))))
+				goto error;
+		}
 		walker->ptep_user[walker->level - 1] = ptep_user;
+
+		//print_record("XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
+		//if (pte == 0xf4f4f4f4f4f4f4f4)
+		//	printk(KERN_ERR "XELATEX %s, %d, pte=0x%llx\n", __func__, __LINE__, (u64)pte);
 
 		trace_kvm_mmu_paging_element(pte, walker->level);
 

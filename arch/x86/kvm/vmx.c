@@ -2713,8 +2713,9 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf)
 #endif
 	if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_SECONDARY_CONTROLS) {
 		min2 = 0;
-		opt2 = SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
-			SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |
+		// XELATEX
+		//opt2 = SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
+		opt2 = SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |
 			SECONDARY_EXEC_WBINVD_EXITING |
 			SECONDARY_EXEC_ENABLE_VPID |
 			SECONDARY_EXEC_ENABLE_EPT |
@@ -3762,7 +3763,7 @@ static int init_rmode_tss(struct kvm *kvm)
 	if (r < 0)
 		goto out;
 	data = TSS_BASE_SIZE + TSS_REDIRECTION_SIZE;
-	r = kvm_write_guest_page(kvm, fn++, &data,
+	r = kvm_write_guest_page_kvm(kvm, fn++, &data,
 			TSS_IOPB_BASE_OFFSET, sizeof(u16));
 	if (r < 0)
 		goto out;
@@ -3773,7 +3774,7 @@ static int init_rmode_tss(struct kvm *kvm)
 	if (r < 0)
 		goto out;
 	data = ~0;
-	r = kvm_write_guest_page(kvm, fn, &data,
+	r = kvm_write_guest_page_kvm(kvm, fn, &data,
 				 RMODE_TSS_SIZE - 2 * PAGE_SIZE - 1,
 				 sizeof(u8));
 	if (r < 0)
@@ -3810,7 +3811,7 @@ static int init_rmode_identity_map(struct kvm *kvm)
 	for (i = 0; i < PT32_ENT_PER_PAGE; i++) {
 		tmp = (i << 22) + (_PAGE_PRESENT | _PAGE_RW | _PAGE_USER |
 			_PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_PSE);
-		r = kvm_write_guest_page(kvm, identity_map_pfn,
+		r = kvm_write_guest_page_kvm(kvm, identity_map_pfn,
 				&tmp, i * sizeof(tmp), sizeof(tmp));
 		if (r < 0)
 			goto out;
@@ -4892,8 +4893,10 @@ static int handle_io(struct kvm_vcpu *vcpu)
 
 	++vcpu->stat.io_exits;
 
-	if (string || in)
+	if (string || in) {
+		//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d, string=%d, in=%d\n", __func__, __LINE__, string, in);
 		return emulate_instruction(vcpu, 0) == EMULATE_DONE;
+	}
 
 	port = exit_qualification >> 16;
 	size = (exit_qualification & 7) + 1;
@@ -5461,7 +5464,7 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 	ret = handle_mmio_page_fault_common(vcpu, gpa, true);
 	if (likely(ret == RET_MMIO_PF_EMULATE))
 		return x86_emulate_instruction(vcpu, gpa, 0, NULL, 0) ==
-					      EMULATE_DONE;
+				      	EMULATE_DONE;
 
 	if (unlikely(ret == RET_MMIO_PF_INVALID))
 		return kvm_mmu_page_fault(vcpu, gpa, 0, NULL, 0);
@@ -5767,8 +5770,9 @@ int tm_unsync_init(void *opaque)
 {
 	struct kvm_vcpu *vcpu = (struct kvm_vcpu *)opaque;
 
-	vcpu->mmu_vcpu_valid_gen ++;
-	kvm_mmu_unload(vcpu);
+	//vcpu->mmu_vcpu_valid_gen ++;
+	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+	//kvm_mmu_unload(vcpu);
 	//kvm_record_count = KVM_RECORD_COUNT - 1;
 	vcpu->is_recording = true;
 
@@ -5799,9 +5803,9 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		private = pfn_to_kaddr(private_page->private_pfn);
 		copy_page(origin, private);
 
-		print_record("commit: vcpu %d orgin_pfn 0x%llx private_pfn 0x%llx pages %d\n",
-			vcpu->vcpu_id, private_page->original_pfn,
-			private_page->private_pfn, i++);
+		//print_record("commit: vcpu %d orgin_pfn 0x%llx private_pfn 0x%llx pages %d\n",
+		//	vcpu->vcpu_id, private_page->original_pfn,
+		//	private_page->private_pfn, i++);
 
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 
@@ -5896,7 +5900,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		kvm_mmu_unload(vcpu);
 	}
 
-	vmx_flush_tlb(vcpu);
+	//vmx_flush_tlb(vcpu);
+	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 
 	vcpu->nr_sync ++;
 out:
@@ -6795,7 +6800,7 @@ static bool nested_vmx_exit_handled_io(struct kvm_vcpu *vcpu,
 		bitmap += (port & 0x7fff) / 8;
 
 		if (last_bitmap != bitmap)
-			if (kvm_read_guest(vcpu->kvm, bitmap, &b, 1))
+			if (kvm_read_guest(vcpu, bitmap, &b, 1))
 				return 1;
 		if (b & (1 << (port & 7)))
 			return 1;
@@ -6839,7 +6844,7 @@ static bool nested_vmx_exit_handled_msr(struct kvm_vcpu *vcpu,
 	/* Then read the msr_index'th bit from this bitmap: */
 	if (msr_index < 1024*8) {
 		unsigned char b;
-		if (kvm_read_guest(vcpu->kvm, bitmap + msr_index/8, &b, 1))
+		if (kvm_read_guest(vcpu, bitmap + msr_index/8, &b, 1))
 			return 1;
 		return 1 & (b >> (msr_index & 7));
 	} else
@@ -7044,6 +7049,8 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	u32 exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
+	//unsigned long rip = vmcs_readl(GUEST_RIP);
+	//u32 sec_vm_exec_ctrl = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
 
 	// XELATEX
 	if (kvm_record)
@@ -7053,6 +7060,11 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	if (kvm_record && kvm_record_type == KVM_RECORD_TIMER
 			&& atomic_read(&(record_kvm->tm_trap_count)))
 		kvm_make_request(KVM_REQ_RECORD, vcpu);
+
+	// XELATEX
+	//if (kvm_record)
+	//	print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
+	//			__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
 
 	/* If guest state is invalid, start emulating */
 	if (vmx->emulation_required)
