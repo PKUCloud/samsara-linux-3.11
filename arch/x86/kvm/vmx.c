@@ -5794,7 +5794,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	struct kvm_private_mem_page *private_page;
 	struct kvm_private_mem_page *temp;
 	void *origin, *private;
-	int i = 0;
 
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
@@ -5818,6 +5817,32 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 }
 
 extern void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete);
+
+
+/* Tamlok
+ * Rollback the private pages to the original ones. Called when a quantum is
+ * finished and conflict with others so that have to rollback.
+ */
+void tm_memory_rollback(struct kvm_vcpu *vcpu)
+{
+	struct kvm_private_mem_page *private_page;
+	struct kvm_private_mem_page *temp;
+
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
+		link)
+	{
+		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
+
+		kfree(pfn_to_kaddr(private_page->private_pfn));
+		list_del(&private_page->link);
+		kfree(private_page);
+		vcpu->arch.nr_private_pages--;
+	}
+	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+}
+
+
+
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
