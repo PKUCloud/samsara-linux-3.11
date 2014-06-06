@@ -6036,6 +6036,19 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.apic_attention)
 		kvm_lapic_sync_from_vapic(vcpu);
 
+	// XELATEX
+	if (kvm_record || vcpu->is_recording) {
+		r = kvm_x86_ops->check_rr_commit(vcpu);
+		if (r == KVM_RR_COMMIT) {
+			print_record("XELATEX - %s, %d, commit\n", __func__, __LINE__);
+			kvm_x86_ops->tm_memory_commit(vcpu);
+		}
+		else if (r == KVM_RR_ROLLBACK) {
+			print_record("XELATEX - %s, %d, rollback\n", __func__, __LINE__);
+			kvm_x86_ops->tm_memory_rollback(vcpu);
+		}
+	}
+
 	r = kvm_x86_ops->handle_exit(vcpu);
 	return r;
 
