@@ -224,6 +224,16 @@ struct kvm_tm_page {
 	int write;
 };
 
+// XELATEX
+struct rr_event {
+	struct list_head link;
+	int delivery_mode;
+	int vector;
+	int level;
+	int trig_mode;
+	unsigned long *dest_map;
+};
+
 // 2G mem is 2G/4K=512K
 // 500M mem is 128K
 #define TM_BITMAP_SIZE 512*1024
@@ -299,6 +309,10 @@ struct kvm_vcpu {
 	gfn_t access_size;
 	gfn_t dirty_size;
 	gfn_t conflict_size;
+	struct list_head events_list;
+	struct mutex events_list_lock;
+	int need_chkpt;
+	int nr_test;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;

@@ -3414,7 +3414,7 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		break;
 	}
 	case KVM_SET_LAPIC: {
-		ret = kvm_vcpu_ioctl_get_lapic(vcpu, arg);
+		ret = kvm_vcpu_ioctl_set_lapic(vcpu, arg);
 		break;
 	}
 	case KVM_SET_VCPU_EVENTS: {
@@ -5747,7 +5747,7 @@ static void update_cr8_intercept(struct kvm_vcpu *vcpu)
 	kvm_x86_ops->update_cr8_intercept(vcpu, tpr, max_irr);
 }
 
-static void inject_pending_event(struct kvm_vcpu *vcpu)
+static int inject_pending_event(struct kvm_vcpu *vcpu)
 {
 	/* try to reinject previous events if any */
 	if (vcpu->arch.exception.pending) {
@@ -5758,17 +5758,17 @@ static void inject_pending_event(struct kvm_vcpu *vcpu)
 					  vcpu->arch.exception.has_error_code,
 					  vcpu->arch.exception.error_code,
 					  vcpu->arch.exception.reinject);
-		return;
+		return 1;
 	}
 
 	if (vcpu->arch.nmi_injected) {
 		kvm_x86_ops->set_nmi(vcpu);
-		return;
+		return 2;
 	}
 
 	if (vcpu->arch.interrupt.pending) {
 		kvm_x86_ops->set_irq(vcpu);
-		return;
+		return 3;
 	}
 
 	/* try to inject new event if pending */
@@ -5777,14 +5777,17 @@ static void inject_pending_event(struct kvm_vcpu *vcpu)
 			--vcpu->arch.nmi_pending;
 			vcpu->arch.nmi_injected = true;
 			kvm_x86_ops->set_nmi(vcpu);
+			return 4;
 		}
 	} else if (kvm_cpu_has_injectable_intr(vcpu)) {
 		if (kvm_x86_ops->interrupt_allowed(vcpu)) {
 			kvm_queue_interrupt(vcpu, kvm_cpu_get_interrupt(vcpu),
 					    false);
 			kvm_x86_ops->set_irq(vcpu);
+			return 5;
 		}
 	}
+	return 0;
 }
 
 static void process_nmi(struct kvm_vcpu *vcpu)
@@ -5843,13 +5846,19 @@ static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 	kvm_apic_update_tmr(vcpu, tmr);
 }
 
+extern int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
+			     int vector, int level, int trig_mode,
+			     unsigned long *dest_map);
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
 	int r;
 	bool req_int_win = !irqchip_in_kernel(vcpu->kvm) &&
 		vcpu->run->request_interrupt_window;
 	bool req_immediate_exit = false;
+	struct rr_event *e;
+	struct rr_event *tmp;
 
+restart:
 	if (vcpu->requests) {
 		// XELATEX
 		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
@@ -5908,6 +5917,18 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 			vcpu_scan_ioapic(vcpu);
 	}
 
+	// XELATEX
+	if (kvm_record && vcpu->need_chkpt) {
+		mutex_lock(&(vcpu->events_list_lock));
+		vcpu_checkpoint(vcpu);
+		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
+			list_del(&(e->link));
+			kfree(e);
+			print_record("XELATEX - %s, %d, commit, vector=%d\n", __func__, __LINE__, e->vector);
+		}
+		mutex_unlock(&(vcpu->events_list_lock));
+	}
+
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
 		kvm_apic_accept_events(vcpu);
 		if (vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
@@ -5915,7 +5936,13 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 			goto out;
 		}
 
-		inject_pending_event(vcpu);
+		if (kvm_record)
+			print_record("\t XELATEX - %s, %d, priority, apic prio=0x%x.\n",
+					__func__, __LINE__, kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
+		r = inject_pending_event(vcpu);
+		if (kvm_record && r!=0) {
+			print_record("XELATEX - %s, %d, inject_pending_event=%d\n", __func__, __LINE__, r);
+		}
 
 		/* enable NMI/IRQ window open exits if needed */
 		if (vcpu->arch.nmi_pending)
@@ -6038,14 +6065,30 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	// XELATEX
 	if (kvm_record || vcpu->is_recording) {
+		vcpu->need_chkpt = 0;
 		r = kvm_x86_ops->check_rr_commit(vcpu);
+		// Only for test
+		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR)
+			r = ((++vcpu->nr_test) % 2 == 0);
 		if (r == KVM_RR_COMMIT) {
 			print_record("XELATEX - %s, %d, commit\n", __func__, __LINE__);
 			kvm_x86_ops->tm_memory_commit(vcpu);
+			vcpu->need_chkpt = 1;
 		}
 		else if (r == KVM_RR_ROLLBACK) {
 			print_record("XELATEX - %s, %d, rollback\n", __func__, __LINE__);
 			kvm_x86_ops->tm_memory_rollback(vcpu);
+			mutex_lock(&(vcpu->events_list_lock));
+			vcpu_rollback(vcpu);
+			list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
+				r = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
+						e->vector, e->level, e->trig_mode, e->dest_map);
+				print_record("XELATEX - %s, %d, rb vector=%d, result=%d\n",
+						__func__, __LINE__, e->vector, r);
+			}
+			mutex_unlock(&(vcpu->events_list_lock));
+			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+			goto restart;
 		}
 	}
 
@@ -6968,6 +7011,9 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+	INIT_LIST_HEAD(&(vcpu->events_list));
+	mutex_init(&(vcpu->events_list_lock));
+	vcpu->nr_test = 0;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;

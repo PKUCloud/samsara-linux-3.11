@@ -359,7 +359,7 @@ int vcpu_checkpoint(struct kvm_vcpu *vcpu)
 {
 	int ret = kvm_arch_getset_registers(vcpu, 0);
 
-	printk( "Make checkpoint\n" );
+	//printk( "Make checkpoint\n" );
 
 	if ( ret < 0 ){
 		printk( "Some Error Occured During Macking Checkpoint!\n" );
@@ -374,7 +374,7 @@ int vcpu_rollback(struct kvm_vcpu *vcpu)
 {
 	int ret = kvm_arch_getset_registers(vcpu, 1);
 
-	printk( "Roll back\n" );
+	//printk( "Roll back\n" );
 
 	if ( ret < 0 ){
 		printk( "Some Error Occured During Rolling Back!\n" );

@@ -40,6 +40,7 @@
 #include "trace.h"
 #include "x86.h"
 #include "cpuid.h"
+#include "logger.h"
 
 #ifndef CONFIG_X86_64
 #define mod_64(x, y) ((x) - (y) * div64_u64(x, y))
@@ -666,7 +667,7 @@ out:
  * Add a pending IRQ into lapic.
  * Return 1 if successfully added and 0 if discarded.
  */
-static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
+int __rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map)
 {
@@ -698,6 +699,7 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			}
 
 			kvm_make_request(KVM_REQ_EVENT, vcpu);
+			if (kvm_record) print_record("XELATEX - %s, %d\n", __func__, __LINE__);
 			kvm_vcpu_kick(vcpu);
 		}
 out:
@@ -761,6 +763,31 @@ out:
 		break;
 	}
 	return result;
+}
+EXPORT_SYMBOL_GPL(__rr_apic_accept_irq);
+
+int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
+			     int vector, int level, int trig_mode,
+			     unsigned long *dest_map)
+{
+	struct kvm_vcpu *vcpu = apic->vcpu;
+	struct rr_event *rr_event;
+
+	// XELATEX
+	if (kvm_record) {
+		mutex_lock(&(vcpu->events_list_lock));
+		rr_event = kmalloc(sizeof(struct rr_event), GFP_KERNEL);
+		rr_event->delivery_mode = delivery_mode;
+		rr_event->vector = vector;
+		rr_event->level = level;
+		rr_event->trig_mode = trig_mode;
+		rr_event->dest_map = dest_map;
+		list_add(&(rr_event->link), &(vcpu->events_list));
+		print_record("XELATEX - %s, %d, vector=%d\n", __func__, __LINE__, vector);
+		mutex_unlock(&(vcpu->events_list_lock));
+	}
+
+	return __rr_apic_accept_irq(apic, delivery_mode, vector, level, trig_mode, dest_map);
 }
 
 int kvm_apic_compare_prio(struct kvm_vcpu *vcpu1, struct kvm_vcpu *vcpu2)
@@ -1582,8 +1609,12 @@ int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 	apic_update_ppr(apic);
 	highest_irr = apic_find_highest_irr(apic);
 	if ((highest_irr == -1) ||
-	    ((highest_irr & 0xF0) <= kvm_apic_get_reg(apic, APIC_PROCPRI)))
+	    ((highest_irr & 0xF0) <= kvm_apic_get_reg(apic, APIC_PROCPRI))) {
+	    if (kvm_record && highest_irr != -1)
+			print_record("XELATEX - %s, %d, priority, highest_irr=%d, irr prio=0x%x, apic prio=0x%x.\n",
+					__func__, __LINE__, highest_irr, highest_irr & 0xF0, kvm_apic_get_reg(apic, APIC_PROCPRI));
 		return -1;
+	}
 	return highest_irr;
 }
 

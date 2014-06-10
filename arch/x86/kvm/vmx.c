@@ -7079,8 +7079,8 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	u32 exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
-	//unsigned long rip = vmcs_readl(GUEST_RIP);
-	//u32 sec_vm_exec_ctrl = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
+	unsigned long rip = vmcs_readl(GUEST_RIP);
+	u32 sec_vm_exec_ctrl = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
 
 	// XELATEX
 	if (kvm_record)
@@ -7092,9 +7092,9 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 		kvm_make_request(KVM_REQ_RECORD, vcpu);
 
 	// XELATEX
-	//if (kvm_record)
-	//	print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
-	//			__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
+	if (kvm_record)
+		print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
+				__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
 
 	/* If guest state is invalid, start emulating */
 	if (vmx->emulation_required)
@@ -7238,12 +7238,14 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			print_record("XELATEX - check reason : MMIO\n");
 		else if (exit_reason == EXIT_REASON_PREEMPTION_TIMER)
 			print_record("XELATEX - check reason : Preemption\n");
-		else if (exit_reason == EXIT_REASON_PENDING_INTERRUPT)
-			print_record("XELATEX - check reason : Interrupt Window\n");
-		else if (exit_reason == EXIT_REASON_NMI_WINDOW)
-			print_record("XELATEX - check reason : NMI Window\n");
-		else if (exit_reason == EXIT_REASON_EXTERNAL_INTERRUPT)
-			print_record("XELATEX - check reason : External Interrupt\n");
+		//else if (exit_reason == EXIT_REASON_PENDING_INTERRUPT)
+		//	print_record("XELATEX - check reason : Interrupt Window\n");
+		//else if (exit_reason == EXIT_REASON_NMI_WINDOW)
+		//	print_record("XELATEX - check reason : NMI Window\n");
+		//else if (exit_reason == EXIT_REASON_EXTERNAL_INTERRUPT)
+		//	print_record("XELATEX - check reason : External Interrupt\n");
+		//else if (exit_reason == EXIT_REASON_EXCEPTION_NMI)
+		//	print_record("XELATEX - check reason : Exception or NMI\n");
 
 		switch (exit_reason) {
 		/* IO */
@@ -7252,12 +7254,14 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		case EXIT_REASON_EPT_MISCONFIG:
 		/* PREEMPTION */
 		case EXIT_REASON_PREEMPTION_TIMER:
-		/* Interrupt Window */
-		case EXIT_REASON_PENDING_INTERRUPT:
-		/* NMI Window */
-		case EXIT_REASON_NMI_WINDOW:
-		/* External Interrupt */
-		case EXIT_REASON_EXTERNAL_INTERRUPT:
+		///* Interrupt Window */
+		//case EXIT_REASON_PENDING_INTERRUPT:
+		///* NMI Window */
+		//case EXIT_REASON_NMI_WINDOW:
+		///* External Interrupt */
+		//case EXIT_REASON_EXTERNAL_INTERRUPT:
+		///* Exception or NMI */
+		//case EXIT_REASON_EXCEPTION_NMI:
 			ret = vmx_tm_commit(vcpu);
 			if (ret == -1) {
 				printk(KERN_ERR "XELATEX - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
@@ -8727,6 +8731,10 @@ static int vmx_check_intercept(struct kvm_vcpu *vcpu,
 	return X86EMUL_CONTINUE;
 }
 
+extern int __rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
+			     int vector, int level, int trig_mode,
+			     unsigned long *dest_map);
+
 static struct kvm_x86_ops vmx_x86_ops = {
 	.cpu_has_kvm_support = cpu_has_kvm_support,
 	.disabled_by_bios = vmx_disabled_by_bios,
@@ -8830,6 +8838,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.check_rr_commit = vmx_check_rr_commit,
 	.tm_memory_commit = tm_memory_commit,
 	.tm_memory_rollback = tm_memory_rollback,
+ 	.rr_apic_accept_irq = __rr_apic_accept_irq,
 };
 
 static int __init vmx_init(void)
