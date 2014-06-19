@@ -1474,13 +1474,14 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 		if (kaddr == NULL) {
 			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
 					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			return -EFAULT;
-			//goto normal;
+			//return -EFAULT;
+			goto normal;
 		}
 		memcpy(data, kaddr + offset, len);
 		return 0;
 	}
 
+normal:
 	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 	addr = gfn_to_hva_read(kvm, gfn);
 	if (kvm_is_error_hva(addr)) {
@@ -1571,13 +1572,14 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 		if (kaddr == NULL) {
 			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
 					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			return -EFAULT;
-			//goto normal;
+			//return -EFAULT;
+			goto normal;
 		}
 		memcpy(kaddr + offset, data, len);
 		return 0;
 	}
 
+normal:
 	//if(kvm_record) printk(KERN_ERR "%s, %d\n", __func__, __LINE__);
 	return kvm_write_guest_page_kvm(kvm, gfn, data, offset, len);
 }

@@ -3849,10 +3849,20 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		return NULL;
 	}
 
+	if (vcpu->arch.mmu.root_hpa == INVALID_PAGE) {
+		printk(KERN_ERR "XELATEX - root_hpa == INVALID_PAGE\n");
+		return (void *)INVALID_PAGE;
+	}
+
 	//printk(KERN_ERR "addr=0x%llx\n", addr);
 	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (sptep == 0xffff87ffffffffffULL)
+			printk(KERN_ERR "index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
+						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
+				index, sptep, shadow_addr, __va(shadow_addr), level,
+				vcpu->arch.mmu.root_hpa);
 		//printk(KERN_ERR "index=0x%x, sptep=0x%llx, *sptep=0x%llx, shadow_addr=0x%llx, va(shadow_addr)=0x%llx\n",
 		//		index, sptep, *sptep, shadow_addr, __va(shadow_addr));
 		if (!is_shadow_present_pte(*sptep)) {
@@ -3896,6 +3906,8 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 			return NULL;
 		}
 	}
+	else if (kaddr == (void *)INVALID_PAGE)
+		return NULL;
 
 	return kaddr;
 }
