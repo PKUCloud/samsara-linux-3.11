@@ -1650,6 +1650,15 @@ static void vmx_save_host_state(struct kvm_vcpu *vcpu)
 		kvm_set_shared_msr(vmx->guest_msrs[i].index,
 				   vmx->guest_msrs[i].data,
 				   vmx->guest_msrs[i].mask);
+
+	if(kvm_record){
+		u64 rsr_msr_host_kernel_gs_base;
+		rdmsrl(MSR_KERNEL_GS_BASE, rsr_msr_host_kernel_gs_base);
+		print_record("msr_guest_kernel_gs_base=0x%llx, vmx->msr_host_kernel_gs_base=0x%llx," \
+			"vmx->msr_guest_kernel_gs_base=0x%llx\n", rsr_msr_host_kernel_gs_base
+			, vmx->msr_host_kernel_gs_base, vmx->msr_guest_kernel_gs_base);
+	}
+	
 }
 
 static void __vmx_load_host_state(struct vcpu_vmx *vmx)
@@ -1690,6 +1699,12 @@ static void __vmx_load_host_state(struct vcpu_vmx *vmx)
 	if (!user_has_fpu() && !vmx->vcpu.guest_fpu_loaded)
 		stts();
 	load_gdt(&__get_cpu_var(host_gdt));
+
+#ifdef CONFIG_X86_64
+	print_record("vmx->msr_guest_kernel_gs_base=0x%llx\n", vmx->msr_guest_kernel_gs_base);
+	print_record("vmx->msr_host_kernel_gs_base=0x%llx\n",vmx->msr_host_kernel_gs_base);
+	print_record("vmx->host_state.gs_sel=0x%llx\n",vmx->host_state.gs_sel);
+#endif	
 }
 
 static void vmx_load_host_state(struct vcpu_vmx *vmx)
@@ -2516,6 +2531,86 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 
 	return ret;
 }
+
+//rsr-debug
+static int vmx_set_msr_checkpoint(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct shared_msr_entry *msr;
+	int ret = 0;
+	u32 msr_index = msr_info->index;
+	u64 data = msr_info->data;
+
+	switch (msr_index) {
+	case MSR_EFER:
+		ret = kvm_set_msr_common(vcpu, msr_info);
+		break;
+#ifdef CONFIG_X86_64
+	case MSR_FS_BASE:
+		vmx_segment_cache_clear(vmx);
+		vmcs_writel(GUEST_FS_BASE, data);
+		break;
+	case MSR_GS_BASE:
+		vmx_segment_cache_clear(vmx);
+		vmcs_writel(GUEST_GS_BASE, data);
+		break;
+	case MSR_KERNEL_GS_BASE:
+		//vmx_load_host_state(vmx);
+		//printk("don't vmx_load_host_state\n");
+		vmx->msr_guest_kernel_gs_base = data;
+		break;
+#endif
+	case MSR_IA32_SYSENTER_CS:
+		vmcs_write32(GUEST_SYSENTER_CS, data);
+		break;
+	case MSR_IA32_SYSENTER_EIP:
+		vmcs_writel(GUEST_SYSENTER_EIP, data);
+		break;
+	case MSR_IA32_SYSENTER_ESP:
+		vmcs_writel(GUEST_SYSENTER_ESP, data);
+		break;
+	case MSR_IA32_TSC:
+		kvm_write_tsc(vcpu, msr_info);
+		break;
+	case MSR_IA32_CR_PAT:
+		if (vmcs_config.vmentry_ctrl & VM_ENTRY_LOAD_IA32_PAT) {
+			vmcs_write64(GUEST_IA32_PAT, data);
+			vcpu->arch.pat = data;
+			break;
+		}
+		ret = kvm_set_msr_common(vcpu, msr_info);
+		break;
+	case MSR_IA32_TSC_ADJUST:
+		ret = kvm_set_msr_common(vcpu, msr_info);
+		break;
+	case MSR_TSC_AUX:
+		if (!vmx->rdtscp_enabled)
+			return 1;
+		/* Check reserved bit, higher 32 bits should be zero */
+		if ((data >> 32) != 0)
+			return 1;
+		/* Otherwise falls through */
+	default:
+		if (vmx_set_vmx_msr(vcpu, msr_index, data))
+			break;
+		msr = find_msr_entry(vmx, msr_index);
+		if (msr) {
+			msr->data = data;
+			if (msr - vmx->guest_msrs < vmx->save_nmsrs) {
+				preempt_disable();
+				kvm_set_shared_msr(msr->index, msr->data,
+						   msr->mask);
+				preempt_enable();
+			}
+			break;
+		}
+		ret = kvm_set_msr_common(vcpu, msr_info);
+	}
+
+	return ret;
+}
+
+//end rsr-debug
 
 static void vmx_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 {
@@ -4045,7 +4140,7 @@ static void vmx_deliver_posted_interrupt(struct kvm_vcpu *vcpu, int vector)
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	int r;
 
-	if (pi_test_and_set_pir(vector, &vmx->pi_desc))
+	if (pi_test_and_set_pir(vector, &vmx->pi_desc))		// Set a bit and return its old value:  @vector: Bit to set   @vmx->pi_desc: Address to count from
 		return;
 
 	r = pi_test_and_set_on(&vmx->pi_desc);
@@ -4063,8 +4158,9 @@ static void vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 
-	if (!pi_test_and_clear_on(&vmx->pi_desc))
+	if (!pi_test_and_clear_on(&vmx->pi_desc)){
 		return;
+	}
 
 	kvm_apic_update_irr(vcpu, vmx->pi_desc.pir);
 }
@@ -4660,7 +4756,6 @@ static int vmx_interrupt_allowed(struct kvm_vcpu *vcpu)
 			 */
 		}
 	}
-
 	return (vmcs_readl(GUEST_RFLAGS) & X86_EFLAGS_IF) &&
 		!(vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) &
 			(GUEST_INTR_STATE_STI | GUEST_INTR_STATE_MOV_SS));
@@ -5860,7 +5955,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 		mutex_lock(&(kvm->tm_lock));
 		//if (!(kvm->timestamp % 1000))
-			print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n",
+			print_record("XELATEX - vcpu=%d, timestamp=%llu =====================================================\n",
 					vcpu->vcpu_id, kvm->timestamp);
 
 		/*
@@ -7092,10 +7187,15 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 		kvm_make_request(KVM_REQ_RECORD, vcpu);
 
 	// XELATEX
-	if (kvm_record)
+	if (kvm_record){
 		print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
 				__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
-
+		
+		/*if (exit_reason == 2){
+			print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
+					__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
+		}*/
+	}
 	/* If guest state is invalid, start emulating */
 	if (vmx->emulation_required)
 		return handle_invalid_guest_state(vcpu);
@@ -8756,6 +8856,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.update_db_bp_intercept = update_exception_bitmap,
 	.get_msr = vmx_get_msr,
 	.set_msr = vmx_set_msr,
+	.set_msr_checkpoint = vmx_set_msr_checkpoint,
 	.get_segment_base = vmx_get_segment_base,
 	.get_segment = vmx_get_segment,
 	.set_segment = vmx_set_segment,

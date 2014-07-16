@@ -232,6 +232,10 @@ struct rr_event {
 	int level;
 	int trig_mode;
 	unsigned long *dest_map;
+	//rsr--debug
+	//bool is_committed;	//this event has already been committed, so can be deleted before next vmentry
+	//end rsr--debug
+	
 };
 
 // 2G mem is 2G/4K=512K

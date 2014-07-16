@@ -474,8 +474,11 @@ static inline int apic_find_highest_isr(struct kvm_lapic *apic)
 	/* Note that isr_count is always 1 with vid enabled */
 	if (!apic->isr_count)
 		return -1;
-	if (likely(apic->highest_isr_cache != -1))
+	if (likely(apic->highest_isr_cache != -1)){
+		if (kvm_record)
+			print_record("   apic->highest_isr_cache = %d   ", apic->highest_isr_cache);
 		return apic->highest_isr_cache;
+	}
 
 	result = find_highest_vector(apic->regs + APIC_ISR);
 	ASSERT(result == -1 || result >= 16);
@@ -501,7 +504,7 @@ static void apic_update_ppr(struct kvm_lapic *apic)
 	tpr = kvm_apic_get_reg(apic, APIC_TASKPRI);
 	isr = apic_find_highest_isr(apic);
 	isrv = (isr != -1) ? isr : 0;
-
+	
 	if ((tpr & 0xf0) >= (isrv & 0xf0))
 		ppr = tpr & 0xff;
 	else
@@ -699,7 +702,7 @@ int __rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			}
 
 			kvm_make_request(KVM_REQ_EVENT, vcpu);
-			if (kvm_record) print_record("XELATEX - %s, %d\n", __func__, __LINE__);
+			if (kvm_record) print_record("%s, vector=%d\n", __func__, vector);
 			kvm_vcpu_kick(vcpu);
 		}
 out:
@@ -722,6 +725,9 @@ out:
 		break;
 
 	case APIC_DM_INIT:
+
+		if (kvm_record) print_record("APIC_DM_INIT !!!\n");
+		
 		if (!trig_mode || level) {
 			result = 1;
 			/* assumes that there are only KVM_APIC_INIT/SIPI */
@@ -782,8 +788,11 @@ int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 		rr_event->level = level;
 		rr_event->trig_mode = trig_mode;
 		rr_event->dest_map = dest_map;
+		//rsr--debug
+		//rr_event->is_committed = 0;
+		//end rsr--debug
 		list_add(&(rr_event->link), &(vcpu->events_list));
-		print_record("XELATEX - %s, %d, vector=%d\n", __func__, __LINE__, vector);
+		//printk("XELATEX - %s, %d, delivery_mode=%d, vector=%d\n", __func__, __LINE__,delivery_mode ,vector);
 		mutex_unlock(&(vcpu->events_list_lock));
 	}
 
@@ -1611,7 +1620,7 @@ int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 	if ((highest_irr == -1) ||
 	    ((highest_irr & 0xF0) <= kvm_apic_get_reg(apic, APIC_PROCPRI))) {
 	    if (kvm_record && highest_irr != -1)
-			print_record("XELATEX - %s, %d, priority, highest_irr=%d, irr prio=0x%x, apic prio=0x%x.\n",
+			print_record("XELATEX-error - %s, %d, priority, highest_irr=%d, irr prio=0x%x, apic prio=0x%x.\n",
 					__func__, __LINE__, highest_irr, highest_irr & 0xF0, kvm_apic_get_reg(apic, APIC_PROCPRI));
 		return -1;
 	}
@@ -1662,6 +1671,7 @@ void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu,
 		struct kvm_lapic_state *s)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
+	int i;
 
 	kvm_lapic_set_base(vcpu, vcpu->arch.apic_base);
 	/* set SPIV separately to get count of SW disabled APICs right */
@@ -1670,8 +1680,9 @@ void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu,
 	/* call kvm_apic_set_id() to put apic into apic_map */
 	kvm_apic_set_id(apic, kvm_apic_id(apic));
 	kvm_apic_set_version(vcpu);
-
+	
 	apic_update_ppr(apic);
+
 	hrtimer_cancel(&apic->lapic_timer.timer);
 	update_divide_count(apic);
 	start_apic_timer(apic);
@@ -1908,7 +1919,7 @@ void kvm_apic_accept_events(struct kvm_vcpu *vcpu)
 			vcpu->arch.mp_state = KVM_MP_STATE_INIT_RECEIVED;
 	}
 	if (test_bit(KVM_APIC_SIPI, &pe) &&
-	    vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
+	    vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {	// SIPI : Startup IPI
 		/* evaluate pending_events before reading the vector */
 		smp_rmb();
 		sipi_vector = apic->sipi_vector;

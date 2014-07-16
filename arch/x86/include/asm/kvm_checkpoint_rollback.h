@@ -8,6 +8,19 @@ typedef struct MSRdata{
 	struct kvm_msr_entry entries[100];	
 } MSRdata;
 
+struct rsr_lapic {
+
+	/* The highest vector set in ISR; if -1 - invalid, must scan ISR. */
+	int highest_isr_cache;
+	/**
+	 * APIC register page.  The layout matches the register layout seen by
+	 * the guest 1:1, because it is accessed by the vmx microcode.
+	 * Note: Only one register, the TPR, is used by the microcode.
+	 */
+	char regs[KVM_APIC_REG_SIZE];
+};
+
+
 typedef struct CPUX86State {
 
 	/* standard registers */
@@ -22,8 +35,12 @@ typedef struct CPUX86State {
 	
 	struct kvm_mp_state mp_state;
 	
-	/* APIC state */
-	struct kvm_lapic_state kapic;
+	/* APIC regs */
+	//struct kvm_lapic_state kapic;
+
+	//rsr-debug APIC status
+	struct rsr_lapic lapic;
+	//end rsr-debug
 	
 	/* Debug registers */
 	struct kvm_debugregs dbgregs;

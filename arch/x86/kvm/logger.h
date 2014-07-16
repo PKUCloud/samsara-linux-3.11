@@ -10,7 +10,7 @@
 
 #define LOGGER_MAJOR 0  //dynamic major by default
 #define LOGGER_QUANTUM 4096   //use a quantum size of 4096
-#define PRINT_TIME 1      //1 - to print timestamp at the front of every message
+#define PRINT_TIME 0      //1 - to print timestamp at the front of every message
 
 struct logger_quantum {
 	void *data;            //pointer to a page
