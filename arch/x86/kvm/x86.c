@@ -2819,7 +2819,7 @@ static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
 				    struct rsr_lapic *s)
 {
 	struct kvm_lapic_state *lapic = s->regs;
-	//vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
+	vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
 	print_record("highest_isr = %d\n", s->highest_isr_cache);
 	kvm_apic_post_state_restore(vcpu, lapic);
 	update_cr8_intercept(vcpu);
@@ -5934,7 +5934,7 @@ restart:
 	
 	if (vcpu->requests) {	// Check if there is any requests which are not handled.
 		// XELATEX
-		printk("before enter -- Check request\n");
+		//printk("before enter -- Check request\n");
 		
 		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
 			//printk(KERN_ERR "XELATEX - get request KVM_REQ_RECORD");

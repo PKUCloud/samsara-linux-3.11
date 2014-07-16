@@ -14,6 +14,8 @@
 
 #include "logger.h"
 
+//#define CONFIG_RSR_CHECKPOINT_DEBUG 0
+
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 #include "kvm_cache_regs.h"
 #endif
@@ -444,7 +446,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 #ifdef CONFIG_X86_64
 
 		msrs[n++].index = MSR_CSTAR;
-		//msrs[n++].index = MSR_KERNEL_GS_BASE;
+//		msrs[n++].index = MSR_KERNEL_GS_BASE;
 
 		msrs[n++].index = MSR_SYSCALL_MASK;
 		msrs[n++].index = MSR_LSTAR;
@@ -469,7 +471,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		  *The hypervisor is only guaranteed to update this data at the moment of MSR write.
 		  *Note that although MSRs are per-CPU entities, the effect of this particular MSR is global.
 		  */
-		msrs[n++].index = MSR_KVM_WALL_CLOCK_NEW;
+//		msrs[n++].index = MSR_KVM_WALL_CLOCK_NEW;
 		//same as MSR_KVM_SYSTEM_TIME_NEW. Use that instead.
 		msrs[n++].index = MSR_KVM_SYSTEM_TIME_NEW;
 		if (kvm_has_feature(KVM_FEATURE_ASYNC_PF)) {
@@ -496,11 +498,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	}
 
 
-
-
-	//4 All parameters are kernel addresses, so use __msr_io
 	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_MSRS:KVM_GET_MSRS, msr_data);
-	//ret = __msr_io(vcpu, &msr_data, kvm_get_msr, 1);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\nMSR: ret=%d\n", ret);

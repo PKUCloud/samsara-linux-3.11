@@ -4973,6 +4973,7 @@ static int handle_external_interrupt(struct kvm_vcpu *vcpu)
 static int handle_triple_fault(struct kvm_vcpu *vcpu)
 {
 	vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
+	printk("handle_triple_fault\n");
 	return 0;
 }
 

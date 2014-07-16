@@ -108,7 +108,7 @@ void log2file(const char *fname, const char *fname_log)
 			exit(1);
 		}
 		//fprintf(f_log, "\n<end>============\n");
-
+		fflush(f_log);
 		//the driver will delete the data that mapped currently
 		//so when we map the same address next time, it will actually be the next page
 		munmap(address, len);
