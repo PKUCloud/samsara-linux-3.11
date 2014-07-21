@@ -70,13 +70,13 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 {
 	int i, r = -1;
 	struct kvm_vcpu *vcpu, *lowest = NULL;
-
+	
 	if (irq->dest_mode == 0 && irq->dest_id == 0xff &&
 			kvm_is_dm_lowest_prio(irq)) {
 		printk(KERN_INFO "kvm: apic: phys broadcast and lowest prio\n");
 		irq->delivery_mode = APIC_DM_FIXED;
 	}
-
+	
 	if (kvm_irq_delivery_to_apic_fast(kvm, src, irq, &r, dest_map))
 		return r;
 
@@ -88,10 +88,10 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 					irq->dest_id, irq->dest_mode))
 			continue;
 
-		if (!kvm_is_dm_lowest_prio(irq)) {
+		if (!kvm_is_dm_lowest_prio(irq)) {			
 			if (r < 0)
 				r = 0;
-			r += kvm_apic_set_irq(vcpu, irq, dest_map);
+			r += kvm_apic_set_irq(vcpu, irq, dest_map);			
 		} else if (kvm_lapic_enabled(vcpu)) {
 			if (!lowest)
 				lowest = vcpu;
@@ -99,7 +99,6 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 				lowest = vcpu;
 		}
 	}
-
 	if (lowest)
 		r = kvm_apic_set_irq(lowest, irq, dest_map);
 

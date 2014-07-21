@@ -14,6 +14,10 @@
 
 #include "logger.h"
 
+//rsr-debug
+#include "mmu.h"
+//end rsr-debug
+
 //#define CONFIG_RSR_CHECKPOINT_DEBUG 0
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
@@ -400,19 +404,6 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	struct MSRdata msr_data_debug;
 #endif
-
-#ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-		print_record("\nMSR:\n");
-		memset(&msr_data_debug, 0 , sizeof(MSRdata));
-		msr_data_debug.entries[0].index =  MSR_KERNEL_GS_BASE;
-		msr_data_debug.info.nmsrs = 1;
-		
-		kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, KVM_GET_MSRS, &msr_data_debug);
-		print_record("msr[0].index=%u, data=0x%llx\n"
-						, msr_data_debug.entries[0].index, msr_data_debug.entries[0].data);
-	
-#endif
-
 	
 	if (!set) {
 		memset(msr_data, 0, sizeof(struct MSRdata));
@@ -436,17 +427,12 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		msrs[n++].index = MSR_IA32_MISC_ENABLE;
 
 		//do we need to record timestamp?
-		/*
-		if (!env->tsc_valid) {
-			msrs[n++].index = MSR_IA32_TSC;
-			env->tsc_valid = !runstate_is_running();
-		}
-		*/
+		msrs[n++].index = MSR_IA32_TSC;
 
 #ifdef CONFIG_X86_64
 
 		msrs[n++].index = MSR_CSTAR;
-//		msrs[n++].index = MSR_KERNEL_GS_BASE;
+		msrs[n++].index = MSR_KERNEL_GS_BASE;
 
 		msrs[n++].index = MSR_SYSCALL_MASK;
 		msrs[n++].index = MSR_LSTAR;
@@ -471,7 +457,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		  *The hypervisor is only guaranteed to update this data at the moment of MSR write.
 		  *Note that although MSRs are per-CPU entities, the effect of this particular MSR is global.
 		  */
-//		msrs[n++].index = MSR_KVM_WALL_CLOCK_NEW;
+		msrs[n++].index = MSR_KVM_WALL_CLOCK_NEW;
 		//same as MSR_KVM_SYSTEM_TIME_NEW. Use that instead.
 		msrs[n++].index = MSR_KVM_SYSTEM_TIME_NEW;
 		if (kvm_has_feature(KVM_FEATURE_ASYNC_PF)) {
@@ -497,9 +483,9 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		//end rsr-debug
 	}
 
-
 	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_MSRS:KVM_GET_MSRS, msr_data);
 
+/*
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\nMSR: ret=%d\n", ret);
 	memset(&msr_data_debug, 0 , sizeof(MSRdata));
@@ -513,7 +499,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 					, i, msr_data_debug.entries[i].index, msr_data_debug.entries[i].data);
 
 #endif
-
+*/
 
     return 0;
 }
@@ -539,6 +525,16 @@ int kvm_arch_getset_registers(struct kvm_vcpu *vcpu, int set)
     if (ret < 0) {
         return ret;
     }
+
+	//rsr-debug
+	//set_sregs lead to destroy mmu which will be used in set_msrs, so reload it before set_msrs
+	ret = kvm_mmu_reload(vcpu);					// Load VM memory page table
+	if (unlikely(ret)) {
+		printk(KERN_DEBUG "tamlok: Fail to reload mmu\n");
+		return -1;
+	}
+	//end rsr-debug
+	
 	ret = kvm_getset_msrs(vcpu, env, set);
     if (ret < 0) {
         return ret;

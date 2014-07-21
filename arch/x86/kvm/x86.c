@@ -946,25 +946,6 @@ static int do_set_msr(struct kvm_vcpu *vcpu, unsigned index, u64 *data)
 	return kvm_set_msr(vcpu, &msr);
 }
 
-//rsr-debug
-int kvm_set_msr_checkpoint(struct kvm_vcpu *vcpu, struct msr_data *msr)
-{
-	return kvm_x86_ops->set_msr_checkpoint(vcpu, msr);
-}
-
-
-static int do_set_msr_checkpoint(struct kvm_vcpu *vcpu, unsigned index, u64 *data)
-{
-	struct msr_data msr;
-
-	msr.data = *data;
-	msr.index = index;
-	msr.host_initiated = true;
-	return kvm_set_msr_checkpoint(vcpu, &msr);
-}
-//end rsr-debug
-
-
 #ifdef CONFIG_X86_64
 struct pvclock_gtod_data {
 	seqcount_t	seq;
@@ -2820,7 +2801,7 @@ static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
 {
 	struct kvm_lapic_state *lapic = s->regs;
 	vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
-	print_record("highest_isr = %d\n", s->highest_isr_cache);
+	//print_record("highest_isr = %d\n", s->highest_isr_cache);
 	kvm_apic_post_state_restore(vcpu, lapic);
 	update_cr8_intercept(vcpu);
 
@@ -3451,7 +3432,7 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		struct kvm_msrs *msrs = arg;
 		struct kvm_msr_entry *entries = msrs->entries;
 		//rsr-debug
-		ret = __msr_io(vcpu, arg, entries, do_set_msr_checkpoint);
+		ret = __msr_io(vcpu, arg, entries, do_set_msr);
 		//end rsr-debug
 		break;
 	}
@@ -6000,7 +5981,8 @@ restart:
 	if (kvm_record && vcpu->need_chkpt) {		// make checkpoint
 		mutex_lock(&(vcpu->events_list_lock));
 		vcpu_checkpoint(vcpu);
-		printk("before enter -- vcpu_checkpoint\n");
+		//printk("before enter -- vcpu_checkpoint\n");
+
 		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {		//delete all events in the event list because it already be committed
 			list_del(&(e->link));
 			kfree(e);
@@ -6012,7 +5994,7 @@ restart:
 
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
 
-		printk("before enter -- found: KVM_REQ_EVENT \n");
+		//printk("before enter -- found: KVM_REQ_EVENT \n");
 
 		kvm_apic_accept_events(vcpu);								// Check if inject an event?
 		if (vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
@@ -6045,7 +6027,7 @@ restart:
 
 		r = inject_pending_event(vcpu);										//inject pending events that recived from last vmentre to vmexit
 
-		if (kvm_record){
+		/*if (kvm_record){
 			print_record("vcpu->request=%lu \n ", vcpu->requests);
 			if (r==0)
 				print_record("0 = inject_pending_event\n");
@@ -6054,7 +6036,7 @@ restart:
 				print_record("arch.interrupt.pending=%d, arch.interrupt.soft=%d, arch.interrupt.nr=%d \n",vcpu->arch.interrupt.pending, vcpu->arch.interrupt.soft, vcpu->arch.interrupt.nr );
 			}
 
-		}
+		}*/
 
 		/* enable NMI/IRQ window open exits if needed */
 		if (vcpu->arch.nmi_pending)
@@ -6213,20 +6195,23 @@ restart:
 			r = ((++vcpu->nr_test) % 2 == 0);
 		if (r == KVM_RR_COMMIT) {
 			print_record("KVM_RR_COMMIT\n");
-			printk("after exit -- KVM_RR_COMMIT\n");
+			//printk("after exit -- KVM_RR_COMMIT\n");
 
 			kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
 		}
 		else if (r == KVM_RR_ROLLBACK) {
 			print_record("KVM_RR_ROLLBACK\n");
-			printk("after exit -- KVM_RR_ROLLBACK\n");
+			//printk("after exit -- KVM_RR_ROLLBACK\n");
 
 			kvm_x86_ops->tm_memory_rollback(vcpu);
-			mutex_lock(&(vcpu->events_list_lock));	
+				
 			vcpu_rollback(vcpu);
-			printk("after exit -- vcpu_rollback\n");
-			
+			//printk("after exit -- vcpu_rollback\n");
+
+			//rsr-debug
+			mutex_lock(&(vcpu->events_list_lock));
+			//end rsr-debug
 			list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
 				r = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
 						e->vector, e->level, e->trig_mode, e->dest_map);
@@ -6235,8 +6220,6 @@ restart:
 			}
 			mutex_unlock(&(vcpu->events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-			//1 Is that all right?
-			print_record("\n");
 			
 			goto restart;
 		}

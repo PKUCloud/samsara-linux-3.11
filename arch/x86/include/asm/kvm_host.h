@@ -688,9 +688,6 @@ struct kvm_x86_ops {
 	void (*update_db_bp_intercept)(struct kvm_vcpu *vcpu);
 	int (*get_msr)(struct kvm_vcpu *vcpu, u32 msr_index, u64 *pdata);
 	int (*set_msr)(struct kvm_vcpu *vcpu, struct msr_data *msr);
-	//rsr-debug
-	int (*set_msr_checkpoint)(struct kvm_vcpu *vcpu, struct msr_data *msr);
-	//end rsr-debug
 	u64 (*get_segment_base)(struct kvm_vcpu *vcpu, int seg);
 	void (*get_segment)(struct kvm_vcpu *vcpu,
 			    struct kvm_segment *var, int seg);

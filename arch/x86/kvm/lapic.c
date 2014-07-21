@@ -610,7 +610,7 @@ bool kvm_irq_delivery_to_apic_fast(struct kvm *kvm, struct kvm_lapic *src,
 	bool ret = false;
 
 	*r = -1;
-
+	
 	if (irq->shorthand == APIC_DEST_SELF) {
 		*r = kvm_apic_set_irq(src->vcpu, irq, dest_map);
 		return true;
@@ -792,7 +792,6 @@ int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 		//rr_event->is_committed = 0;
 		//end rsr--debug
 		list_add(&(rr_event->link), &(vcpu->events_list));
-		//printk("XELATEX - %s, %d, delivery_mode=%d, vector=%d\n", __func__, __LINE__,delivery_mode ,vector);
 		mutex_unlock(&(vcpu->events_list_lock));
 	}
 

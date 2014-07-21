@@ -95,7 +95,7 @@ void log2file(const char *fname, const char *fname_log)
 			fclose(f_log);
 			exit(1);
 		}
-			
+
 		//output the log to fname_log
 		str = (char*)address;
 
@@ -108,7 +108,7 @@ void log2file(const char *fname, const char *fname_log)
 			exit(1);
 		}
 		//fprintf(f_log, "\n<end>============\n");
-		fflush(f_log);
+		//fflush(f_log);
 		//the driver will delete the data that mapped currently
 		//so when we map the same address next time, it will actually be the next page
 		munmap(address, len);
@@ -260,7 +260,7 @@ int main(int argc, char **argv)
 					fprintf(stderr, "Can't turn on separate_memory under this mode\n");
 			}
 		printf("separate_mem=%d\n", kvm_rc.separate_mem);
-		
+
 		ret = ioctl(fd, KVM_ENABLE_RECORD, &kvm_rc);
 		if (ret < 0) {
 			printf("KVM_ENABLE_RECORD failed, errno = %d\n"
