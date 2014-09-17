@@ -2711,9 +2711,6 @@ static void __always_inline __mmu_print_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep
 		else if (*sptep & VMX_EPT_ACCESS_BIT)
 			print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
 					addr >> PAGE_SHIFT, gpa >> PAGE_SHIFT);
-		//else
-		//	print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
-		//			new_addr >> PAGE_SHIFT, new_gpa >> PAGE_SHIFT);
 	}
 }
 
@@ -2750,7 +2747,6 @@ void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn)
 	spte = *sptep;
 	spte &= ~PT64_BASE_ADDR_MASK;
 	spte |= (u64)pfn << PAGE_SHIFT;
-	//print_record("spte was 0x%llx and is 0x%llx\n", *sptep, spte);
 	*sptep = spte;
 }
 EXPORT_SYMBOL_GPL(kvm_record_spte_set_pfn);
@@ -2814,19 +2810,12 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 	struct kvm_private_mem_page *private_mem_page;
 
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
-	//new_page = mmu_memory_cache_alloc(&vcpu->arch.mmu_page_cache);
 	new_page = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	//print_record("kvm_record_memory_cow - new_pfn=0x%llx, original_pfn=0x%llx\n",
-	//		__pa(new_page) >> PAGE_SHIFT, pfn);
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
 	copy_page(new_page, pfn_to_kaddr(pfn));
-	// TODO: Set all bytes to HLT, only for test, need remove afterwards
-	//memset(pfn_to_kaddr(pfn), 0xF4, PAGE_SIZE);
 
-	//print_record("cow: vcpu %d origin_pfn 0x%llx new_pfn 0x%llx pages %d\n",
-	//	vcpu->vcpu_id, pfn, private_mem_page->private_pfn, vcpu->arch.nr_private_pages);
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
 
 	/* Add it to the list */
@@ -2888,32 +2877,11 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			if (vcpu->is_recording && kvm_record_separate_mem &&
 				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
 				if (!write) {
-					// print_record("read_trap: vcpu %d gfn 0x%lx pfn 0x%lx spte 0x%lx\n",
-					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep);
 				} else {
-					//printk(KERN_ERR "write_trap: vcpu %d gfn 0x%llx pfn 0x%llx spte 0x%llx pages=%d\n",
-					// 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep, vcpu->arch.nr_private_pages);
-					//printk(KERN_ERR "XELATEX - memslot_id=%x\n", memslot_id(vcpu->kvm, gfn));
-
-					//if (memslot_id(vcpu->kvm, gfn) == 8) {
 						kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
 						kvm_mmu_flush_tlb(vcpu);
-					//}
 				}
 			}
-
-/*
-			if (kvm_record) {
-				if (vcpu->is_recording && kvm_record_separate_mem &&
-					likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep))
-				if (write)
-				if (memslot_id(vcpu->kvm, gfn) != 8) {
-					printk(KERN_ERR "XELATEX - %s, %d, vcpu %d gfn 0x%llx pfn 0x%llx spte 0x%llx memslot=%d\n",
-						__func__, __LINE__,
-					 	vcpu->vcpu_id, gfn, pfn, *iterator.sptep, memslot_id(vcpu->kvm, gfn));
-				}
-			}
-*/
 			break;
 		}
 
@@ -2962,71 +2930,20 @@ static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, 
 	}
 }
 
-#if 0
-static void __mmu_walk_spt_fast(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int top_level)
-{
-	u64 index[PT64_ROOT_LEVEL + 2] = {0};
-	gpa_t gpa[PT64_ROOT_LEVEL + 2] = {0};
-	hpa_t addr[PT64_ROOT_LEVEL + 2] = {0};
-	u64 *sptep;
-	int level = top_level;
-
-	if (level < PT_PAGE_TABLE_LEVEL)
-		return;
-
-	addr[top_level + 1] = shadow_addr;
-	gpa[top_level + 1] = 0;
-	while (level <= top_level) {			
-		while (index[level] < PT64_NR_PT_ENTRY) {
-			sptep = ((u64 *)__va(addr[level+1])) + index[level];
-			if (is_shadow_present_pte(*sptep)) {
-				addr[level] = *sptep & PT64_BASE_ADDR_MASK;
-				gpa[level] = SHADOW_PT_ADDR(gpa[level+1], index[level], level);
-				if (!is_last_spte(*sptep, level)) {
-					index[level]++;
-					level --;
-					continue;
-				}
-				if (kvm_record_print_log)
-					__mmu_print_AD_bit(vcpu, sptep, gpa[level], addr[level]);
-				__mmu_set_AD_bit(vcpu, sptep, gpa[level], addr[level]);
-/*				if (*sptep & VMX_EPT_DIRTY_BIT || *sptep & VMX_EPT_ACCESS_BIT) {
-					set_bit(gpa[level] >> PAGE_SHIFT, vcpu->access_bitmap);
-					vcpu->access_size = (gpa[level] >> PAGE_SHIFT) + 1;
-					if (*sptep & VMX_EPT_DIRTY_BIT) {
-						set_bit(gpa[level] >> PAGE_SHIFT, vcpu->dirty_bitmap);
-						vcpu->dirty_size = (gpa[level] >> PAGE_SHIFT) + 1;
-					}
-				}
-				*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT); */
-			}
-			index[level]++;
-		}
-		index[level] = 0;
-		level++;
-	}
-}
-#endif
-
 static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 {
 	int level = vcpu->arch.mmu.shadow_root_level;
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
 
 	if (level != PT64_ROOT_LEVEL) {
-		printk(KERN_ERR "XELATEX - NO PT64_ROOT_LEVEL support\n");
+		printk(KERN_ERR "error - NO PT64_ROOT_LEVEL support\n");
 		return;
 	}
 	if (vcpu->arch.mmu.root_level < PT64_ROOT_LEVEL &&
 			!vcpu->arch.mmu.direct_map)
 		--level;
-	//if (kvm_record_print_log)
-	//	printk(KERN_ERR "XELATEX - mmu spt info\n");
 
-	//print_record("XELATEX - first\n");
 	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
-	//print_record("XELATEX - second\n");
-	//__mmu_walk_spt_fast(vcpu, shadow_addr, level);
 }
 
 static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
@@ -3034,32 +2951,18 @@ static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
 	struct kvm *kvm = vcpu->kvm;
 	struct kvm_memory_slot *slot;
 	struct kvm_shadow_walk_iterator iterator;
-	//struct kvm_mmu_page *sp = NULL;
-	//bool get_sp = false;
 	gfn_t gfn;
 	u64 spte;
 	pfn_t pfn;
 	u64 *sptep;
 
-	//if (kvm_record_print_log)
-	//	printk(KERN_ERR "XELATEX - slot spt info\n");
 	kvm_for_each_memslot(slot, kvm->memslots) {
 	if (kvm_record_print_log)
-		//printk(KERN_ERR "\tXELATEX -slot, id=%u, base_gfn=0x%llx, npages=%lu\n",
-		//	slot->id, slot->base_gfn, slot->npages);
 		for (gfn = slot->base_gfn; gfn < slot->base_gfn+slot->npages; gfn++) {
 			for_each_shadow_entry_lockless(vcpu, (u64)gfn << PAGE_SHIFT, iterator, spte) {
 				sptep = iterator.sptep;
 				if (!is_shadow_present_pte(*sptep))
 					break;
-//				get_sp = false;
-//				for_each_gfn_sp(vcpu->kvm, sp, gfn) {
-//					if (is_obsolete_sp(vcpu->kvm, sp) || sp->vcpu != vcpu)
-//						continue;
-//					get_sp = true;
-//					break;
-//				}
-//				if (!get_sp) break;
 				if (iterator.level == level && is_shadow_present_pte(*iterator.sptep)) {
 					pfn = (*iterator.sptep & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT;
 					if (kvm_record_print_log) {
@@ -3073,9 +2976,6 @@ static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
 							else if (*sptep & VMX_EPT_ACCESS_BIT)
 								print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
 										pfn, gfn);
-							//else
-							//	print_record("\tU pfn = 0x%llx gfn = 0x%llx\n",
-							//			pfn, gfn);
 						}
 					}
 					break;

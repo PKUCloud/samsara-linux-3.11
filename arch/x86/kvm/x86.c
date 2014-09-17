@@ -2801,7 +2801,6 @@ static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
 {
 	struct kvm_lapic_state *lapic = s->regs;
 	vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
-	//print_record("highest_isr = %d\n", s->highest_isr_cache);
 	kvm_apic_post_state_restore(vcpu, lapic);
 	update_cr8_intercept(vcpu);
 
@@ -5890,39 +5889,13 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	int i, print_count;
 
 restart:
-
-	/*if (kvm_record){
-		print_count = 0;
-		for (i=0; i<8; i++)
-			if( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) || 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-				print_count = 1;
-		if (print_count){
-			print_record("after restart:  ");
-			print_record("ISR:  ");
-			
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) )
-					print_record("[%d]=0x%8x  ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
-			print_record("IRR:  ");
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-					print_record("[%d]=0x%8x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
-			print_record("APIC_PROCPRI=0x%x , ", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-			print_record("APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
-		}
-		//printk("after restart!\n");
-	}*/
-	
 	if (vcpu->requests) {	// Check if there is any requests which are not handled.
 		// XELATEX
-		//printk("before enter -- Check request\n");
-		
 		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
-			//printk(KERN_ERR "XELATEX - get request KVM_REQ_RECORD");
 			if (kvm_x86_ops)
 				kvm_x86_ops->tm_commit(vcpu, 0);
 			else
-				printk(KERN_ERR "XELATEX - ERROR - kvm_x86_ops->tm_commit=NULL\n");
+				printk(KERN_ERR "XELATEX - error - kvm_x86_ops->tm_commit=NULL\n");
 		}
 		if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu))
 			kvm_mmu_unload(vcpu);
@@ -5946,12 +5919,12 @@ restart:
 			r = 0;
 			goto out;
 		}
-		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {	// deal with triple fault? exit to qemu to reboot? these triple fault means the fault happens in KVM (eg. during deliver interrupt)?
+		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 			r = 0;
-			print_record("TRIPLE_FAULT_ERROR! Disable kvm_record\n");
+			print_record("error: TRIPLE_FAULT_ERROR! Disable kvm_record\n");
 			kvm_record = false;
-			printk("TRIPLE_FAULT_ERROR! kvm_record = false\n");
+			printk("error: TRIPLE_FAULT_ERROR! kvm_record = false\n");
 			goto out;
 		}
 
@@ -5981,62 +5954,22 @@ restart:
 	if (kvm_record && vcpu->need_chkpt) {		// make checkpoint
 		mutex_lock(&(vcpu->events_list_lock));
 		vcpu_checkpoint(vcpu);
-		//printk("before enter -- vcpu_checkpoint\n");
 
-		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {		//delete all events in the event list because it already be committed
+		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
 			list_del(&(e->link));
 			kfree(e);
-			print_record("XELATEX - %s, %d, commit-- delete events, delivery_mode=%d, vector=%d\n"
-						, __func__, __LINE__, e->delivery_mode, e->vector);
 		}
 		mutex_unlock(&(vcpu->events_list_lock));
 	}
 
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
-
-		//printk("before enter -- found: KVM_REQ_EVENT \n");
-
-		kvm_apic_accept_events(vcpu);								// Check if inject an event?
+		kvm_apic_accept_events(vcpu);
 		if (vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
 			r = 1;
 			goto out;
 		}
 
-		/*if (kvm_record){
-			//print_record("\t XELATEX - %s, %d, priority, apic prio=0x%x.\n",
-			//		__func__, __LINE__, kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-			print_count = 0;
-			for (i=0; i<8; i++)
-				if( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) || 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-					print_count = 1;
-			if (print_count){
-				print_record("before injected:   ");
-				print_record("ISR:   ");
-				for (i=0; i<8; i++)
-					if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) )
-						print_record("[%d]=0x%8x   ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
-				print_record("IRR:   ");
-				for (i=0; i<8; i++)
-					if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-						print_record("[%d]=0x%8x   ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
-				print_record("APIC_PROCPRI=0x%x , ", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-				print_record("APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
-
-			}
-		}*/
-
-		r = inject_pending_event(vcpu);										//inject pending events that recived from last vmentre to vmexit
-
-		/*if (kvm_record){
-			print_record("vcpu->request=%lu \n ", vcpu->requests);
-			if (r==0)
-				print_record("0 = inject_pending_event\n");
-			else{
-				print_record("XELATEX - %s, %d, inject_pending_event=%d\n", __func__, __LINE__, r);
-				print_record("arch.interrupt.pending=%d, arch.interrupt.soft=%d, arch.interrupt.nr=%d \n",vcpu->arch.interrupt.pending, vcpu->arch.interrupt.soft, vcpu->arch.interrupt.nr );
-			}
-
-		}*/
+		r = inject_pending_event(vcpu);
 
 		/* enable NMI/IRQ window open exits if needed */
 		if (vcpu->arch.nmi_pending)
@@ -6059,30 +5992,28 @@ restart:
 		}
 	}
 
-	r = kvm_mmu_reload(vcpu);					// Load VM memory page table
+	r = kvm_mmu_reload(vcpu);	// Load VM memory page table
 	if (unlikely(r)) {
 		goto cancel_injection;
 	}
 
 	preempt_disable();
 
-	kvm_x86_ops->prepare_guest_switch(vcpu);	// Actually, kvm_x86_ops->vmx_save_host_state(). Save host machine state including fs and gs segment selector
+	kvm_x86_ops->prepare_guest_switch(vcpu);
 
 
 	if (vcpu->fpu_active)
 		kvm_load_guest_fpu(vcpu);
-	kvm_load_guest_xcr0(vcpu);				// Check CR4.OSXSAVE feature.
+	kvm_load_guest_xcr0(vcpu);	// Check CR4.OSXSAVE feature.
 
 	vcpu->mode = IN_GUEST_MODE;
 
 	/* We should set ->mode before check ->requests,
 	 * see the comment in make_all_cpus_request.
 	 */
-	smp_mb();		 // Guess: this is used to lock other CPU in order to force strict CPU 
+	smp_mb();
 
 	local_irq_disable();
-
-
 
 	if (vcpu->mode == EXITING_GUEST_MODE || vcpu->requests
 	    || need_resched() || signal_pending(current)) {
@@ -6093,18 +6024,17 @@ restart:
 		r = 1;
 
 		if (kvm_record)
-			print_record("!!Enter failed!! vcpu->mode=%d || vcpu->requests=%lu || need_resched=%d || signal_pending(current)=%d\n"
-						, vcpu->mode, vcpu->requests, need_resched(), signal_pending(current));
-		
+			print_record("error: enter fail vcpu->mode=%d || vcpu->requests=%lu || need_resched=%d || signal_pending(current)=%d\n"
+				     , vcpu->mode, vcpu->requests, need_resched(), signal_pending(current));
 		goto cancel_injection;
 	}
 
-	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);		// RCU is a synchronization mechanism added to linux kernel during 2.5
+	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx); // RCU is a synchronization mechanism added to linux kernel during 2.5
 
 	if (req_immediate_exit)
 		smp_send_reschedule(vcpu->cpu);
 
-	kvm_guest_enter();		// Guess: this is RCU and scheduling related.
+	kvm_guest_enter(); // Guess: this is RCU and scheduling related.
 
 	if (unlikely(vcpu->arch.switch_db_regs)) {
 		set_debugreg(0, 7);
@@ -6170,44 +6100,20 @@ restart:
 	if (kvm_record || vcpu->is_recording) {
 		vcpu->need_chkpt = 0;
 
-		/*print_count = 0;
-		for (i=0; i<8; i++)
-			if( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) || 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-				print_count = 1;
-		if (print_count){
-			print_record("before exit:   ");
-			print_record("ISR:  ");
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) )
-					print_record("[%d]=0x%8x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
-			print_record("IRR:   ");
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-					print_record("[%d]=0x%8x  ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
-			print_record("APIC_PROCPRI=0x%x , ", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-			print_record("APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
-
-		}*/
-
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		// Only for test
 		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR)
 			r = ((++vcpu->nr_test) % 2 == 0);
 		if (r == KVM_RR_COMMIT) {
 			print_record("KVM_RR_COMMIT\n");
-			//printk("after exit -- KVM_RR_COMMIT\n");
-
 			kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
 		}
 		else if (r == KVM_RR_ROLLBACK) {
 			print_record("KVM_RR_ROLLBACK\n");
-			//printk("after exit -- KVM_RR_ROLLBACK\n");
-
 			kvm_x86_ops->tm_memory_rollback(vcpu);
 				
 			vcpu_rollback(vcpu);
-			//printk("after exit -- vcpu_rollback\n");
 
 			//rsr-debug
 			mutex_lock(&(vcpu->events_list_lock));
@@ -6216,7 +6122,7 @@ restart:
 				r = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
 						e->vector, e->level, e->trig_mode, e->dest_map);
 				print_record("rollback--add events delivery_mode=%d, vector=%d, result=%d\n",
-						e->delivery_mode, e->vector, r);
+					     e->delivery_mode, e->vector, r);
 			}
 			mutex_unlock(&(vcpu->events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);

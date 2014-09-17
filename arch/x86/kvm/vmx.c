@@ -5803,10 +5803,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		private = pfn_to_kaddr(private_page->private_pfn);
 		copy_page(origin, private);
 
-		//print_record("commit: vcpu %d orgin_pfn 0x%llx private_pfn 0x%llx pages %d\n",
-		//	vcpu->vcpu_id, private_page->original_pfn,
-		//	private_page->private_pfn, i++);
-
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 
 		kfree(private);
@@ -5860,32 +5856,15 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 
 		mutex_lock(&(kvm->tm_lock));
-		//if (!(kvm->timestamp % 1000))
-			print_record("XELATEX - vcpu=%d, timestamp=%llu =====================================================\n",
-					vcpu->vcpu_id, kvm->timestamp);
-
-		/*
-		if (kvm_record_separate_mem) {
-			print_record("tm_unsync_commit: vcpu %d timestamp %llu =======================\n",
-				vcpu->vcpu_id, kvm->timestamp);
-
-			tm_memory_commit(vcpu);
-
-			print_record("-----------------------------------------------\n");
-		}
-		*/
-
 
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
 			// Detect conflict
 			if (tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
-				//print_record("XELATEX - conflict, vcpu=%d\n", vcpu->vcpu_id);
 				commit = 0;
 				vcpu->nr_conflict++;
 			}
 			// Clear conflict bitmap
 			bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
-			//vcpu->conflict_size = 1;
 		}
 
 		if (commit) {
@@ -5895,8 +5874,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 					continue;
 				bitmap_or(kvm->vcpus[i]->conflict_bitmap, vcpu->dirty_bitmap,
 					kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
-				//if (kvm->vcpus[i]->conflict_size < vcpu->dirty_size + 1)
-				//	kvm->vcpus[i]->conflict_size = vcpu->dirty_size + 1;
 			}
 
 			// Set last commit vcpu
@@ -5945,25 +5922,6 @@ EXPORT_SYMBOL_GPL(tm_unsync_commit);
 // XELATEX
 static int handle_preemption(struct kvm_vcpu *vcpu)
 {
-
-	//kvm_vcpu_checkpoint_rollback rsr
-	//1 TODO: just for debug
-	/*
-	if (vcpu->check_rollback == 100){
-		vcpu_rollback(vcpu);
-		vcpu->check_rollback = 0;
-	}
-	else
-		make_vcpu_checkpoint(vcpu);
-	vcpu->check_rollback++;
-	*/
-	//end kvm_vcpu_checkpoint_rollback rsr
-	
-	//if (kvm_record_type == KVM_RECORD_PREEMPTION)
-	//	return tm_commit(vcpu, 1);
-	//else if (kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION)
-	//	return tm_unsync_commit(vcpu, 1);
-	//else return 1;
 	return 1;
 }
 
@@ -7092,16 +7050,6 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 			&& atomic_read(&(record_kvm->tm_trap_count)))
 		kvm_make_request(KVM_REQ_RECORD, vcpu);
 
-	// XELATEX
-	if (kvm_record){
-		print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
-				__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
-		
-		/*if (exit_reason == 2){
-			print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
-					__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
-		}*/
-	}
 	/* If guest state is invalid, start emulating */
 	if (vmx->emulation_required)
 		return handle_invalid_guest_state(vcpu);
@@ -7206,79 +7154,28 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 
 	// First time
 	if (!vcpu->is_recording) {
-		print_record("XELATEX - First time to check rr commit\n");
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
-			printk(KERN_ERR "XELATEX - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
+			printk(KERN_ERR "error: - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
 		}
 		return KVM_RR_COMMIT;
 	}
-#if 0
-	if (exit_reason == EXIT_REASON_PREEMPTION_TIMER) {
-		print_record("XELATEX - check reason : Preemption\n");
-		ret = vmx_tm_commit(vcpu);
-		if (ret == -1) {
-			printk(KERN_ERR "XELATEX - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
-		} else if (ret == 1)
-			return KVM_RR_COMMIT;
-		else
-			return KVM_RR_ROLLBACK;
-	}
-#endif
-#if 0
-	if (kvm_check_request(KVM_REQ_EVENT, vcpu)) {
-		print_record("XELATEX - check reason : event\n");
-		kvm_make_request(KVM_REQ_EVENT, vcpu);
-		ret = vmx_tm_commit(vcpu);
-		if (ret == -1) {
-			printk(KERN_ERR "XELATEX - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
-		} else if (ret == 1)
-			return KVM_RR_COMMIT;
-		else
-			return KVM_RR_ROLLBACK;
-	}else {
-#endif
-		if (exit_reason == EXIT_REASON_IO_INSTRUCTION)
-			print_record("XELATEX - check reason : IO\n");
-		else if (exit_reason == EXIT_REASON_EPT_MISCONFIG)
-			print_record("XELATEX - check reason : MMIO\n");
-		else if (exit_reason == EXIT_REASON_PREEMPTION_TIMER)
-			print_record("XELATEX - check reason : Preemption\n");
-		//else if (exit_reason == EXIT_REASON_PENDING_INTERRUPT)
-		//	print_record("XELATEX - check reason : Interrupt Window\n");
-		//else if (exit_reason == EXIT_REASON_NMI_WINDOW)
-		//	print_record("XELATEX - check reason : NMI Window\n");
-		//else if (exit_reason == EXIT_REASON_EXTERNAL_INTERRUPT)
-		//	print_record("XELATEX - check reason : External Interrupt\n");
-		//else if (exit_reason == EXIT_REASON_EXCEPTION_NMI)
-		//	print_record("XELATEX - check reason : Exception or NMI\n");
 
-		switch (exit_reason) {
-		/* IO */
-		case EXIT_REASON_IO_INSTRUCTION:
-		/* MMIO */
-		case EXIT_REASON_EPT_MISCONFIG:
-		/* PREEMPTION */
-		case EXIT_REASON_PREEMPTION_TIMER:
-		///* Interrupt Window */
-		//case EXIT_REASON_PENDING_INTERRUPT:
-		///* NMI Window */
-		//case EXIT_REASON_NMI_WINDOW:
-		///* External Interrupt */
-		//case EXIT_REASON_EXTERNAL_INTERRUPT:
-		///* Exception or NMI */
-		//case EXIT_REASON_EXCEPTION_NMI:
-			ret = vmx_tm_commit(vcpu);
-			if (ret == -1) {
-				printk(KERN_ERR "XELATEX - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
-			} else if (ret == 1)
-				return KVM_RR_COMMIT;
-			else
-				return KVM_RR_ROLLBACK;
-		}
-#if 0
+	switch (exit_reason) {
+	/* IO */
+	case EXIT_REASON_IO_INSTRUCTION:
+	/* MMIO */
+	case EXIT_REASON_EPT_MISCONFIG:
+	/* PREEMPTION */
+	case EXIT_REASON_PREEMPTION_TIMER:
+		ret = vmx_tm_commit(vcpu);
+		if (ret == -1) {
+			printk(KERN_ERR "error: - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
+		} else if (ret == 1)
+			return KVM_RR_COMMIT;
+		else
+			return KVM_RR_ROLLBACK;
 	}
-#endif
 	return KVM_RR_SKIP;
 }
 
