@@ -426,7 +426,6 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		msrs[n++].index = MSR_IA32_TSCDEADLINE;
 		msrs[n++].index = MSR_IA32_MISC_ENABLE;
 
-		//do we need to record timestamp?
 		msrs[n++].index = MSR_IA32_TSC;
 
 #ifdef CONFIG_X86_64
@@ -457,9 +456,10 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		  *The hypervisor is only guaranteed to update this data at the moment of MSR write.
 		  *Note that although MSRs are per-CPU entities, the effect of this particular MSR is global.
 		  */
-		msrs[n++].index = MSR_KVM_WALL_CLOCK_NEW;
+		//1 rsr-debug just for debugging
+		//msrs[n++].index = MSR_KVM_WALL_CLOCK_NEW;
 		//same as MSR_KVM_SYSTEM_TIME_NEW. Use that instead.
-		msrs[n++].index = MSR_KVM_SYSTEM_TIME_NEW;
+		//msrs[n++].index = MSR_KVM_SYSTEM_TIME_NEW;
 		if (kvm_has_feature(KVM_FEATURE_ASYNC_PF)) {
 			msrs[n++].index = MSR_KVM_ASYNC_PF_EN;
 		}

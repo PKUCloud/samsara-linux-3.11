@@ -318,6 +318,9 @@ struct kvm_vcpu {
 	int need_chkpt;
 	int nr_test;
 
+	int need_memory_commit;
+	int rr_state;
+
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
 	int check_rollback;

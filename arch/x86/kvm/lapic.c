@@ -421,7 +421,8 @@ int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq,
 
 static int pv_eoi_put_user(struct kvm_vcpu *vcpu, u8 val)
 {
-
+	if (kvm_record)
+		print_record("pv_eoi_put_user() gpa 0x%llx\n", vcpu->arch.pv_eoi.data.gpa);
 	return kvm_write_guest_cached(vcpu, &vcpu->arch.pv_eoi.data, &val,
 				      sizeof(val));
 }
@@ -475,8 +476,6 @@ static inline int apic_find_highest_isr(struct kvm_lapic *apic)
 	if (!apic->isr_count)
 		return -1;
 	if (likely(apic->highest_isr_cache != -1)){
-		if (kvm_record)
-			print_record("   apic->highest_isr_cache = %d   ", apic->highest_isr_cache);
 		return apic->highest_isr_cache;
 	}
 
@@ -702,7 +701,6 @@ int __rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			}
 
 			kvm_make_request(KVM_REQ_EVENT, vcpu);
-			if (kvm_record) print_record("%s, vector=%d\n", __func__, vector);
 			kvm_vcpu_kick(vcpu);
 		}
 out:
@@ -1618,9 +1616,6 @@ int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 	highest_irr = apic_find_highest_irr(apic);
 	if ((highest_irr == -1) ||
 	    ((highest_irr & 0xF0) <= kvm_apic_get_reg(apic, APIC_PROCPRI))) {
-	    if (kvm_record && highest_irr != -1)
-			print_record("XELATEX-error - %s, %d, priority, highest_irr=%d, irr prio=0x%x, apic prio=0x%x.\n",
-					__func__, __LINE__, highest_irr, highest_irr & 0xF0, kvm_apic_get_reg(apic, APIC_PROCPRI));
 		return -1;
 	}
 	return highest_irr;

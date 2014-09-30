@@ -99,6 +99,7 @@ EXPORT_SYMBOL_GPL(kvm_record_count);
 int kvm_record_separate_mem;
 EXPORT_SYMBOL_GPL(kvm_record_separate_mem);
 
+extern int print_record(const char* fmt, ...);
 
 static __read_mostly struct preempt_ops kvm_preempt_ops;
 
@@ -1474,18 +1475,12 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 		if (kaddr == NULL) {
 			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
 					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			//return -EFAULT;
-			//rsr-debug
-			dump_stack();
-			//end rsr-debug
-			goto normal;
+			return -EFAULT;
 		}
 		memcpy(data, kaddr + offset, len);
 		return 0;
 	}
 
-normal:
-	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 	addr = gfn_to_hva_read(kvm, gfn);
 	if (kvm_is_error_hva(addr)) {
 		printk(KERN_ERR "XELATEX - %s normal fault, is error hva.\n", __func__);
@@ -1571,22 +1566,19 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 	void *kaddr;
 
 	if (kvm_record) {
+		if (vcpu->rr_state == 1) {
+			print_record("kvm_write_guest_page()\n");
+		}
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
 		if (kaddr == NULL) {
 			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
 					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			//rsr-debug
-			dump_stack();
-			//end rsr-debug
-			//return -EFAULT;
-			goto normal;
+			return -EFAULT;
 		}
 		memcpy(kaddr + offset, data, len);
 		return 0;
 	}
 
-normal:
-	//if(kvm_record) printk(KERN_ERR "%s, %d\n", __func__, __LINE__);
 	return kvm_write_guest_page_kvm(kvm, gfn, data, offset, len);
 }
 EXPORT_SYMBOL_GPL(kvm_write_guest_page);

@@ -2751,6 +2751,15 @@ void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn)
 }
 EXPORT_SYMBOL_GPL(kvm_record_spte_set_pfn);
 
+void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn)
+{
+	u64 spte;
+
+	spte = *sptep;
+	ASSERT(pfn == ((spte & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT));
+}
+EXPORT_SYMBOL_GPL(kvm_record_spte_check_pfn);
+
 /* Tamlok
  * Just add write trap page to vcpu->arch.private_pages, not replacing it
  * with private page yet.
@@ -2808,16 +2817,23 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 {
 	void *new_page;
 	struct kvm_private_mem_page *private_mem_page;
+	u64 old_spte;
 
+	if (vcpu->rr_state == 1) {
+		print_record("warning: cow after memory commit\n");
+	}
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
 	new_page = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
 	copy_page(new_page, pfn_to_kaddr(pfn));
-
+	old_spte = *sptep;
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
 
+	print_record("memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte 0x%llx "
+				 "pfn 0x%llx\n", vcpu->arch.nr_private_pages, old_spte, pfn,
+				 *sptep, private_mem_page->private_pfn);
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages++;
@@ -2997,6 +3013,215 @@ static int tm_walk_mmu(struct kvm_vcpu *vcpu, int level)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(tm_walk_mmu);
+
+void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu)
+{
+	struct kvm_pte_page *pp;
+	struct kvm_pte_page *temp;
+	int count = 0;
+
+	if (list_empty(&vcpu->arch.ept_mirror))
+		return;
+	list_for_each_entry_safe(pp, temp, &vcpu->arch.ept_mirror,
+		link) {
+		if (!pp || !(pp->page)) {
+			printk(KERN_ERR "%s pp or pp->page is NULL\n", __func__);
+			return;
+		}
+		list_del(&pp->link);
+		kfree(pp->page);
+		kfree(pp);
+		count++;
+	}
+	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);
+	print_record("kvm_record_clear_ept_mirror %d items\n", count);
+}
+EXPORT_SYMBOL_GPL(kvm_record_clear_ept_mirror);
+
+static void kvm_record_ept_mirror_insert(struct kvm_vcpu *vcpu, gpa_t gpa,
+	u64 spte, hpa_t page_addr)
+{
+	struct kvm_pte_page *pte_page;
+	void *page;
+
+	pte_page = kmalloc(sizeof(*pte_page), GFP_KERNEL);
+	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!pte_page || !page) {
+		printk(KERN_ERR "%s fail to kmalloc for page or pte_page\n", __func__);
+		return;
+	}
+	pte_page->gpa = gpa;
+	pte_page->spte = spte;
+	copy_page(page, __va(page_addr));
+	pte_page->page = page;
+	list_add_tail(&pte_page->link, &vcpu->arch.ept_mirror);
+}
+
+static void __mmu_walk_spt_mirror(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
+	int level, gpa_t gpa)
+{
+	u64 index;
+	gpa_t new_gpa;
+	hpa_t new_addr;
+	u64 *sptep;
+
+	if (level < PT_PAGE_TABLE_LEVEL)
+		return;
+	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (!is_shadow_present_pte(*sptep))
+			continue;
+		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
+		new_addr = *sptep & PT64_BASE_ADDR_MASK;
+		if (is_last_spte(*sptep, level)) {
+			kvm_record_ept_mirror_insert(vcpu, new_gpa, *sptep, new_addr);
+		} else
+			__mmu_walk_spt_mirror(vcpu , new_addr, level - 1, new_gpa);
+	}
+}
+
+/* Make an mirror of ept and contents of the page */
+void kvm_record_make_ept_mirror(struct kvm_vcpu *vcpu)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+
+	if (shadow_addr == INVALID_PAGE) {
+		printk(KERN_ERR "%s mmu.root_hpa==INVALID_PAGE\n", __func__);
+		return;
+	}
+	kvm_record_clear_ept_mirror(vcpu);
+	__mmu_walk_spt_mirror(vcpu, shadow_addr, level, 0);
+}
+EXPORT_SYMBOL_GPL(kvm_record_make_ept_mirror);
+
+static bool __compare_page(void *page_a, void *page_b)
+{
+	int i;
+	char *a = page_a;
+	char *b = page_b;
+
+	for (i = 0; i < PAGE_SIZE; ++i) {
+		if (a[i] != b[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/* Must call this function with gpa in ascending order */
+static void kvm_record_ept_mirror_check_one(struct kvm_vcpu *vcpu, gpa_t gpa,
+	u64 spte, hpa_t page_addr)
+{
+	struct kvm_pte_page *pte_page;
+	struct kvm_pte_page *temp;
+	void *page;
+
+	if (list_empty(&vcpu->arch.ept_mirror)) {
+		print_record("error: mirror has no item with gpa 0x%llx spte 0x%llx\n",
+			gpa, spte);
+		return;
+	}
+
+	list_for_each_entry_safe(pte_page, temp, &vcpu->arch.ept_mirror, link) {
+		if (pte_page->gpa == gpa) {
+			list_del(&pte_page->link);
+			if (pte_page->spte != spte) {
+				print_record("error: gpa 0x%llx mapped spte 0x%llx in mirror but "
+					"0x%llx now\n", gpa, pte_page->spte, spte);
+			} else {
+				page = __va(page_addr);
+				if (!__compare_page(pte_page->page, page)) {
+					print_record("error: content of the page mismatch gpa "
+						"0x%llx spte 0x%llx\n", gpa, spte);
+				}
+			}
+
+			/* Free memory */
+			kfree(pte_page->page);
+			kfree(pte_page);
+			return;
+		} else if (pte_page->gpa < gpa) {
+			list_del(&pte_page->link);
+			print_record("error: mismatch item in mirror gpa 0x%llx spte "
+				"0x%llx\n", pte_page->gpa, pte_page->spte);
+			kfree(pte_page->page);
+			kfree(pte_page);
+		} else {
+			print_record("error: mirror has no item with gpa 0x%llx "
+						 "spte 0x%llx\n", gpa, spte);
+			return;
+		}
+	}
+}
+
+static void __mmu_walk_spt_check(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
+	int level, gpa_t gpa)
+{
+	u64 index;
+	gpa_t new_gpa;
+	hpa_t new_addr;
+	u64 *sptep;
+
+	if (level < PT_PAGE_TABLE_LEVEL)
+		return;
+	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (!is_shadow_present_pte(*sptep))
+			continue;
+		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
+		new_addr = *sptep & PT64_BASE_ADDR_MASK;
+		if (is_last_spte(*sptep, level)) {
+			kvm_record_ept_mirror_check_one(vcpu, new_gpa, *sptep, new_addr);
+		} else
+			__mmu_walk_spt_check(vcpu , new_addr, level - 1, new_gpa);
+	}
+}
+
+/* Check if the ept is identical to the mirror made before */
+void kvm_record_check_ept_mirror(struct kvm_vcpu *vcpu)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+
+	print_record("kvm_record_check_ept_mirror()\n");
+	__mmu_walk_spt_check(vcpu, shadow_addr, level, 0);
+}
+EXPORT_SYMBOL_GPL(kvm_record_check_ept_mirror);
+
+static void __mmu_walk_spt_clean(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
+	int level, gpa_t gpa)
+{
+	u64 index;
+	gpa_t new_gpa;
+	hpa_t new_addr;
+	u64 *sptep;
+
+	if (level < PT_PAGE_TABLE_LEVEL)
+		return;
+	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (!is_shadow_present_pte(*sptep))
+			continue;
+		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
+		new_addr = *sptep & PT64_BASE_ADDR_MASK;
+		if (is_last_spte(*sptep, level)) {
+			*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
+			*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
+		} else
+			__mmu_walk_spt_clean(vcpu , new_addr, level - 1, new_gpa);
+	}
+}
+
+void kvm_record_clean_ept(struct kvm_vcpu *vcpu)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+
+	print_record("kvm_record_clean_ept()\n");
+	__mmu_walk_spt_clean(vcpu, shadow_addr, level, 0);
+}
+EXPORT_SYMBOL_GPL(kvm_record_clean_ept);
 
 static void kvm_send_hwpoison_signal(unsigned long address, struct task_struct *tsk)
 {
@@ -3191,7 +3416,9 @@ exit:
 	trace_fast_page_fault(vcpu, gva, error_code, iterator.sptep,
 			      spte, ret);
 	walk_shadow_page_lockless_end(vcpu);
-
+	if (kvm_record && ret) {
+		print_record("waring: fast_page_fault() gpa 0x%llx\n", gva);
+	}
 	return ret;
 }
 
@@ -3627,6 +3854,7 @@ static int kvm_arch_setup_async_pf(struct kvm_vcpu *vcpu, gva_t gva, gfn_t gfn)
 {
 	struct kvm_arch_async_pf arch;
 
+	print_record("kvm_arch_setup_async_pf()\n");
 	arch.token = (vcpu->arch.apf.id++ << 12) | vcpu->vcpu_id;
 	arch.gfn = gfn;
 	arch.direct_map = vcpu->arch.mmu.direct_map;
@@ -3754,7 +3982,6 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		return (void *)INVALID_PAGE;
 	}
 
-	//printk(KERN_ERR "addr=0x%llx\n", addr);
 	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
@@ -3763,19 +3990,24 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
 				index, sptep, shadow_addr, __va(shadow_addr), level,
 				vcpu->arch.mmu.root_hpa);
-		//printk(KERN_ERR "index=0x%x, sptep=0x%llx, *sptep=0x%llx, shadow_addr=0x%llx, va(shadow_addr)=0x%llx\n",
-		//		index, sptep, *sptep, shadow_addr, __va(shadow_addr));
 		if (!is_shadow_present_pte(*sptep)) {
-			//printk(KERN_ERR "XELATEX - %s, %d, spte=0x%llx\n", __func__, __LINE__, *sptep);
-			//dump_stack();
 			return NULL;
 		}
 		*sptep |= VMX_EPT_ACCESS_BIT;
-		if (level == PT_PAGE_TABLE_LEVEL || *sptep & PT_PAGE_SIZE_MASK) {
-			if (write)
+		if (is_last_spte(*sptep, level)) {
+			/*if (write)
 				*sptep |= PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE | PT_USER_MASK | VMX_EPT_DIRTY_BIT;
 			else
 				*sptep |= PT_USER_MASK;
+			*/
+			if (write) {
+				if (!(*sptep & PT_WRITABLE_MASK)) {
+					print_record("%s lack of PT_WRITABLE_MASK for gfn 0x%llx\n", __func__, gfn);
+					return NULL;
+				}
+				*sptep |= VMX_EPT_DIRTY_BIT;
+			}
+			print_record("gfn_to_kaddr_ept gfn 0x%llx spte 0x%llx write %d\n", gfn, *sptep, write);
 			return (u64 *)__va(*sptep & PT64_BASE_ADDR_MASK);
 		}
 		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
@@ -3791,18 +4023,23 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	int r;
 	u32 error_code = 0;
 
+	/*if (gfn ==  0x1fc0d) {
+		printk(KERN_INFO "gfn_to_kaddr_ept(gfn 0x1fc0d, write %d)\n", write);
+		dump_stack();
+	}*/
 	kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 	if (kaddr == NULL) {
 		if (write)
 			error_code |= PFERR_WRITE_MASK;
+		print_record("warning: go to tdp_page_fault() path in %s\n", __func__);
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
-			printk(KERN_ERR "XELATEX - %s, %d, tdp_page_fault2 error\n", __func__, __LINE__);
+			print_record("error: tdp_page_fault() fail in %s for gfn 0xllx\n", __func__, gfn);
 			return NULL;
 		}
 		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s, %d, __gfn_to_kaddr_ept error.\n", __func__, __LINE__);
+			print_record("error: %s fail for gfn 0x%llx\n", __func__, gfn);
 			return NULL;
 		}
 	}

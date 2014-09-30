@@ -1603,7 +1603,8 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 		pvclock_flags |= PVCLOCK_TSC_STABLE_BIT;
 
 	vcpu->hv_clock.flags = pvclock_flags;
-
+	if (kvm_record)
+		print_record("%s vcpu->pv_time gpa 0x%llx\n", __func__, vcpu->pv_time.gpa);
 	kvm_write_guest_cached(v, &vcpu->pv_time,
 				&vcpu->hv_clock,
 				sizeof(vcpu->hv_clock));
@@ -1947,7 +1948,8 @@ static void record_steal_time(struct kvm_vcpu *vcpu)
 	vcpu->arch.st.steal.steal += vcpu->arch.st.accum_steal;
 	vcpu->arch.st.steal.version += 2;
 	vcpu->arch.st.accum_steal = 0;
-
+	if (kvm_record)
+		print_record("record_steal_time() gpa 0x%llx\n", vcpu->arch.st.stime.gpa);
 	kvm_write_guest_cached(vcpu, &vcpu->arch.st.stime,
 		&vcpu->arch.st.steal, sizeof(struct kvm_steal_time));
 }
@@ -2800,7 +2802,7 @@ static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
 				    struct rsr_lapic *s)
 {
 	struct kvm_lapic_state *lapic = s->regs;
-	vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
+	//vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
 	kvm_apic_post_state_restore(vcpu, lapic);
 	update_cr8_intercept(vcpu);
 
@@ -5875,6 +5877,9 @@ static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 extern int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map);
+extern void kvm_record_make_ept_mirror(struct kvm_vcpu *vcpu);
+extern void kvm_record_check_ept_mirror(struct kvm_vcpu *vcpu);
+extern void kvm_record_clean_ept(struct kvm_vcpu *vcpu);
 
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
@@ -5884,9 +5889,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_immediate_exit = false;
 	struct rr_event *e;
 	struct rr_event *tmp;
-
-	struct kvm_lapic_state *s;
-	int i, print_count;
+	static u64 commit_count;
+	static int mirror_flag;
 
 restart:
 	if (vcpu->requests) {	// Check if there is any requests which are not handled.
@@ -5997,6 +6001,15 @@ restart:
 		goto cancel_injection;
 	}
 
+	/* Need to commit memory here */
+	if (kvm_record && vcpu->need_memory_commit) {
+		print_record("commit memory again------------------------\n");
+		kvm_record_clean_ept(vcpu);
+		kvm_x86_ops->tm_memory_commit(vcpu);
+		kvm_x86_ops->tlb_flush(vcpu);
+	}
+
+	vcpu->rr_state = 0;
 	preempt_disable();
 
 	kvm_x86_ops->prepare_guest_switch(vcpu);
@@ -6023,9 +6036,6 @@ restart:
 		preempt_enable();
 		r = 1;
 
-		if (kvm_record)
-			print_record("error: enter fail vcpu->mode=%d || vcpu->requests=%lu || need_resched=%d || signal_pending(current)=%d\n"
-				     , vcpu->mode, vcpu->requests, need_resched(), signal_pending(current));
 		goto cancel_injection;
 	}
 
@@ -6044,6 +6054,13 @@ restart:
 		set_debugreg(vcpu->arch.eff_db[3], 3);
 	}
 
+	if (kvm_record && mirror_flag == 1) {
+		mirror_flag = 0;
+		kvm_record_make_ept_mirror(vcpu);
+	}
+
+	if (kvm_record)
+		print_record("kvm_x86_ops->run(vcpu)\n");
 	trace_kvm_entry(vcpu->vcpu_id);
 	kvm_x86_ops->run(vcpu);
 
@@ -6080,6 +6097,8 @@ restart:
 
 	preempt_enable();
 
+	if (kvm_record)
+		print_record("exit---------------------\n");
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 	/*
@@ -6099,6 +6118,7 @@ restart:
 	// XELATEX
 	if (kvm_record || vcpu->is_recording) {
 		vcpu->need_chkpt = 0;
+		vcpu->rr_state = 0;
 
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		// Only for test
@@ -6108,11 +6128,15 @@ restart:
 			print_record("KVM_RR_COMMIT\n");
 			kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
+			commit_count++;
+			if (commit_count % 500 == 0) {
+				//mirror_flag = 1;
+			}
 		}
 		else if (r == KVM_RR_ROLLBACK) {
 			print_record("KVM_RR_ROLLBACK\n");
 			kvm_x86_ops->tm_memory_rollback(vcpu);
-				
+			vcpu->need_memory_commit = 0;
 			vcpu_rollback(vcpu);
 
 			//rsr-debug
@@ -6121,16 +6145,20 @@ restart:
 			list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
 				r = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
 						e->vector, e->level, e->trig_mode, e->dest_map);
-				print_record("rollback--add events delivery_mode=%d, vector=%d, result=%d\n",
-					     e->delivery_mode, e->vector, r);
 			}
 			mutex_unlock(&(vcpu->events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 			
+			if (commit_count % 500 == 0) {
+				//mirror_flag = 2;
+			}
+			if (kvm_record && mirror_flag == 2) {
+				mirror_flag = 0;
+				kvm_record_check_ept_mirror(vcpu);
+			}
 			goto restart;
 		}
 	}
-
 	r = kvm_x86_ops->handle_exit(vcpu);
 
 	if (vcpu->run->exit_reason == KVM_EXIT_SHUTDOWN){
@@ -7071,6 +7099,9 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	/* Tamlok */
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages = 0;
+	vcpu->need_memory_commit = 0;
+	vcpu->rr_state = 0;
+	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);
 
 	return 0;
 fail_free_wbinvd_dirty_mask:
@@ -7500,7 +7531,8 @@ static void kvm_del_async_pf_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 
 static int apf_put_user(struct kvm_vcpu *vcpu, u32 val)
 {
-
+	if (kvm_record)
+		print_record("apf_put_user() gpa 0x%llx\n", vcpu->arch.apf.data.gpa);
 	return kvm_write_guest_cached(vcpu, &vcpu->arch.apf.data, &val,
 				      sizeof(val));
 }

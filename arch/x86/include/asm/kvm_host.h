@@ -350,6 +350,13 @@ struct kvm_private_mem_page {
 	u64 *sptep;	/*Pointer of the spte that references this pfn */
 };
 
+/* Record spte, including gpa, spte and the content of the page */
+struct kvm_pte_page {
+	struct list_head link;
+	gpa_t gpa;
+	u64 spte;
+	void *page;
+};
 
 struct kvm_vcpu_arch {
 	/*
@@ -537,6 +544,8 @@ struct kvm_vcpu_arch {
 	/* Tamlok */
 	struct list_head private_pages;
 	int nr_private_pages;
+
+	struct list_head ept_mirror;	/* A mirror of the EPT and its content */
 };
 
 struct kvm_lpage_info {

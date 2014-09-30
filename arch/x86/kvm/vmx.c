@@ -5694,6 +5694,8 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 	return ret;
 }
 
+extern void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu);
+
 void tm_disable(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -5717,6 +5719,8 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	vcpu->access_size = 1;
 	vcpu->dirty_size = 1;
 	vcpu->conflict_size = 1;
+
+	kvm_record_clear_ept_mirror(vcpu);
 
 	up(&(kvm->tm_enter_sem));
 	for (i=0; i<online_vcpus - 1; i++)
@@ -5786,6 +5790,8 @@ int tm_unsync_init(void *opaque)
 }
 
 extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
+extern void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn);
+
 /* Tamlok
  * Commit the private pages to the original ones. Called when a quantum is
  * finished and can commit.
@@ -5795,16 +5801,26 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	struct kvm_private_mem_page *private_page;
 	struct kvm_private_mem_page *temp;
 	void *origin, *private;
+	u64 old_spte;
 
+	print_record("memory_commit() %d pages=====================\n",
+		     vcpu->arch.nr_private_pages);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
 		origin = pfn_to_kaddr(private_page->original_pfn);
 		private = pfn_to_kaddr(private_page->private_pfn);
 		copy_page(origin, private);
+		old_spte = *(private_page->sptep);
 
+		kvm_record_spte_check_pfn(private_page->sptep,
+					  private_page->private_pfn);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
-
+		print_record("memory_commit() spte 0x%llx pfn 0x%llx -> "
+			     "spte 0x%llx pfn 0x%llx\n",
+			     old_spte, private_page->private_pfn,
+			     *(private_page->sptep),
+			     private_page->original_pfn);
 		kfree(private);
 		list_del(&private_page->link);
 		kfree(private_page);
@@ -5824,11 +5840,22 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 {
 	struct kvm_private_mem_page *private_page;
 	struct kvm_private_mem_page *temp;
+	u64 old_spte;
 
+	print_record("memory_rollback() %d pages=====================\n",
+		     vcpu->arch.nr_private_pages);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
+		old_spte = *(private_page->sptep);
+		kvm_record_spte_check_pfn(private_page->sptep,
+					  private_page->private_pfn);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
+		print_record("memory_rollback() spte 0x%llx pfn 0x%llx -> "
+			     "spte 0x%llx pfn 0x%llx\n",
+			     old_spte, private_page->private_pfn,
+			     *(private_page->sptep),
+			     private_page->original_pfn);
 
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
@@ -7152,13 +7179,23 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	u32 exit_reason = vmx->exit_reason;
 	int ret;
 
+	vcpu->need_memory_commit = 0;
 	// First time
 	if (!vcpu->is_recording) {
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "error: - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
 		}
+		if (exit_reason == EXIT_REASON_IO_INSTRUCTION ||
+		    exit_reason == EXIT_REASON_EPT_MISCONFIG)
+			vcpu->need_memory_commit = 1;
 		return KVM_RR_COMMIT;
+	}
+
+	if (exit_reason == EXIT_REASON_IO_INSTRUCTION) {
+		print_record("EXIT_REASON_IO_INSTRUCTION\n");
+	} else if (exit_reason == EXIT_REASON_EPT_MISCONFIG) {
+		print_record("EXIT_REASON_EPT_MISCONFIG\n");
 	}
 
 	switch (exit_reason) {
@@ -7166,6 +7203,9 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	case EXIT_REASON_IO_INSTRUCTION:
 	/* MMIO */
 	case EXIT_REASON_EPT_MISCONFIG:
+		/* Should not place here, just for test */
+		vcpu->need_memory_commit = 1;
+		vcpu->rr_state = 1;
 	/* PREEMPTION */
 	case EXIT_REASON_PREEMPTION_TIMER:
 		ret = vmx_tm_commit(vcpu);
