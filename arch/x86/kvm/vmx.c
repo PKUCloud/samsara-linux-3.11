@@ -7065,8 +7065,6 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	u32 exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
-	unsigned long rip = vmcs_readl(GUEST_RIP);
-	u32 sec_vm_exec_ctrl = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
 
 	// XELATEX
 	if (kvm_record)
@@ -7186,9 +7184,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		if (ret == -1) {
 			printk(KERN_ERR "error: - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
 		}
-		if (exit_reason == EXIT_REASON_IO_INSTRUCTION ||
-		    exit_reason == EXIT_REASON_EPT_MISCONFIG)
-			vcpu->need_memory_commit = 1;
+		vcpu->need_memory_commit = 1;
 		return KVM_RR_COMMIT;
 	}
 
@@ -7196,25 +7192,43 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		print_record("EXIT_REASON_IO_INSTRUCTION\n");
 	} else if (exit_reason == EXIT_REASON_EPT_MISCONFIG) {
 		print_record("EXIT_REASON_EPT_MISCONFIG\n");
+	} else print_record("% exit_reason %d\n", __func__, exit_reason);
+
+	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
+		vcpu->need_memory_commit = 1;
+		vcpu->rr_state = 1;
+		ret = vmx_tm_commit(vcpu);
+
+		if (ret == -1) {
+			printk(KERN_ERR "error: %s vmx_tm_commit returns -1\n", __func__);
+		} else if (ret == 1) {
+			return KVM_RR_COMMIT;
+		} else {
+			printk(KERN_ERR "error: %s need to rollback\n", __func__);
+			return KVM_RR_ROLLBACK;
+		}
 	}
+
+	return KVM_RR_SKIP;
 
 	switch (exit_reason) {
 	/* IO */
 	case EXIT_REASON_IO_INSTRUCTION:
 	/* MMIO */
 	case EXIT_REASON_EPT_MISCONFIG:
-		/* Should not place here, just for test */
-		vcpu->need_memory_commit = 1;
-		vcpu->rr_state = 1;
 	/* PREEMPTION */
 	case EXIT_REASON_PREEMPTION_TIMER:
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
-			printk(KERN_ERR "error: - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
-		} else if (ret == 1)
+			printk(KERN_ERR "error: %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
+		} else if (ret == 1) {
+			vcpu->need_memory_commit = 1;
+			vcpu->rr_state = 1;
 			return KVM_RR_COMMIT;
-		else
+		} else {
+			printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			return KVM_RR_ROLLBACK;
+		}
 	}
 	return KVM_RR_SKIP;
 }

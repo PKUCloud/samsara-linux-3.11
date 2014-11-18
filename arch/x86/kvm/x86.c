@@ -6010,6 +6010,7 @@ restart:
 	}
 
 	vcpu->rr_state = 0;
+	kvm_x86_ops->tlb_flush(vcpu);
 	preempt_disable();
 
 	kvm_x86_ops->prepare_guest_switch(vcpu);
@@ -6039,6 +6040,13 @@ restart:
 		goto cancel_injection;
 	}
 
+	if (kvm_record && mirror_flag == 1) {
+		mirror_flag = 2;
+		preempt_enable();
+		kvm_record_make_ept_mirror(vcpu);
+		preempt_disable();
+	}
+
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx); // RCU is a synchronization mechanism added to linux kernel during 2.5
 
 	if (req_immediate_exit)
@@ -6052,11 +6060,6 @@ restart:
 		set_debugreg(vcpu->arch.eff_db[1], 1);
 		set_debugreg(vcpu->arch.eff_db[2], 2);
 		set_debugreg(vcpu->arch.eff_db[3], 3);
-	}
-
-	if (kvm_record && mirror_flag == 1) {
-		mirror_flag = 0;
-		kvm_record_make_ept_mirror(vcpu);
 	}
 
 	if (kvm_record)
@@ -6122,21 +6125,30 @@ restart:
 
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		// Only for test
-		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR)
-			r = ((++vcpu->nr_test) % 2 == 0);
+		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR) {
+			// r = ((++vcpu->nr_test) % 2 == 0);
+			++vcpu->nr_test;
+			if (vcpu->nr_test % 100 == 99) {
+				r = KVM_RR_ROLLBACK;
+			} else r = KVM_RR_COMMIT;
+		}
 		if (r == KVM_RR_COMMIT) {
 			print_record("KVM_RR_COMMIT\n");
 			kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
 			commit_count++;
-			if (commit_count % 500 == 0) {
-				//mirror_flag = 1;
-			}
-		}
-		else if (r == KVM_RR_ROLLBACK) {
+			// if (vcpu->nr_test % 100 == 98)
+			// 	mirror_flag = 1;
+			kvm_x86_ops->tlb_flush(vcpu);
+		} else if (r == KVM_RR_ROLLBACK) {
 			print_record("KVM_RR_ROLLBACK\n");
 			kvm_x86_ops->tm_memory_rollback(vcpu);
+			kvm_x86_ops->tlb_flush(vcpu);
 			vcpu->need_memory_commit = 0;
+			if (kvm_record && mirror_flag == 2) {
+				mirror_flag = 0;
+				kvm_record_check_ept_mirror(vcpu);
+			}
 			vcpu_rollback(vcpu);
 
 			//rsr-debug
@@ -6148,14 +6160,6 @@ restart:
 			}
 			mutex_unlock(&(vcpu->events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-			
-			if (commit_count % 500 == 0) {
-				//mirror_flag = 2;
-			}
-			if (kvm_record && mirror_flag == 2) {
-				mirror_flag = 0;
-				kvm_record_check_ept_mirror(vcpu);
-			}
 			goto restart;
 		}
 	}

@@ -2895,7 +2895,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				if (!write) {
 				} else {
 						kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
-						kvm_mmu_flush_tlb(vcpu);
+						kvm_x86_ops->tlb_flush(vcpu);
 				}
 			}
 			break;
@@ -3025,7 +3025,7 @@ void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(pp, temp, &vcpu->arch.ept_mirror,
 		link) {
 		if (!pp || !(pp->page)) {
-			printk(KERN_ERR "%s pp or pp->page is NULL\n", __func__);
+			printk(KERN_ERR "error: %s pp or pp->page is NULL\n", __func__);
 			return;
 		}
 		list_del(&pp->link);
@@ -3047,7 +3047,11 @@ static void kvm_record_ept_mirror_insert(struct kvm_vcpu *vcpu, gpa_t gpa,
 	pte_page = kmalloc(sizeof(*pte_page), GFP_KERNEL);
 	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!pte_page || !page) {
-		printk(KERN_ERR "%s fail to kmalloc for page or pte_page\n", __func__);
+		printk(KERN_ERR "error: %s fail to kmalloc for page or pte_page\n",
+			   __func__);
+		if (pte_page) {
+			kfree(pte_page);
+		}
 		return;
 	}
 	pte_page->gpa = gpa;
@@ -3087,7 +3091,7 @@ void kvm_record_make_ept_mirror(struct kvm_vcpu *vcpu)
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
 
 	if (shadow_addr == INVALID_PAGE) {
-		printk(KERN_ERR "%s mmu.root_hpa==INVALID_PAGE\n", __func__);
+		printk(KERN_ERR "error: %s mmu.root_hpa==INVALID_PAGE\n", __func__);
 		return;
 	}
 	kvm_record_clear_ept_mirror(vcpu);
@@ -4034,12 +4038,12 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		print_record("warning: go to tdp_page_fault() path in %s\n", __func__);
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
-			print_record("error: tdp_page_fault() fail in %s for gfn 0xllx\n", __func__, gfn);
+			//print_record("error: tdp_page_fault() fail in %s for gfn 0xllx\n", __func__, gfn);
 			return NULL;
 		}
 		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 		if (kaddr == NULL) {
-			print_record("error: %s fail for gfn 0x%llx\n", __func__, gfn);
+			//print_record("error: %s fail for gfn 0x%llx\n", __func__, gfn);
 			return NULL;
 		}
 	}

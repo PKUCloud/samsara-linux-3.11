@@ -240,7 +240,7 @@ struct rr_event {
 
 // 2G mem is 2G/4K=512K
 // 500M mem is 128K
-#define TM_BITMAP_SIZE 512*1024
+#define TM_BITMAP_SIZE 1024*1024
 
 struct kvm_vcpu {
 	struct kvm *kvm;

@@ -1473,8 +1473,10 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 	if (kvm_record) {
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 0);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
-					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
+			addr = gfn_to_hva_read(kvm, gfn);
+			if (!kvm_is_error_hva(addr))
+				printk(KERN_ERR "error: %s get INVALID_PAGE of non-error hva: "
+					   "gfn=0x%llx, offset=0x%x\n", __func__, gfn, offset);
 			return -EFAULT;
 		}
 		memcpy(data, kaddr + offset, len);
@@ -1483,12 +1485,13 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 
 	addr = gfn_to_hva_read(kvm, gfn);
 	if (kvm_is_error_hva(addr)) {
-		printk(KERN_ERR "XELATEX - %s normal fault, is error hva.\n", __func__);
+		//printk(KERN_ERR "XELATEX - %s normal fault, is error hva.\n", __func__);
 		return -EFAULT;
 	}
 	r = kvm_read_hva(data, (void __user *)addr + offset, len);
 	if (r) {
-		printk(KERN_ERR "XELATEX - %s normal fault, kvm_read_hva fail.\n", __func__);
+		//printk(KERN_ERR "error: %s normal fault, kvm_read_hva fail.\n",
+		//	   __func__);
 		return -EFAULT;
 	}
 	return 0;
@@ -1545,12 +1548,12 @@ int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 
 	addr = gfn_to_hva(kvm, gfn);
 	if (kvm_is_error_hva(addr)) {
-		if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, is error hva\n", __func__, __LINE__);
+		//if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, is error hva\n", __func__, __LINE__);
 		return -EFAULT;
 	}
 	r = __copy_to_user((void __user *)addr + offset, data, len);
 	if (r) {
-		if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, copy_to_user fault\n", __func__, __LINE__);
+		//if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, copy_to_user fault\n", __func__, __LINE__);
 		return -EFAULT;
 	}
 	mark_page_dirty(kvm, gfn);
@@ -1564,6 +1567,7 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 {
 	struct kvm *kvm = vcpu->kvm;
 	void *kaddr;
+	unsigned long addr;
 
 	if (kvm_record) {
 		if (vcpu->rr_state == 1) {
@@ -1571,8 +1575,10 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 		}
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
-					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
+			addr = gfn_to_hva(kvm, gfn);
+			if (!kvm_is_error_hva(addr))
+				printk(KERN_ERR "error: %s get INVALID_PAGE of non-error hva: "
+					   "gfn=0x%llx, offset=0x%x\n", __func__, gfn, offset);
 			return -EFAULT;
 		}
 		memcpy(kaddr + offset, data, len);

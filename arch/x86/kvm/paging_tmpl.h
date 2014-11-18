@@ -214,7 +214,7 @@ retry_walk:
 			memcpy(&pte, kaddr + offset, sizeof(pte));
 		} else {
 			if (kvm_record){
-				printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, kaddr=0x%llx\n",
+				printk(KERN_ERR "error: %s get INVALID_PAGE, gfn=0x%llx, kaddr=0x%llx\n",
 						__func__, real_gfn, (u64)kaddr);
 			}
 
