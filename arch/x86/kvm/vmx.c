@@ -7192,7 +7192,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		print_record("EXIT_REASON_IO_INSTRUCTION\n");
 	} else if (exit_reason == EXIT_REASON_EPT_MISCONFIG) {
 		print_record("EXIT_REASON_EPT_MISCONFIG\n");
-	} else print_record("% exit_reason %d\n", __func__, exit_reason);
+	} else print_record("%s exit_reason %d\n", __func__, exit_reason);
 
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
 		vcpu->need_memory_commit = 1;

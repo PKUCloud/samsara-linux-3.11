@@ -5957,6 +5957,14 @@ restart:
 	// XELATEX
 	if (kvm_record && vcpu->need_chkpt) {		// make checkpoint
 		mutex_lock(&(vcpu->events_list_lock));
+		if (vcpu->guest_fpu_loaded) {
+			/* We need to read back the value from hardware fpu, that is
+			 * unload the fpu.
+			 */
+			vcpu->guest_fpu_loaded = 0;
+			fpu_save_init(&vcpu->arch.guest_fpu);
+			__kernel_fpu_end();
+		}
 		vcpu_checkpoint(vcpu);
 
 		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
@@ -6148,6 +6156,14 @@ restart:
 			if (kvm_record && mirror_flag == 2) {
 				mirror_flag = 0;
 				kvm_record_check_ept_mirror(vcpu);
+			}
+			if (vcpu->guest_fpu_loaded) {
+				/* Unload fpu from the hardware before we rollback fpu,
+				 * or kvm may override the value we rollback.
+				 */
+				vcpu->guest_fpu_loaded = 0;
+				fpu_save_init(&vcpu->arch.guest_fpu);
+				__kernel_fpu_end();
 			}
 			vcpu_rollback(vcpu);
 
