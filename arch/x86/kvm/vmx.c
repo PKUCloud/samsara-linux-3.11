@@ -5626,7 +5626,7 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 
 	if (!kvm_record)
 		return -1;
-
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s,  before master lock\n", vcpu->vcpu_id, __func__);
 	// The first vcpu enter is treated as master, other as slaves
 	mutex_lock(&(kvm->tm_lock));
 	if (kvm->record_master == false) {
@@ -5637,7 +5637,7 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 		atomic_set(&(kvm->finished_slaves), 0);
 	}
 	mutex_unlock(&(kvm->tm_lock));
-
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s, after master lock\n", vcpu->vcpu_id, __func__);
 	if (master) {
 		// Kick all other vcpus if "kick" is set
 		while (kick_time-- && !ok){
@@ -5648,20 +5648,20 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 					continue;
 				if (cur_vcpu->is_trapped)
 					continue;
-				kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
+				//kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
 				kvm_vcpu_kick(cur_vcpu);
 				cur_vcpu->is_kicked = true;
 				ok = false;
 			}
 		}
-
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s, 1\n", vcpu->vcpu_id, __func__);
 		// Master, sync when enter, wait slaves enter
 		if (online_vcpus > 1 && down_interruptible(&(kvm->tm_enter_sem))) {
-			print_record("XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
-				vcpu->vcpu_id);
+			printk(KERN_ERR "XELATEX - vcpu=%d, %s, master,interrupt received waiting kvm->tm_enter_sem\n", 
+				vcpu->vcpu_id, __func__);
 			return -1;
 		}
-
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s, 2\n", vcpu->vcpu_id, __func__);
 		if (func_master && func_master(opaque_master))
 			ret = -1;
 
@@ -5672,13 +5672,16 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 		// Master, sync when exit, let slaves go
 		for (i=0; i<online_vcpus - 1; i++)
 			up(&(kvm->tm_exit_sem));
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s, 3\n", vcpu->vcpu_id, __func__);
 	} 
 	// Slaves
 	else {
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s, 4\n", vcpu->vcpu_id, __func__);
 		// Slave, sync when enter, let master go
 		if (atomic_inc_return(&(kvm->finished_slaves)) == online_vcpus - 1) {
 			up(&(kvm->tm_enter_sem));
 		}
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s, 5\n", vcpu->vcpu_id, __func__);
 
 		if (func_slave && func_slave(opaque_slave))
 			ret = -1;
@@ -5689,6 +5692,7 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 				vcpu->vcpu_id);
 			ret = -1;
 		}
+//printk(KERN_ERR "XELATEX - vcpu=%d, %s, 6\n", vcpu->vcpu_id, __func__);
 	}
 
 	return ret;
@@ -5803,8 +5807,8 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	void *origin, *private;
 	u64 old_spte;
 
-	print_record("memory_commit() %d pages=====================\n",
-		     vcpu->arch.nr_private_pages);
+	print_record("vcpu=%d, memory_commit() %d pages=====================\n",
+		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -5816,11 +5820,11 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		kvm_record_spte_check_pfn(private_page->sptep,
 					  private_page->private_pfn);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
-		print_record("memory_commit() spte 0x%llx pfn 0x%llx -> "
-			     "spte 0x%llx pfn 0x%llx\n",
-			     old_spte, private_page->private_pfn,
-			     *(private_page->sptep),
-			     private_page->original_pfn);
+		//print_record("memory_commit() spte 0x%llx pfn 0x%llx -> "
+		//	     "spte 0x%llx pfn 0x%llx\n",
+		//	     old_spte, private_page->private_pfn,
+		//	     *(private_page->sptep),
+		//	     private_page->original_pfn);
 		kfree(private);
 		list_del(&private_page->link);
 		kfree(private_page);
@@ -5842,8 +5846,8 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	struct kvm_private_mem_page *temp;
 	u64 old_spte;
 
-	print_record("memory_rollback() %d pages=====================\n",
-		     vcpu->arch.nr_private_pages);
+	print_record("vcpu=%d, memory_rollback() %d pages=====================\n",
+		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -5851,11 +5855,11 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		kvm_record_spte_check_pfn(private_page->sptep,
 					  private_page->private_pfn);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
-		print_record("memory_rollback() spte 0x%llx pfn 0x%llx -> "
-			     "spte 0x%llx pfn 0x%llx\n",
-			     old_spte, private_page->private_pfn,
-			     *(private_page->sptep),
-			     private_page->original_pfn);
+		//print_record("memory_rollback() spte 0x%llx pfn 0x%llx -> "
+		//	     "spte 0x%llx pfn 0x%llx\n",
+		//	     old_spte, private_page->private_pfn,
+		//	     *(private_page->sptep),
+		//	     private_page->original_pfn);
 
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
@@ -7182,17 +7186,18 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	if (!vcpu->is_recording) {
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
-			printk(KERN_ERR "error: - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
+			printk(KERN_ERR "vcpu=%d, error: - %s, %d, vmx_tm_commit returns -1\n",
+				vcpu->vcpu_id, __func__, __LINE__);
 		}
 		vcpu->need_memory_commit = 1;
 		return KVM_RR_COMMIT;
 	}
 
 	if (exit_reason == EXIT_REASON_IO_INSTRUCTION) {
-		print_record("EXIT_REASON_IO_INSTRUCTION\n");
+		print_record("vcpu=%d, EXIT_REASON_IO_INSTRUCTION\n", vcpu->vcpu_id);
 	} else if (exit_reason == EXIT_REASON_EPT_MISCONFIG) {
-		print_record("EXIT_REASON_EPT_MISCONFIG\n");
-	} else print_record("%s exit_reason %d\n", __func__, exit_reason);
+		print_record("vcpu=%d, EXIT_REASON_EPT_MISCONFIG\n", vcpu->vcpu_id);
+	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
 		vcpu->need_memory_commit = 1;
@@ -7200,11 +7205,12 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		ret = vmx_tm_commit(vcpu);
 
 		if (ret == -1) {
-			printk(KERN_ERR "error: %s vmx_tm_commit returns -1\n", __func__);
+			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
+				vcpu->vcpu_id, __func__);
 		} else if (ret == 1) {
 			return KVM_RR_COMMIT;
 		} else {
-			printk(KERN_ERR "error: %s need to rollback\n", __func__);
+			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			return KVM_RR_ROLLBACK;
 		}
 	}

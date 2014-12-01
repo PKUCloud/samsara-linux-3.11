@@ -4188,7 +4188,7 @@ int x86_decode_insn(struct x86_emulate_ctxt *ctxt, void *insn, int insn_len)
 
 		ctxt->rex_prefix = 0;
 	}
-	if(kvm_record) print_record("%s, %d\n", __func__, __LINE__);
+	//if(kvm_record) print_record("%s, %d\n", __func__, __LINE__);
 
 done_prefixes:
 

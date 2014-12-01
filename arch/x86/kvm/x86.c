@@ -1948,8 +1948,8 @@ static void record_steal_time(struct kvm_vcpu *vcpu)
 	vcpu->arch.st.steal.steal += vcpu->arch.st.accum_steal;
 	vcpu->arch.st.steal.version += 2;
 	vcpu->arch.st.accum_steal = 0;
-	if (kvm_record)
-		print_record("record_steal_time() gpa 0x%llx\n", vcpu->arch.st.stime.gpa);
+	//if (kvm_record)
+	//	print_record("record_steal_time() gpa 0x%llx\n", vcpu->arch.st.stime.gpa);
 	kvm_write_guest_cached(vcpu, &vcpu->arch.st.stime,
 		&vcpu->arch.st.steal, sizeof(struct kvm_steal_time));
 }
@@ -5926,9 +5926,9 @@ restart:
 		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 			r = 0;
-			print_record("error: TRIPLE_FAULT_ERROR! Disable kvm_record\n");
+			print_record("vcpu=%d, error: TRIPLE_FAULT_ERROR! Disable kvm_record\n", vcpu->vcpu_id);
 			kvm_record = false;
-			printk("error: TRIPLE_FAULT_ERROR! kvm_record = false\n");
+			printk("vcpu=%d, error: TRIPLE_FAULT_ERROR! kvm_record = false\n", vcpu->vcpu_id);
 			goto out;
 		}
 
@@ -6011,7 +6011,7 @@ restart:
 
 	/* Need to commit memory here */
 	if (kvm_record && vcpu->need_memory_commit) {
-		print_record("commit memory again------------------------\n");
+		print_record("vcpu=%d, commit memory again------------------------\n", vcpu->vcpu_id);
 		kvm_record_clean_ept(vcpu);
 		kvm_x86_ops->tm_memory_commit(vcpu);
 		kvm_x86_ops->tlb_flush(vcpu);
@@ -6071,7 +6071,7 @@ restart:
 	}
 
 	if (kvm_record)
-		print_record("kvm_x86_ops->run(vcpu)\n");
+		print_record("vcpu=%d, kvm_x86_ops->run(vcpu)\n", vcpu->vcpu_id);
 	trace_kvm_entry(vcpu->vcpu_id);
 	kvm_x86_ops->run(vcpu);
 
@@ -6108,8 +6108,8 @@ restart:
 
 	preempt_enable();
 
-	if (kvm_record)
-		print_record("exit---------------------\n");
+	//if (kvm_record)
+	//	print_record("exit---------------------\n");
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 	/*
@@ -6133,6 +6133,7 @@ restart:
 
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		// Only for test
+		/*
 		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR) {
 			// r = ((++vcpu->nr_test) % 2 == 0);
 			++vcpu->nr_test;
@@ -6140,8 +6141,11 @@ restart:
 				r = KVM_RR_ROLLBACK;
 			} else r = KVM_RR_COMMIT;
 		}
+		*/
 		if (r == KVM_RR_COMMIT) {
-			print_record("KVM_RR_COMMIT\n");
+			++vcpu->nr_test;
+			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d\n",
+				vcpu->vcpu_id, vcpu->nr_test);
 			kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
 			commit_count++;
@@ -6149,7 +6153,8 @@ restart:
 			// 	mirror_flag = 1;
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
-			print_record("KVM_RR_ROLLBACK\n");
+			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d\n",
+				vcpu->vcpu_id, vcpu->nr_test);
 			kvm_x86_ops->tm_memory_rollback(vcpu);
 			kvm_x86_ops->tlb_flush(vcpu);
 			vcpu->need_memory_commit = 0;
@@ -6182,9 +6187,9 @@ restart:
 	r = kvm_x86_ops->handle_exit(vcpu);
 
 	if (vcpu->run->exit_reason == KVM_EXIT_SHUTDOWN){
-		print_record("SHUTDOWN! Disable kvm_record\n");
+		print_record("vcpu=%d, SHUTDOWN! Disable kvm_record\n", vcpu->vcpu_id);
 		kvm_record = false;
-		printk("kvm_record = false\n");
+		printk("vcpu=%d, kvm_record = false\n", vcpu->vcpu_id);
 	}
 	
 	return r;

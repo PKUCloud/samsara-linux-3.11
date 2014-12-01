@@ -2831,9 +2831,9 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 	old_spte = *sptep;
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
 
-	print_record("memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte 0x%llx "
-				 "pfn 0x%llx\n", vcpu->arch.nr_private_pages, old_spte, pfn,
-				 *sptep, private_mem_page->private_pfn);
+	//print_record("memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte 0x%llx "
+	//			 "pfn 0x%llx\n", vcpu->arch.nr_private_pages, old_spte, pfn,
+	//			 *sptep, private_mem_page->private_pfn);
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages++;
@@ -3222,7 +3222,7 @@ void kvm_record_clean_ept(struct kvm_vcpu *vcpu)
 	int level = vcpu->arch.mmu.shadow_root_level;
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
 
-	print_record("kvm_record_clean_ept()\n");
+	//print_record("kvm_record_clean_ept()\n");
 	__mmu_walk_spt_clean(vcpu, shadow_addr, level, 0);
 }
 EXPORT_SYMBOL_GPL(kvm_record_clean_ept);
@@ -4011,7 +4011,7 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 				}
 				*sptep |= VMX_EPT_DIRTY_BIT;
 			}
-			print_record("gfn_to_kaddr_ept gfn 0x%llx spte 0x%llx write %d\n", gfn, *sptep, write);
+			//print_record("__gfn_to_kaddr_ept gfn 0x%llx spte 0x%llx write %d\n", gfn, *sptep, write);
 			return (u64 *)__va(*sptep & PT64_BASE_ADDR_MASK);
 		}
 		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
@@ -4035,7 +4035,7 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	if (kaddr == NULL) {
 		if (write)
 			error_code |= PFERR_WRITE_MASK;
-		print_record("warning: go to tdp_page_fault() path in %s\n", __func__);
+		//print_record("warning: go to tdp_page_fault() path in %s\n", __func__);
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
 			//print_record("error: tdp_page_fault() fail in %s for gfn 0xllx\n", __func__, gfn);
