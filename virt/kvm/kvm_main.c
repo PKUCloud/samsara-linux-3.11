@@ -1570,15 +1570,18 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 	unsigned long addr;
 
 	if (kvm_record) {
-		if (vcpu->rr_state == 1) {
-			print_record("kvm_write_guest_page()\n");
-		}
+		//if (vcpu->rr_state == 1) {
+		//	print_record("vcpu=%d, %s\n", vcpu->vcpu_id, __func__);
+		//}
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
 		if (kaddr == NULL) {
 			addr = gfn_to_hva(kvm, gfn);
-			if (!kvm_is_error_hva(addr))
-				printk(KERN_ERR "error: %s get INVALID_PAGE of non-error hva: "
-					   "gfn=0x%llx, offset=0x%x\n", __func__, gfn, offset);
+			if (!kvm_is_error_hva(addr)) {
+				printk(KERN_ERR "vcpu=%d, error: %s get INVALID_PAGE of non-error hva: "
+					   "gfn=0x%llx, offset=0x%x\n", vcpu->vcpu_id, __func__, gfn, offset);
+				print_record("vcpu=%d, error: %s get INVALID_PAGE of non-error hva: "
+					   "gfn=0x%llx, offset=0x%x\n", vcpu->vcpu_id, __func__, gfn, offset);
+			}
 			return -EFAULT;
 		}
 		memcpy(kaddr + offset, data, len);

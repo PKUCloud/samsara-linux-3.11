@@ -5779,9 +5779,10 @@ int tm_unsync_init(void *opaque)
 {
 	struct kvm_vcpu *vcpu = (struct kvm_vcpu *)opaque;
 
-	//vcpu->mmu_vcpu_valid_gen ++;
+	vcpu->mmu_vcpu_valid_gen ++;
 	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-	//kvm_mmu_unload(vcpu);
+	kvm_mmu_unload(vcpu);
+	kvm_mmu_reload(vcpu);
 	//kvm_record_count = KVM_RECORD_COUNT - 1;
 	vcpu->is_recording = true;
 
@@ -7071,8 +7072,11 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	u32 vectoring_info = vmx->idt_vectoring_info;
 
 	// XELATEX
-	if (kvm_record)
+	if (kvm_record) {
 		vmx_record_setup(vmx);
+		if (exit_reason != EXIT_REASON_EPT_VIOLATION)
+			print_record("vcpu=%d, %s, exit_reason=%u\n", vcpu->vcpu_id, __func__, exit_reason);
+	}
 
 	// XELATEX
 	if (kvm_record && kvm_record_type == KVM_RECORD_TIMER
@@ -7192,13 +7196,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		vcpu->need_memory_commit = 1;
 		return KVM_RR_COMMIT;
 	}
-
+/*
 	if (exit_reason == EXIT_REASON_IO_INSTRUCTION) {
 		print_record("vcpu=%d, EXIT_REASON_IO_INSTRUCTION\n", vcpu->vcpu_id);
 	} else if (exit_reason == EXIT_REASON_EPT_MISCONFIG) {
 		print_record("vcpu=%d, EXIT_REASON_EPT_MISCONFIG\n", vcpu->vcpu_id);
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
-
+*/
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
 		vcpu->need_memory_commit = 1;
 		vcpu->rr_state = 1;

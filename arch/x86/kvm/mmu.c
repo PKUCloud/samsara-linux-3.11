@@ -2819,17 +2819,22 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 	struct kvm_private_mem_page *private_mem_page;
 	u64 old_spte;
 
+//print_record("vcpu=%d, %s, 1, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	if (vcpu->rr_state == 1) {
-		print_record("warning: cow after memory commit\n");
+		print_record("vcpu=%d, warning: %s, cow after memory commit\n", vcpu->vcpu_id, __func__);
 	}
+//print_record("vcpu=%d, %s, 2, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
 	new_page = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
+//print_record("vcpu=%d, %s, 3, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	copy_page(new_page, pfn_to_kaddr(pfn));
 	old_spte = *sptep;
+//print_record("vcpu=%d, %s, 4, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
+//print_record("vcpu=%d, %s, 5, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 
 	//print_record("memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte 0x%llx "
 	//			 "pfn 0x%llx\n", vcpu->arch.nr_private_pages, old_spte, pfn,
@@ -2894,7 +2899,15 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
 				if (!write) {
 				} else {
+//print_record("vcpu=%d, %s, 1, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
+//	"sptep=0x%llx, spte=0x%llx\n",
+//	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
+//	iterator.sptep, *iterator.sptep);
 						kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
+//print_record("vcpu=%d, %s, 2, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
+//	"sptep=0x%llx, spte=0x%llx\n",
+//	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
+//	iterator.sptep, *iterator.sptep);
 						kvm_x86_ops->tlb_flush(vcpu);
 				}
 			}
@@ -3990,9 +4003,9 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
 		if (sptep == 0xffff87ffffffffffULL)
-			printk(KERN_ERR "index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
+			printk(KERN_ERR "vcpu=%d, index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
 						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
-				index, sptep, shadow_addr, __va(shadow_addr), level,
+				vcpu->vcpu_id, index, sptep, shadow_addr, __va(shadow_addr), level,
 				vcpu->arch.mmu.root_hpa);
 		if (!is_shadow_present_pte(*sptep)) {
 			return NULL;
@@ -4006,7 +4019,8 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 			*/
 			if (write) {
 				if (!(*sptep & PT_WRITABLE_MASK)) {
-					print_record("%s lack of PT_WRITABLE_MASK for gfn 0x%llx\n", __func__, gfn);
+					print_record("vcpu=%d, %s lack of PT_WRITABLE_MASK for gfn 0x%llx, sptep=0x%llx, spte=0x%llx\n",
+						vcpu->vcpu_id, __func__, gfn, sptep, *sptep);
 					return NULL;
 				}
 				*sptep |= VMX_EPT_DIRTY_BIT;
@@ -4017,7 +4031,7 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
 	}
 
-	printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
+	//printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 	return NULL;
 }
 
@@ -4035,15 +4049,18 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	if (kaddr == NULL) {
 		if (write)
 			error_code |= PFERR_WRITE_MASK;
-		//print_record("warning: go to tdp_page_fault() path in %s\n", __func__);
+		//print_record("vcpu=%d, warning: go to tdp_page_fault() path in %s\n", vcpu->vcpu_id, __func__);
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
-			//print_record("error: tdp_page_fault() fail in %s for gfn 0xllx\n", __func__, gfn);
+			print_record("vcpu=%d, error: tdp_page_fault() fail in %s for gfn 0xllx\n",
+				vcpu->vcpu_id, __func__, gfn);
 			return NULL;
 		}
+		//print_record("vcpu=%d, reclaim write for gfn 0x%llx\n", vcpu->vcpu_id, gfn);
 		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 		if (kaddr == NULL) {
-			//print_record("error: %s fail for gfn 0x%llx\n", __func__, gfn);
+			print_record("vcpu=%d, error: %s fail for gfn 0x%llx\n",
+				vcpu->vcpu_id, __func__, gfn);
 			return NULL;
 		}
 	}

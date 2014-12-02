@@ -1603,8 +1603,8 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 		pvclock_flags |= PVCLOCK_TSC_STABLE_BIT;
 
 	vcpu->hv_clock.flags = pvclock_flags;
-	if (kvm_record)
-		print_record("%s vcpu->pv_time gpa 0x%llx\n", __func__, vcpu->pv_time.gpa);
+	//if (kvm_record)
+	//	print_record("%s vcpu->pv_time gpa 0x%llx\n", __func__, vcpu->pv_time.gpa);
 	kvm_write_guest_cached(v, &vcpu->pv_time,
 				&vcpu->hv_clock,
 				sizeof(vcpu->hv_clock));
@@ -6070,8 +6070,8 @@ restart:
 		set_debugreg(vcpu->arch.eff_db[3], 3);
 	}
 
-	if (kvm_record)
-		print_record("vcpu=%d, kvm_x86_ops->run(vcpu)\n", vcpu->vcpu_id);
+	//if (kvm_record)
+	//	print_record("vcpu=%d, kvm_x86_ops->run(vcpu)\n", vcpu->vcpu_id);
 	trace_kvm_entry(vcpu->vcpu_id);
 	kvm_x86_ops->run(vcpu);
 
@@ -6142,6 +6142,8 @@ restart:
 			} else r = KVM_RR_COMMIT;
 		}
 		*/
+		// XELATEX TEST
+		//print_record("vcpu=%d, %s, root_hpa=0x%llx\n", vcpu->vcpu_id, __func__, vcpu->arch.mmu.root_hpa);
 		if (r == KVM_RR_COMMIT) {
 			++vcpu->nr_test;
 			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d\n",
