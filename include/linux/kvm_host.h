@@ -317,6 +317,8 @@ struct kvm_vcpu {
 	struct mutex events_list_lock;
 	int need_chkpt;
 	int nr_test;
+	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
+	int nr_rollback;	/* Number of continuous rollback */
 
 	int need_memory_commit;
 	int rr_state;
@@ -476,6 +478,12 @@ struct kvm {
 		unsigned long long tm_turn;
 	};
 	int tm_last_commit_vcpu;
+	/* 1 if we can commit normally, otherwise someone is in exclusive commit status */
+	atomic_t tm_normal_commit;
+	/* If someone is in exclusive commit, we can't check and commit normally, just wait on
+	 * this queue.
+	 */
+	wait_queue_head_t tm_exclusive_commit_que;
 };
 
 #define kvm_err(fmt, ...) \

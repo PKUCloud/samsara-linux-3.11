@@ -6146,17 +6146,17 @@ restart:
 		//print_record("vcpu=%d, %s, root_hpa=0x%llx\n", vcpu->vcpu_id, __func__, vcpu->arch.mmu.root_hpa);
 		if (r == KVM_RR_COMMIT) {
 			++vcpu->nr_test;
-			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d\n",
-				vcpu->vcpu_id, vcpu->nr_test);
-			kvm_x86_ops->tm_memory_commit(vcpu);
+			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d, nr_rollback=%d\n",
+				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
+			//kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
 			commit_count++;
 			// if (vcpu->nr_test % 100 == 98)
 			// 	mirror_flag = 1;
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
-			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d\n",
-				vcpu->vcpu_id, vcpu->nr_test);
+			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d, nr_rollback=%d\n",
+				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
 			kvm_x86_ops->tm_memory_rollback(vcpu);
 			kvm_x86_ops->tlb_flush(vcpu);
 			vcpu->need_memory_commit = 0;
@@ -7129,6 +7129,8 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->need_memory_commit = 0;
 	vcpu->rr_state = 0;
 	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);
+	vcpu->exclusive_commit = 0;
+	vcpu->nr_rollback = 0;
 
 	return 0;
 fail_free_wbinvd_dirty_mask:
@@ -7171,6 +7173,8 @@ void kvm_arch_init_record(struct kvm *kvm)
 	spin_lock_init(&(kvm->tm_timer_lock));
 	kvm->timestamp = 0;
 	kvm->tm_last_commit_vcpu = -1;
+	atomic_set(&kvm->tm_normal_commit, 1);
+	init_waitqueue_head(&kvm->tm_exclusive_commit_que);
 }
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)

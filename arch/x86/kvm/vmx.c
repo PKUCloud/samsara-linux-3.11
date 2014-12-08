@@ -5713,6 +5713,7 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	kvm_record = false;
 	kvm->record_master = false;
 	kvm->tm_last_commit_vcpu = -1;
+	atomic_set(&kvm->tm_normal_commit, 1);
 	vcpu->is_kicked = false;
 	vcpu->is_trapped = false;
 	vcpu->is_recording = false;
@@ -5723,6 +5724,8 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	vcpu->access_size = 1;
 	vcpu->dirty_size = 1;
 	vcpu->conflict_size = 1;
+	vcpu->exclusive_commit = 0;
+	vcpu->nr_rollback = 0;
 
 	kvm_record_clear_ept_mirror(vcpu);
 
@@ -5886,6 +5889,17 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
 
+		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
+			/* Now anothter vcpu is in exclusive commit state */
+			print_record("vcpu %d is going to sleep because of exclusive commit\n", vcpu->vcpu_id);
+			if (wait_event_interruptible(kvm->tm_exclusive_commit_que,
+			    atomic_read(&kvm->tm_normal_commit) == 1)) {
+				printk(KERN_ERR "error: %s wait_event_interruptible() interrupted\n",
+					  __func__);
+				return -1;
+			}
+			print_record("vcpu %d wake up\n", vcpu->vcpu_id);
+		}
 
 		mutex_lock(&(kvm->tm_lock));
 
@@ -5900,6 +5914,19 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		}
 
 		if (commit) {
+			if (vcpu->exclusive_commit) {
+				/* Exclusive commit state */
+				print_record("vcpu %d exclusive commit, going to wake up othter vcpus\n", vcpu->vcpu_id);
+				vcpu->exclusive_commit = 0;
+				atomic_set(&kvm->tm_normal_commit, 1);
+				wake_up_interruptible(&kvm->tm_exclusive_commit_que);
+			} else if (atomic_read(&kvm->tm_normal_commit) < 1) {
+				/* Now another vcpu is in exclusive commit state, need to rollback*/
+				print_record("vcpu %d going to commit but another vcpu is in exclusive commit, so rollback\n", vcpu->vcpu_id);
+				commit = 0;
+				vcpu->nr_rollback++;
+				goto unlock;
+			}
 			// Set dirty bit
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
@@ -5908,9 +5935,24 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 					kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
 			}
 
+			/* Commit here in the lock */
+			tm_memory_commit(vcpu);
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
+
+			vcpu->nr_rollback = 0;
+		} else {
+			vcpu->nr_rollback++;
+			if (!vcpu->exclusive_commit && vcpu->nr_rollback > 10) {
+				print_record("vcpu %d rollback > 10, try to be exclusiv\n", vcpu->vcpu_id);
+				if (atomic_dec_and_test(&kvm->tm_normal_commit)) {
+					/* Now we can enter exclusive commit state */
+					print_record("vcpu %d in exclusive commit state\n", vcpu->vcpu_id);
+					vcpu->exclusive_commit = 1;
+				}
+			}
 		}
+unlock:
 		mutex_unlock(&(kvm->tm_lock));
 
 	} else {
@@ -7203,15 +7245,15 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		print_record("vcpu=%d, EXIT_REASON_EPT_MISCONFIG\n", vcpu->vcpu_id);
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 */
+	
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
-		vcpu->need_memory_commit = 1;
-		vcpu->rr_state = 1;
 		ret = vmx_tm_commit(vcpu);
-
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
 				vcpu->vcpu_id, __func__);
 		} else if (ret == 1) {
+			vcpu->need_memory_commit = 1;
+			vcpu->rr_state = 1;
 			return KVM_RR_COMMIT;
 		} else {
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
@@ -7236,7 +7278,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			vcpu->rr_state = 1;
 			return KVM_RR_COMMIT;
 		} else {
-			printk(KERN_ERR "error: %s need to rollback\n", __func__);
+			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			return KVM_RR_ROLLBACK;
 		}
 	}
