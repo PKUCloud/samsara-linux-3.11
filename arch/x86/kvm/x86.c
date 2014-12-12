@@ -5954,6 +5954,14 @@ restart:
 			vcpu_scan_ioapic(vcpu);
 	}
 
+	/* Enable recording */
+	if (kvm_record && !vcpu->is_recording) {
+		if (kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION) {
+			if (!kvm_x86_ops->tm_unsync_pre_record(vcpu, 1)) {
+				vcpu->need_chkpt = 1;
+			}
+		}
+	}
 	// XELATEX
 	if (kvm_record && vcpu->need_chkpt) {		// make checkpoint
 		mutex_lock(&(vcpu->events_list_lock));
@@ -6071,7 +6079,8 @@ restart:
 	}
 
 	//if (kvm_record)
-	//	print_record("vcpu=%d, kvm_x86_ops->run(vcpu)\n", vcpu->vcpu_id);
+	//	printk(KERN_INFO "vcpu %d kvm_x86_ops->run(vcpu)\n", vcpu->vcpu_id);
+
 	trace_kvm_entry(vcpu->vcpu_id);
 	kvm_x86_ops->run(vcpu);
 
@@ -6109,7 +6118,7 @@ restart:
 	preempt_enable();
 
 	//if (kvm_record)
-	//	print_record("exit---------------------\n");
+	//	printk(KERN_INFO "vcpu %d exit\n", vcpu->vcpu_id);
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 	/*
@@ -6126,8 +6135,8 @@ restart:
 	if (vcpu->arch.apic_attention)
 		kvm_lapic_sync_from_vapic(vcpu);
 
-	// XELATEX
-	if (kvm_record || vcpu->is_recording) {
+	// For now we do this only after we begin recording, that is vcpu->is_recording is true */
+	if (vcpu->is_recording) {
 		vcpu->need_chkpt = 0;
 		vcpu->rr_state = 0;
 
@@ -6146,7 +6155,7 @@ restart:
 		//print_record("vcpu=%d, %s, root_hpa=0x%llx\n", vcpu->vcpu_id, __func__, vcpu->arch.mmu.root_hpa);
 		if (r == KVM_RR_COMMIT) {
 			++vcpu->nr_test;
-			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d, nr_rollback=%d\n",
+			print_record("vcpu %d, KVM_RR_COMMIT, nr_test=%d, nr_rollback=%d\n",
 				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
 			//kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
@@ -6155,7 +6164,7 @@ restart:
 			// 	mirror_flag = 1;
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
-			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d, nr_rollback=%d\n",
+			print_record("vcpu %d, KVM_RR_ROLLBACK, nr_test=%d, nr_rollback=%d\n",
 				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
 			kvm_x86_ops->tm_memory_rollback(vcpu);
 			kvm_x86_ops->tlb_flush(vcpu);
