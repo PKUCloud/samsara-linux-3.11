@@ -2824,8 +2824,9 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 		print_record("vcpu=%d, warning: %s, cow after memory commit\n", vcpu->vcpu_id, __func__);
 	}
 //print_record("vcpu=%d, %s, 2, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
-	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
-	new_page = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	/* We should use GFP_ATOMIC here, because it will be called while holding spinlock */
+	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
+	new_page = kmalloc(PAGE_SIZE, GFP_ATOMIC);
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
