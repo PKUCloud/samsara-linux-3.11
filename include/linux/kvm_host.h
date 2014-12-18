@@ -25,6 +25,8 @@
 #include <linux/irqflags.h>
 #include <linux/context_tracking.h>
 #include <asm/signal.h>
+// XELATEX
+#include <linux/rr_profile.h>
 
 #include <linux/kvm.h>
 #include <linux/kvm_para.h>
@@ -237,10 +239,6 @@ struct rr_event {
 	//end rsr--debug
 	
 };
-
-// 2G mem is 2G/4K=512K
-// 500M mem is 128K
-#define TM_BITMAP_SIZE 1024*1024
 
 struct kvm_vcpu {
 	struct kvm *kvm;
