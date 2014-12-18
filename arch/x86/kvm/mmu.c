@@ -36,6 +36,8 @@
 #include <linux/srcu.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+// XELATEX
+#include <linux/rr_profile.h>
 
 #include <asm/page.h>
 #include <asm/cmpxchg.h>
@@ -2926,6 +2928,9 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 
 			link_shadow_page(iterator.sptep, sp);
 		}
+		if (is_shadow_present_pte(*iterator.sptep)) {
+			*iterator.sptep |= VMX_EPT_ACCESS_BIT;
+		}
 	}
 	return emulate;
 }
@@ -2948,17 +2953,30 @@ static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, 
 		sptep = ((u64 *)__va(shadow_addr)) + index;
 		if (!is_shadow_present_pte(*sptep))
 			continue;
+
+		/* Check if VMX_EPT_ACCESS_BIT is set, if not there is no need to walk
+		 * its children any more.
+		 */
+		#ifdef RR_AD_BIT_OPT
+		if (!(*sptep & VMX_EPT_ACCESS_BIT)) {
+			continue;
+		}
+		#endif
+
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 		if (is_last_spte(*sptep, level)) {
 			if (kvm_record_print_log)
 				__mmu_print_AD_bit(vcpu, sptep, new_gpa, new_addr);
 			__mmu_set_AD_bit(vcpu, sptep, new_gpa, new_addr);
+		} else {
+ 			__mmu_walk_spt(vcpu, new_addr, level - 1, new_gpa);
+			*sptep &= ~VMX_EPT_ACCESS_BIT;
 		}
-		else
-			__mmu_walk_spt(vcpu, new_addr, level - 1, new_gpa);
 	}
 }
+
+void kvm_record_check_ept_ad(struct kvm_vcpu *vcpu);
 
 static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 {
@@ -2973,6 +2991,7 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 			!vcpu->arch.mmu.direct_map)
 		--level;
 
+	//kvm_record_check_ept_ad(vcpu);
 	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
 }
 
@@ -3221,13 +3240,25 @@ static void __mmu_walk_spt_clean(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
 		sptep = ((u64 *)__va(shadow_addr)) + index;
 		if (!is_shadow_present_pte(*sptep))
 			continue;
+		
+		/* Check if VMX_EPT_ACCESS_BIT is set, if not, there is no need to
+		 * walk its children any more.
+		 */
+		#ifdef RR_AD_BIT_OPT
+		if (!(*sptep & VMX_EPT_ACCESS_BIT)) {
+			continue;
+		}
+		#endif
+
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 		if (is_last_spte(*sptep, level)) {
 			*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
 			*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
-		} else
-			__mmu_walk_spt_clean(vcpu , new_addr, level - 1, new_gpa);
+		} else {
+ 			__mmu_walk_spt_clean(vcpu , new_addr, level - 1, new_gpa);
+			*sptep &= ~VMX_EPT_ACCESS_BIT;
+		}
 	}
 }
 
@@ -3240,6 +3271,49 @@ void kvm_record_clean_ept(struct kvm_vcpu *vcpu)
 	__mmu_walk_spt_clean(vcpu, shadow_addr, level, 0);
 }
 EXPORT_SYMBOL_GPL(kvm_record_clean_ept);
+
+static void __mmu_walk_spt_check_ad(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
+									int level, gpa_t gpa, int accessed)
+{
+	u64 index;
+	gpa_t new_gpa;
+	hpa_t new_addr;
+	u64 *sptep;
+
+	if (level < PT_PAGE_TABLE_LEVEL)
+		return;
+
+	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (!is_shadow_present_pte(*sptep))
+			continue;
+		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
+		new_addr = *sptep & PT64_BASE_ADDR_MASK;
+
+		if ((*sptep & VMX_EPT_ACCESS_BIT) && (accessed == 0)) {
+			print_record("error: vcpu %d mismatch ad bit spte 0x%llx gpa 0x%llx level %d\n",
+						 vcpu->vcpu_id, *sptep, new_gpa, level);
+			printk(KERN_ERR "error: vcpu %d mismatch ad bit spte 0x%llx gpa 0x%llx level %d\n",
+				  vcpu->vcpu_id, *sptep, new_gpa, level);
+		}
+
+		if (!is_last_spte(*sptep, level)) {
+			__mmu_walk_spt_check_ad(vcpu, new_addr, level - 1, new_gpa,
+									 accessed && (*sptep & VMX_EPT_ACCESS_BIT));
+		}
+	}
+}
+
+/* Check the if the Access-bits are consistent through all the 4 levels ept */
+void kvm_record_check_ept_ad(struct kvm_vcpu *vcpu)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+	print_record("vcpu %d %s\n", vcpu->vcpu_id, __func__);
+	__mmu_walk_spt_check_ad(vcpu, shadow_addr, level, 0, 1);
+}
+EXPORT_SYMBOL_GPL(kvm_record_check_ept_ad);
+
 
 static void kvm_send_hwpoison_signal(unsigned long address, struct task_struct *tsk)
 {
@@ -4067,6 +4141,8 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	}
 	else if (kaddr == (void *)INVALID_PAGE)
 		return NULL;
+
+	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 
 	return kaddr;
 }
