@@ -7265,7 +7265,8 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 */
 	
-	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
+	if (exit_reason != EXIT_REASON_EPT_VIOLATION
+		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
@@ -7281,13 +7282,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	}
 
 	return KVM_RR_SKIP;
-
+/*
 	switch (exit_reason) {
-	/* IO */
+	// IO
 	case EXIT_REASON_IO_INSTRUCTION:
-	/* MMIO */
+	// MMIO
 	case EXIT_REASON_EPT_MISCONFIG:
-	/* PREEMPTION */
+	// PREEMPTION 
 	case EXIT_REASON_PREEMPTION_TIMER:
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
@@ -7302,6 +7303,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		}
 	}
 	return KVM_RR_SKIP;
+*/
 }
 
 /* Synchronization before enabling record for tm_unsync */
