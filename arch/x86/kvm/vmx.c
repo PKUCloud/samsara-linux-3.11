@@ -5790,7 +5790,7 @@ int tm_unsync_init(void *opaque)
 	struct kvm_vcpu *vcpu = (struct kvm_vcpu *)opaque;
 
 	vcpu->mmu_vcpu_valid_gen ++;
-	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 	kvm_mmu_unload(vcpu);
 	kvm_mmu_reload(vcpu);
 	//kvm_record_count = KVM_RECORD_COUNT - 1;
@@ -5898,23 +5898,25 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
 			/* Now anothter vcpu is in exclusive commit state */
-			print_record("vcpu %d is going to sleep because of exclusive commit\n", vcpu->vcpu_id);
+			print_record("vcpu=%d is going to sleep because of exclusive commit\n", vcpu->vcpu_id);
 			if (wait_event_interruptible(kvm->tm_exclusive_commit_que,
 			    atomic_read(&kvm->tm_normal_commit) == 1)) {
 				printk(KERN_ERR "error: %s wait_event_interruptible() interrupted\n",
 					  __func__);
 				return -1;
 			}
-			print_record("vcpu %d wake up\n", vcpu->vcpu_id);
+			print_record("vcpu=%d wake up\n", vcpu->vcpu_id);
 		}
 
 		mutex_lock(&(kvm->tm_lock));
 
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
 			// Detect conflict
-			if (tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
+			if (vcpu->is_early_rb ||
+					tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
 				commit = 0;
 				vcpu->nr_conflict++;
+				vcpu->is_early_rb = 0;
 			}
 			// Clear conflict bitmap
 			bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
@@ -5923,17 +5925,18 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		if (commit) {
 			if (vcpu->exclusive_commit) {
 				/* Exclusive commit state */
-				print_record("vcpu %d exclusive commit, going to wake up othter vcpus\n", vcpu->vcpu_id);
+				print_record("vcpu=%d exclusive commit, going to wake up othter vcpus\n", vcpu->vcpu_id);
 				vcpu->exclusive_commit = 0;
 				atomic_set(&kvm->tm_normal_commit, 1);
 				wake_up_interruptible(&kvm->tm_exclusive_commit_que);
 			} else if (atomic_read(&kvm->tm_normal_commit) < 1) {
 				/* Now another vcpu is in exclusive commit state, need to rollback*/
-				print_record("vcpu %d going to commit but another vcpu is in exclusive commit, so rollback\n", vcpu->vcpu_id);
+				print_record("vcpu=%d going to commit but another vcpu is in exclusive commit, so rollback\n", vcpu->vcpu_id);
 				commit = 0;
 				vcpu->nr_rollback++;
 				goto unlock;
 			}
+			print_record("vcpu=%d, set dirty bit\n", vcpu->vcpu_id);
 			// Set dirty bit
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
@@ -5951,10 +5954,10 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		} else {
 			vcpu->nr_rollback++;
 			if (!vcpu->exclusive_commit && vcpu->nr_rollback > 10) {
-				print_record("vcpu %d rollback > 10, try to be exclusiv\n", vcpu->vcpu_id);
+				print_record("vcpu=%d rollback > 10, try to be exclusiv\n", vcpu->vcpu_id);
 				if (atomic_dec_and_test(&kvm->tm_normal_commit)) {
 					/* Now we can enter exclusive commit state */
-					print_record("vcpu %d in exclusive commit state\n", vcpu->vcpu_id);
+					print_record("vcpu=%d in exclusive commit state\n", vcpu->vcpu_id);
 					vcpu->exclusive_commit = 1;
 				}
 			}
@@ -5964,7 +5967,7 @@ unlock:
 
 	} else {
 		/* Error to come here when vcpu->is_recording is false */
-		printk(KERN_ERR "error: vcpu %d %s when vcpu->is_recording is false\n",
+		printk(KERN_ERR "error: vcpu=%d %s when vcpu->is_recording is false\n",
 			  vcpu->vcpu_id, __func__);
 		return -1;
 		/*
@@ -7237,6 +7240,7 @@ static int vmx_tm_commit(struct kvm_vcpu *vcpu)
 static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct kvm *kvm = vcpu->kvm;
 	u32 exit_reason = vmx->exit_reason;
 	int ret;
 
@@ -7264,9 +7268,22 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		print_record("vcpu=%d, EXIT_REASON_EPT_MISCONFIG\n", vcpu->vcpu_id);
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 */
-	
+	// OPT: early rollback
+	#ifdef RR_EARLY_ROLLBACK
+	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
+		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
+		if (test_bit(gfn, vcpu->conflict_bitmap)) {
+			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
+			print_record("vcpu=%d, early rollback, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
+			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
+			vcpu->is_early_rb = 1;
+		}
+	}
+	#endif
+
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
+		//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",

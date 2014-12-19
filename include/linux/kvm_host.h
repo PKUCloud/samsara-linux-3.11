@@ -320,6 +320,7 @@ struct kvm_vcpu {
 
 	int need_memory_commit;
 	int rr_state;
+	int is_early_rb;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;

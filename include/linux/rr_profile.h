@@ -8,6 +8,7 @@
 
 //#define RR_PROFILE
 #define RR_AD_BIT_OPT
+#define RR_EARLY_ROLLBACK
 
 struct vmexit_states {
 	uint64_t num;

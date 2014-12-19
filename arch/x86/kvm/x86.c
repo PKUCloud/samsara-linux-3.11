@@ -6155,7 +6155,7 @@ restart:
 		//print_record("vcpu=%d, %s, root_hpa=0x%llx\n", vcpu->vcpu_id, __func__, vcpu->arch.mmu.root_hpa);
 		if (r == KVM_RR_COMMIT) {
 			++vcpu->nr_test;
-			print_record("vcpu %d, KVM_RR_COMMIT, nr_test=%d, nr_rollback=%d\n",
+			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d\n",
 				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
 			//kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
@@ -6164,7 +6164,7 @@ restart:
 			// 	mirror_flag = 1;
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
-			print_record("vcpu %d, KVM_RR_ROLLBACK, nr_test=%d, nr_rollback=%d\n",
+			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d, nr_rollback=%d\n",
 				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
 			kvm_x86_ops->tm_memory_rollback(vcpu);
 			kvm_x86_ops->tlb_flush(vcpu);

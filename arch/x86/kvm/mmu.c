@@ -2724,6 +2724,7 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 		vcpu->access_size = (gpa >> PAGE_SHIFT) + 1;
 		if (*sptep & VMX_EPT_DIRTY_BIT) {
 			set_bit(gpa >> PAGE_SHIFT, vcpu->dirty_bitmap);
+			//print_record("vcpu=%d, set_AD_bit, gfn=0x%llx\n", vcpu->vcpu_id, gpa >> PAGE_SHIFT);
 			vcpu->dirty_size = (gpa >> PAGE_SHIFT) + 1;
 		}
 	}
@@ -2839,8 +2840,8 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
 //print_record("vcpu=%d, %s, 5, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 
-	//print_record("memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte 0x%llx "
-	//			 "pfn 0x%llx\n", vcpu->arch.nr_private_pages, old_spte, pfn,
+	//print_record("vcpu=%d,memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte 0x%llx "
+	//			 "pfn 0x%llx\n", vcpu->vcpu_id, vcpu->arch.nr_private_pages, old_spte, pfn,
 	//			 *sptep, private_mem_page->private_pfn);
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
