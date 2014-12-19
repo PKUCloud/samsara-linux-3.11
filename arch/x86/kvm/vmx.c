@@ -5953,8 +5953,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			vcpu->nr_rollback = 0;
 		} else {
 			vcpu->nr_rollback++;
-			if (!vcpu->exclusive_commit && vcpu->nr_rollback > 10) {
-				print_record("vcpu=%d rollback > 10, try to be exclusiv\n", vcpu->vcpu_id);
+			if (!vcpu->exclusive_commit && vcpu->nr_rollback > RR_CONSEC_RB_TIME) {
+				print_record("vcpu=%d rollback > %d, try to be exclusiv\n",
+					vcpu->vcpu_id, RR_CONSEC_RB_TIME);
 				if (atomic_dec_and_test(&kvm->tm_normal_commit)) {
 					/* Now we can enter exclusive commit state */
 					print_record("vcpu=%d in exclusive commit state\n", vcpu->vcpu_id);

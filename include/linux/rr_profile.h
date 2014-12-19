@@ -9,6 +9,7 @@
 //#define RR_PROFILE
 #define RR_AD_BIT_OPT
 #define RR_EARLY_ROLLBACK
+#define RR_CONSEC_RB_TIME 10
 
 struct vmexit_states {
 	uint64_t num;
