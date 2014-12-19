@@ -5950,6 +5950,10 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
 
+			#ifdef RR_PROFILE
+			if (vcpu->nr_rollback != 0)
+				print_record("PROFILE,vcpu=%d,consecutive_rb,%d\n", vcpu->vcpu_id, vcpu->nr_rollback);
+			#endif
 			vcpu->nr_rollback = 0;
 		} else {
 			vcpu->nr_rollback++;

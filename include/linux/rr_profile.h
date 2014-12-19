@@ -2,14 +2,19 @@
 #define __RR_PROFILE_H
 
 
+// Profile Switch
+//#define RR_PROFILE
+
 // 2G mem is 2G/4K=512K
 // 500M mem is 128K
 #define TM_BITMAP_SIZE 1024*1024
 
-//#define RR_PROFILE
+// Params
+#define RR_CONSEC_RB_TIME 10
+
+// Optimizations
 #define RR_AD_BIT_OPT
 #define RR_EARLY_ROLLBACK
-#define RR_CONSEC_RB_TIME 10
 
 struct vmexit_states {
 	uint64_t num;
