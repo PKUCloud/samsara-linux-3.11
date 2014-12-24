@@ -10,11 +10,13 @@
 #define TM_BITMAP_SIZE 1024*1024
 
 // Params
-#define RR_CONSEC_RB_TIME 10
+#define RR_CONSEC_RB_TIME 11
 
 // Optimizations
 #define RR_AD_BIT_OPT
-#define RR_EARLY_ROLLBACK
+/* Early rollback and early check is exclusive */
+//#define RR_EARLY_ROLLBACK
+#define RR_EARLY_CHECK
 
 struct vmexit_states {
 	uint64_t num;

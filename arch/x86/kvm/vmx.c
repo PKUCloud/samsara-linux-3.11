@@ -5957,7 +5957,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			vcpu->nr_rollback = 0;
 		} else {
 			vcpu->nr_rollback++;
-			if (!vcpu->exclusive_commit && vcpu->nr_rollback > RR_CONSEC_RB_TIME) {
+			if (!vcpu->exclusive_commit && vcpu->nr_rollback >= RR_CONSEC_RB_TIME) {
 				print_record("vcpu=%d rollback > %d, try to be exclusiv\n",
 					vcpu->vcpu_id, RR_CONSEC_RB_TIME);
 				if (atomic_dec_and_test(&kvm->tm_normal_commit)) {
@@ -7248,6 +7248,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 	u32 exit_reason = vmx->exit_reason;
 	int ret;
+	int is_early_check;
 
 	vcpu->need_memory_commit = 0;
 	// First time, we do not handle it here.
@@ -7286,6 +7287,20 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	}
 	#endif
 
+	// OPT: early check
+	#ifdef RR_EARLY_CHECK
+	is_early_check = 0;
+	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
+		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
+		if (test_bit(gfn, vcpu->conflict_bitmap)) {
+			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
+			print_record("vcpu=%d, early check, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
+			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
+			is_early_check = 1;
+		}
+	}
+	#endif
+
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
 		//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
@@ -7296,6 +7311,8 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		} else if (ret == 1) {
 			vcpu->need_memory_commit = 1;
 			vcpu->rr_state = 1;
+			if (is_early_check == 1)
+				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
