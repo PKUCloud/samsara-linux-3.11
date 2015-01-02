@@ -4,13 +4,14 @@
 
 // Profile Switch
 //#define RR_PROFILE
+//#define RR_PROFILE_CONFLICT
 
 // 2G mem is 2G/4K=512K
 // 500M mem is 128K
 #define TM_BITMAP_SIZE 1024*1024
 
 // Params
-#define RR_CONSEC_RB_TIME 11
+#define RR_CONSEC_RB_TIME 3
 
 // Optimizations
 #define RR_AD_BIT_OPT

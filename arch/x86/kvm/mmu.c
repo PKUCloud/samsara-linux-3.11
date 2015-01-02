@@ -2908,6 +2908,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 //	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
 //	iterator.sptep, *iterator.sptep);
 						kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
+//print_record("vcpu=%d, PROFILE_COW, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 //print_record("vcpu=%d, %s, 2, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
 //	"sptep=0x%llx, spte=0x%llx\n",
 //	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,

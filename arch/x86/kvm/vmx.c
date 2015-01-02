@@ -5773,6 +5773,36 @@ record_disable:
 }
 EXPORT_SYMBOL_GPL(tm_commit);
 
+int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu, unsigned long *access_bm,
+	unsigned long *conflict_bm, int nbits)
+{
+	int k;
+	int nr = BITS_TO_LONGS(nbits);
+	int ret = 0;
+	int i;
+	gfn_t gfn;
+	int num = 0;
+
+	for (k = 0; k < nr; k++) {
+		if (access_bm[k] & conflict_bm[k]) {
+			gfn = k * BITS_PER_BYTE * sizeof(long);
+			for (i=0; i<BITS_PER_BYTE*sizeof(long); i++) {
+				if ((access_bm[k] >> i) & 1) {
+					print_record("vcpu=%d,PROFILE_CONFLICT,gfn,0x%llx\n",
+						vcpu->vcpu_id, gfn+i);
+					num ++;
+				}
+			}
+			ret = 1;
+		}
+	}
+	if (ret == 1) {
+		print_record("vcpu=%d,PROFILE_CONFLICT,END\n", vcpu->vcpu_id);
+		print_record("vcpu=%d,PROFILE_CONFLICT_NUM,%d\n", vcpu->vcpu_id, num);
+	}
+	return ret;
+}
+
 int tm_detect_conflict(unsigned long *access_bm, unsigned long *conflict_bm, int nbits)
 {
 	int k;
@@ -5912,8 +5942,14 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
 			// Detect conflict
+			#ifdef RR_PROFILE_CONFLICT
+			if (vcpu->is_early_rb ||
+					tm_detect_and_print_conflict(vcpu, vcpu->access_bitmap, 
+						vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
+			#else
 			if (vcpu->is_early_rb ||
 					tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
+			#endif
 				commit = 0;
 				vcpu->nr_conflict++;
 				vcpu->is_early_rb = 0;
@@ -7313,9 +7349,11 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			vcpu->rr_state = 1;
 			if (is_early_check == 1)
 				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
+			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, COMMIT=========\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
+			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, ROLLBACK=========\n", vcpu->vcpu_id);
 			return KVM_RR_ROLLBACK;
 		}
 	}
