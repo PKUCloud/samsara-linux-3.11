@@ -7135,6 +7135,8 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	/* Tamlok */
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages = 0;
+	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
+	vcpu->arch.nr_holding_pages = 0;
 	vcpu->need_memory_commit = 0;
 	vcpu->rr_state = 0;
 	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);

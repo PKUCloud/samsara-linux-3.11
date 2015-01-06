@@ -544,6 +544,8 @@ struct kvm_vcpu_arch {
 	/* Tamlok */
 	struct list_head private_pages;
 	int nr_private_pages;
+	struct list_head holding_pages; /* For pages that have been COW before */
+	int nr_holding_pages;
 
 	struct list_head ept_mirror;	/* A mirror of the EPT and its content */
 };
