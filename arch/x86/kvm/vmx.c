@@ -5835,6 +5835,7 @@ int tm_unsync_init(void *opaque)
 }
 
 extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
+extern void kvm_record_spte_withdraw_wperm(u64 *sptep);
 extern void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn);
 
 /* Tamlok
@@ -5861,6 +5862,8 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		kvm_record_spte_check_pfn(private_page->sptep,
 					  private_page->private_pfn);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
+		/* Widthdraw the write permission */
+		kvm_record_spte_withdraw_wperm(private_page->sptep);
 		//print_record("memory_commit() spte 0x%llx pfn 0x%llx -> "
 		//	     "spte 0x%llx pfn 0x%llx\n",
 		//	     old_spte, private_page->private_pfn,
@@ -5896,6 +5899,8 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		kvm_record_spte_check_pfn(private_page->sptep,
 					  private_page->private_pfn);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
+		/* Widthdraw the write permission */
+		kvm_record_spte_withdraw_wperm(private_page->sptep);
 		//print_record("memory_rollback() spte 0x%llx pfn 0x%llx -> "
 		//	     "spte 0x%llx pfn 0x%llx\n",
 		//	     old_spte, private_page->private_pfn,

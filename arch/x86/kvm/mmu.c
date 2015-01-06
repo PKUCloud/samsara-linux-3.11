@@ -2735,9 +2735,17 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 	 * *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
 	 * Need to mark the page clean?
 	 * mmu_spte_update()?
+	 * For now, we don't withdraw the write permission here. Instead, we
+	 * do this when we commit or rollback private pages.
 	 */
+	// *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
+}
+
+/* Withdrwo write permission of the spte */
+inline void kvm_record_spte_withdraw_wperm(u64 *sptep) {
 	*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
 }
+EXPORT_SYMBOL_GPL(kvm_record_spte_withdraw_wperm);
 
 /* Tamlok
  * Modified the spte's pfn fields
@@ -3258,7 +3266,11 @@ static void __mmu_walk_spt_clean(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 		if (is_last_spte(*sptep, level)) {
 			*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
-			*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
+			/* For now, we don't withdraw the write permission here.
+			 * Instead, we do this when we commit or rollback
+			 * private pages.
+			 */
+			// *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
 		} else {
  			__mmu_walk_spt_clean(vcpu , new_addr, level - 1, new_gpa);
 			*sptep &= ~VMX_EPT_ACCESS_BIT;
