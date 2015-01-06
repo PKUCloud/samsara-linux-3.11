@@ -2816,7 +2816,8 @@ EXPORT_SYMBOL_GPL(kvm_record_show_private_memory_stub);
  * Alloc a new page to replace the original page and update the spte, then add
  * an item to vcpu->arch.private_pages list.
  */
-void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
+void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
+			   gfn_t gfn)
 {
 	void *new_page;
 	struct kvm_private_mem_page *private_mem_page;
@@ -2830,6 +2831,7 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
 	/* We should use GFP_ATOMIC here, because it will be called while holding spinlock */
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
 	new_page = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+	private_mem_page->gfn = gfn;
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
@@ -2907,7 +2909,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 //	"sptep=0x%llx, spte=0x%llx\n",
 //	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
 //	iterator.sptep, *iterator.sptep);
-						kvm_record_memory_cow(vcpu, iterator.sptep, pfn);
+						kvm_record_memory_cow(vcpu, iterator.sptep, pfn, gfn);
 //print_record("vcpu=%d, PROFILE_COW, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 //print_record("vcpu=%d, %s, 2, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
 //	"sptep=0x%llx, spte=0x%llx\n",

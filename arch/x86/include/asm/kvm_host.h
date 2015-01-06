@@ -345,6 +345,7 @@ struct kvm_pmu {
  */
 struct kvm_private_mem_page {
 	struct list_head link;
+	gfn_t gfn;
 	pfn_t original_pfn;
 	pfn_t private_pfn;
 	u64 *sptep;	/*Pointer of the spte that references this pfn */
