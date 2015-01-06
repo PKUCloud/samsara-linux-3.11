@@ -786,6 +786,7 @@ struct kvm_x86_ops {
 	/* Do synchronizations before enabling record */
 	int (*tm_unsync_pre_record)(struct kvm_vcpu *vcpu, int kick);
 	int (*check_rr_commit)(struct kvm_vcpu *vcpu);
+	int (*tm_commit_memory_again)(struct kvm_vcpu *vcpu);
 	void (*tm_memory_commit)(struct kvm_vcpu *vcpu);
 	void (*tm_memory_rollback)(struct kvm_vcpu *vcpu);
 	int (*rr_apic_accept_irq)(struct kvm_lapic *apic, int delivery_mode,

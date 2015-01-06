@@ -6019,10 +6019,10 @@ restart:
 
 	/* Need to commit memory here */
 	if (kvm_record && vcpu->need_memory_commit) {
-		print_record("vcpu=%d, commit memory again------------------------\n", vcpu->vcpu_id);
-		kvm_record_clean_ept(vcpu);
-		kvm_x86_ops->tm_memory_commit(vcpu);
-		kvm_x86_ops->tlb_flush(vcpu);
+		// kvm_record_clean_ept(vcpu);
+		// kvm_x86_ops->tm_memory_commit(vcpu);
+		// kvm_x86_ops->tlb_flush(vcpu);
+		kvm_x86_ops->tm_commit_memory_again(vcpu);
 	}
 
 	vcpu->rr_state = 0;

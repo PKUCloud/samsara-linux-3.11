@@ -6055,6 +6055,34 @@ record_disable:
 }
 EXPORT_SYMBOL_GPL(tm_unsync_commit);
 
+/* Implemented specially for KVM_RECORD_HARDWARE_WALK_MMU and
+ * KVM_RECORD_UNSYNC_PREEMPTION.
+ * Assume that pages committed here will never conflit with other vcpus.
+ */
+int tm_commit_memory_again(struct kvm_vcpu *vcpu)
+{
+	print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
+	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
+	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+
+	/* Do we really need the tm_lock here */
+	// mutex_lock(&kvm->tm_lock);
+	
+	/* Commit memory here */
+	tm_memory_commit(vcpu);
+	
+	// mutex_unlock(&kvm->tm_lock);
+
+	/* Reset bitmaps */
+	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+
+	/* Should not use kvm_make_request here */
+	vmx_flush_tlb(vcpu);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(tm_commit_memory_again);
+
 // XELATEX
 static int handle_preemption(struct kvm_vcpu *vcpu)
 {
@@ -8970,6 +8998,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.tm_commit = NULL,
 	.tm_unsync_pre_record = vmx_tm_unsync_pre_record,
 	.check_rr_commit = vmx_check_rr_commit,
+	.tm_commit_memory_again = tm_commit_memory_again,
 	.tm_memory_commit = tm_memory_commit,
 	.tm_memory_rollback = tm_memory_rollback,
  	.rr_apic_accept_irq = __rr_apic_accept_irq,
