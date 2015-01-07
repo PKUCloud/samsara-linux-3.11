@@ -2742,7 +2742,7 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 }
 
 /* Withdrwo write permission of the spte */
-inline void kvm_record_spte_withdraw_wperm(u64 *sptep) {
+void kvm_record_spte_withdraw_wperm(u64 *sptep) {
 	*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
 }
 EXPORT_SYMBOL_GPL(kvm_record_spte_withdraw_wperm);
@@ -2767,7 +2767,10 @@ void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn)
 	u64 spte;
 
 	spte = *sptep;
-	ASSERT(pfn == ((spte & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT));
+	if (unlikely(pfn != ((spte & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT))) {
+		printk(KERN_ERR "error: %s pfn in spte has been changed\n",
+		       __func__);
+	}
 }
 EXPORT_SYMBOL_GPL(kvm_record_spte_check_pfn);
 
@@ -2850,9 +2853,10 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
 //print_record("vcpu=%d, %s, 5, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 
-	//print_record("vcpu=%d,memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte 0x%llx "
-	//			 "pfn 0x%llx\n", vcpu->vcpu_id, vcpu->arch.nr_private_pages, old_spte, pfn,
-	//			 *sptep, private_mem_page->private_pfn);
+	print_record("vcpu=%d,memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte "
+		     "0x%llx pfn 0x%llx\n", vcpu->vcpu_id,
+		     vcpu->arch.nr_private_pages, old_spte, pfn,
+		     *sptep, private_mem_page->private_pfn);
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages++;
@@ -2917,13 +2921,14 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 //	"sptep=0x%llx, spte=0x%llx\n",
 //	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
 //	iterator.sptep, *iterator.sptep);
-						kvm_record_memory_cow(vcpu, iterator.sptep, pfn, gfn);
+					kvm_record_memory_cow(vcpu, iterator.sptep, pfn, gfn);
+					print_record("gfn 0x%llx\n", gfn);
 //print_record("vcpu=%d, PROFILE_COW, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 //print_record("vcpu=%d, %s, 2, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
 //	"sptep=0x%llx, spte=0x%llx\n",
 //	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
 //	iterator.sptep, *iterator.sptep);
-						kvm_x86_ops->tlb_flush(vcpu);
+					kvm_x86_ops->tlb_flush(vcpu);
 				}
 			}
 			break;
@@ -3003,7 +3008,7 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 			!vcpu->arch.mmu.direct_map)
 		--level;
 
-	//kvm_record_check_ept_ad(vcpu);
+	kvm_record_check_ept_ad(vcpu);
 	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
 }
 
@@ -3513,7 +3518,7 @@ static bool fast_page_fault(struct kvm_vcpu *vcpu, gva_t gva, int level,
 	 */
 	if (!spte_is_locklessly_modifiable(spte))
 		goto exit;
-
+	
 	/*
 	 * Currently, fast page fault only works for direct mapping since
 	 * the gfn is not stable for indirect shadow page.
@@ -3525,7 +3530,7 @@ exit:
 			      spte, ret);
 	walk_shadow_page_lockless_end(vcpu);
 	if (kvm_record && ret) {
-		print_record("waring: fast_page_fault() gpa 0x%llx\n", gva);
+		print_record("warning: fast_page_fault() gpa 0x%llx\n", gva);
 	}
 	return ret;
 }

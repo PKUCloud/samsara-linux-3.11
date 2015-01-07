@@ -19,6 +19,15 @@
 //#define RR_EARLY_ROLLBACK
 #define RR_EARLY_CHECK
 
+/* If defined, we use the vcpu.arch.holding_pages to hold a list of pages that
+ * have been COW. We will not withdraw the write permission and free the private
+ * pages until we have to.
+ */
+#define RR_HOLDING_PAGES
+/* Maximum length of vcpu.arch.holding_pages list */
+#define RR_HOLDING_PAGES_MAXM 1024
+#define RR_HOLDING_PAGES_TARGET_NR 512
+
 struct vmexit_states {
 	uint64_t num;
 	uint64_t time;

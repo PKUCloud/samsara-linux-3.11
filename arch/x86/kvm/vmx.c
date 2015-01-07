@@ -5838,6 +5838,7 @@ extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
 extern void kvm_record_spte_withdraw_wperm(u64 *sptep);
 extern void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn);
 
+#ifndef RR_HOLDING_PAGES
 /* Tamlok
  * Commit the private pages to the original ones. Called when a quantum is
  * finished and can commit.
@@ -5876,10 +5877,105 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 }
+#else
+/* Rollback one private page */
+void tm_memory_rollback_page(struct kvm_private_mem_page *private_page)
+{
+	kvm_record_spte_check_pfn(private_page->sptep,
+				  private_page->private_pfn);
+	kvm_record_spte_set_pfn(private_page->sptep,
+				private_page->original_pfn);
+	kfree(pfn_to_kaddr(private_page->private_pfn));
+}
+
+/* Commit one private page */
+void tm_memory_commit_page(struct kvm_private_mem_page *private_page)
+{
+	void *origin, *private;
+
+	origin = pfn_to_kaddr(private_page->original_pfn);
+	private = pfn_to_kaddr(private_page->private_pfn);
+	copy_page(origin, private);
+}
+
+/* Commit memory.
+ * 1. Check the holding_pages list. For each node, test the gfn in
+ *    conflict_bitmap. If set, this page was updated by other vcpus and we need
+ *    to release the private pages and this node, set back the original pfn in
+ *    spte, withdraw the write permission. If not, test the gfn in dirty_bitmap.
+ *    If set, this page was written by this vcpu in this quantum. We need to
+ *    update the content back to the original page.
+ * 2. Commit the private_pages list and move it to the back of the
+ *    holding_pages list.
+ */
+void tm_memory_commit(struct kvm_vcpu *vcpu)
+{
+	struct kvm_private_mem_page *private_page;
+	struct kvm_private_mem_page *temp;
+	gfn_t gfn;
+	struct list_head temp_list;
+
+	print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
+		     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
+		     vcpu->arch.nr_holding_pages);
+	INIT_LIST_HEAD(&temp_list); /* Hold pages temporary */
+	/* Traverse the holding_pages */
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+				 link) {
+		gfn = private_page->gfn;
+		/* Whether this page has been touched by other vcpus */
+		if (test_bit(gfn, vcpu->conflict_bitmap)) {
+			tm_memory_rollback_page(private_page);
+			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			list_del(&private_page->link);
+			kfree(private_page);
+			vcpu->arch.nr_holding_pages--;
+		} else if (test_bit(gfn, vcpu->dirty_bitmap)) {
+			/* This page was touched by this vcpu in this quantum */
+			tm_memory_commit_page(private_page);
+			list_move_tail(&private_page->link, &temp_list);
+		}
+	}
+	if (!list_empty(&temp_list)) {
+		/* Move the temp_list to the back of the holding_pages */
+		list_splice_tail_init(&temp_list, &vcpu->arch.holding_pages);
+	}
+	/* May be useless */
+	if (vcpu->arch.nr_holding_pages == 0) {
+		INIT_LIST_HEAD(&vcpu->arch.holding_pages);
+	}
+
+	/* Traverse the private_pages */
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
+				 link) {
+		tm_memory_commit_page(private_page);
+		list_move_tail(&private_page->link, &vcpu->arch.holding_pages);
+		vcpu->arch.nr_private_pages--;
+		vcpu->arch.nr_holding_pages++;
+	}
+	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+
+	if (vcpu->arch.nr_holding_pages > RR_HOLDING_PAGES_MAXM) {
+		/* Delete old holding_pages */
+		list_for_each_entry_safe(private_page, temp,
+					 &vcpu->arch.holding_pages, link) {
+			tm_memory_rollback_page(private_page);
+			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			list_del(&private_page->link);
+			kfree(private_page);
+			vcpu->arch.nr_holding_pages--;
+			if (vcpu->arch.nr_holding_pages <=
+			    RR_HOLDING_PAGES_TARGET_NR) {
+				break;
+			}
+		}
+	}
+}
+#endif
 
 extern void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete);
 
-
+#ifndef RR_HOLDING_PAGES
 /* Tamlok
  * Rollback the private pages to the original ones. Called when a quantum is
  * finished and conflict with others so that have to rollback.
@@ -5914,9 +6010,62 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 }
+#else
+/* Rollback memory.
+ * 1. Check the holding_pages list. For each node, test the gfn in
+ *    conflict_bitmap. If set, this page was updated by other vcpus and we need
+ *    to release the private pages and this node, set back the original pfn in
+ *    spte, withdraw the write permission. If not, test the gfn in dirty_bitmap.
+ *    If set, this page was written by this vcpu in this quantum. We need to
+ *    rollback this page.
+ * 2. Rollback the private_pages list.
+ */
+void tm_memory_rollback(struct kvm_vcpu *vcpu)
+{
+	struct kvm_private_mem_page *private_page;
+	struct kvm_private_mem_page *temp;
+	gfn_t gfn;
 
+	print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
+		     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
+		     vcpu->arch.nr_holding_pages);
+	/* Traverse the holding_pages */
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+				 link) {
+		gfn = private_page->gfn;
+		/* Whether this page has been touched by other vcpus */
+		if (test_bit(gfn, vcpu->conflict_bitmap)) {
+			tm_memory_rollback_page(private_page);
+			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			list_del(&private_page->link);
+			kfree(private_page);
+			vcpu->arch.nr_holding_pages--;
+		} else if (test_bit(gfn, vcpu->dirty_bitmap)) {
+			/* This page was touched by this vcpu in this quantum */
+			tm_memory_rollback_page(private_page);
+			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			list_del(&private_page->link);
+			kfree(private_page);
+			vcpu->arch.nr_holding_pages--;
+		}
+	}
+	if (vcpu->arch.nr_holding_pages == 0) {
+		INIT_LIST_HEAD(&vcpu->arch.holding_pages);
+	}
 
-
+	/* Traverse the private_pages */
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
+				 link)
+	{
+		tm_memory_rollback_page(private_page);
+		kvm_record_spte_withdraw_wperm(private_page->sptep);
+		list_del(&private_page->link);
+		kfree(private_page);
+		vcpu->arch.nr_private_pages--;
+	}
+	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+}
+#endif
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
@@ -5977,7 +6126,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				vcpu->nr_rollback++;
 				goto unlock;
 			}
-			print_record("vcpu=%d, set dirty bit\n", vcpu->vcpu_id);
 			// Set dirty bit
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
@@ -6061,17 +6209,28 @@ EXPORT_SYMBOL_GPL(tm_unsync_commit);
  */
 int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 {
+	struct kvm *kvm = vcpu->kvm;
+	int i;
+	int online_vcpus = atomic_read(&kvm->online_vcpus);
+
 	print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
 	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 
 	/* Do we really need the tm_lock here */
-	// mutex_lock(&kvm->tm_lock);
-	
+	mutex_lock(&kvm->tm_lock);
+	/* Spread the dirty_bitmap to other vcpus's conflict_bitmap */
+	for (i = 0; i < online_vcpus; ++i) {
+		if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
+			continue;
+		bitmap_or(kvm->vcpus[i]->conflict_bitmap, vcpu->dirty_bitmap,
+			  kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
+	}
+
 	/* Commit memory here */
 	tm_memory_commit(vcpu);
 	
-	// mutex_unlock(&kvm->tm_lock);
+	mutex_unlock(&kvm->tm_lock);
 
 	/* Reset bitmaps */
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
