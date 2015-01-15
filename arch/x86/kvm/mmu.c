@@ -3008,7 +3008,7 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 			!vcpu->arch.mmu.direct_map)
 		--level;
 
-	kvm_record_check_ept_ad(vcpu);
+	//kvm_record_check_ept_ad(vcpu);
 	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
 }
 

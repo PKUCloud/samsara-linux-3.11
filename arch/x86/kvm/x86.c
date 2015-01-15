@@ -5209,6 +5209,9 @@ int kvm_fast_pio_out(struct kvm_vcpu *vcpu, int size, unsigned short port)
 	unsigned long val = kvm_register_read(vcpu, VCPU_REGS_RAX);
 	int ret = emulator_pio_out_emulated(&vcpu->arch.emulate_ctxt,
 					    size, port, &val, 1);
+if (vcpu->is_recording)
+print_record("vcpu=%d, %s, port=0x%x, size=%d, val=0x%x\n",
+vcpu->vcpu_id, __func__, port, size, val);
 	/* do not return to emulator after return from userspace */
 	vcpu->arch.pio.count = 0;
 	return ret;
@@ -6301,7 +6304,8 @@ static inline int complete_emulated_io(struct kvm_vcpu *vcpu)
 static int complete_emulated_pio(struct kvm_vcpu *vcpu)
 {
 	BUG_ON(!vcpu->arch.pio.count);
-
+if (vcpu->is_recording)
+print_record("vcpu=%d, %s\n", vcpu->vcpu_id, __func__);
 	return complete_emulated_io(vcpu);
 }
 

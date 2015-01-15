@@ -5464,6 +5464,10 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 
+	if (vcpu->is_recording) {
+		print_record("vcpu=%d, %s, gfn=0x%llx\n", vcpu->vcpu_id, __func__, gpa>>PAGE_SHIFT);
+	}
+
 	ret = handle_mmio_page_fault_common(vcpu, gpa, true);
 	if (likely(ret == RET_MMIO_PF_EMULATE))
 		return x86_emulate_instruction(vcpu, gpa, 0, NULL, 0) ==
@@ -5914,6 +5918,9 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	struct kvm_private_mem_page *temp;
 	gfn_t gfn;
 	struct list_head temp_list;
+	void *origin, *private;
+	u64 old_spte;
+	u32 exit_reason = to_vmx(vcpu)->exit_reason;
 
 	print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
 		     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
@@ -5936,10 +5943,12 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			list_move_tail(&private_page->link, &temp_list);
 		}
 	}
+
 	if (!list_empty(&temp_list)) {
 		/* Move the temp_list to the back of the holding_pages */
 		list_splice_tail_init(&temp_list, &vcpu->arch.holding_pages);
 	}
+
 	/* May be useless */
 	if (vcpu->arch.nr_holding_pages == 0) {
 		INIT_LIST_HEAD(&vcpu->arch.holding_pages);
@@ -5948,17 +5957,41 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	/* Traverse the private_pages */
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 				 link) {
-		tm_memory_commit_page(private_page);
-		list_move_tail(&private_page->link, &vcpu->arch.holding_pages);
-		vcpu->arch.nr_private_pages--;
-		vcpu->arch.nr_holding_pages++;
+		if (memslot_id(vcpu->kvm, private_page->gfn) == 8) {
+			tm_memory_commit_page(private_page);
+			list_move_tail(&private_page->link, &vcpu->arch.holding_pages);
+			vcpu->arch.nr_private_pages--;
+			vcpu->arch.nr_holding_pages++;
+		} else {
+			origin = pfn_to_kaddr(private_page->original_pfn);
+			private = pfn_to_kaddr(private_page->private_pfn);
+			copy_page(origin, private);
+			old_spte = *(private_page->sptep);
+
+			kvm_record_spte_check_pfn(private_page->sptep,
+					  private_page->private_pfn);
+			kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
+			/* Widthdraw the write permission */
+			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			//print_record("memory_commit() spte 0x%llx pfn 0x%llx -> "
+			//	     "spte 0x%llx pfn 0x%llx\n",
+			//	     old_spte, private_page->private_pfn,
+			//	     *(private_page->sptep),
+			//	     private_page->original_pfn);
+			kfree(private);
+			list_del(&private_page->link);
+			kfree(private_page);
+			vcpu->arch.nr_private_pages--;
+		}
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 
 	if (vcpu->arch.nr_holding_pages > RR_HOLDING_PAGES_MAXM) {
-		/* Delete old holding_pages */
+		// Delete old holding_pages 
 		list_for_each_entry_safe(private_page, temp,
 					 &vcpu->arch.holding_pages, link) {
+			print_record("vcpu=%d, %s, collect pages, gfn=0x%llx\n",
+				vcpu->vcpu_id, __func__, private_page->gfn);
 			tm_memory_rollback_page(private_page);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
 			list_del(&private_page->link);
@@ -5970,6 +6003,40 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			}
 		}
 	}
+
+
+	// TEST: Copye inconsistent page
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+				 link) {
+		int i;
+		origin = pfn_to_kaddr(private_page->original_pfn);
+		private = pfn_to_kaddr(private_page->private_pfn);
+		for (i=0; i < PAGE_SIZE; i++) {
+			if (((char *)origin)[i] != ((char *)private)[i]) {
+				print_record("vcpu=%d, %s, content inconsistent, gfn=0x%llx, "
+					"original_pfn=0x%llx, private_pfn=0x%llx, pos=%d\n",
+					vcpu->vcpu_id, __func__, private_page->gfn,
+					private_page->original_pfn, private_page->private_pfn, i);
+				copy_page(private, origin);
+				//break;
+			}
+		}
+	}
+
+/*
+	// TEST: Handle exit_reason == EXIT_REASON_IO_INSTRUCTION
+	if (exit_reason == 30) {
+		list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+				 link) {
+			tm_memory_rollback_page(private_page);
+			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			list_del(&private_page->link);
+			kfree(private_page);
+			vcpu->arch.nr_holding_pages--;
+		}
+	}
+*/
+	print_record("vcpu=%d, %s, end of tm_memory_commit\n", vcpu->vcpu_id, __func__);
 }
 #endif
 
@@ -7528,7 +7595,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		}
 	}
 	#endif
-
+print_record("vcpu=%d, %s, exit_reason=%d\n", vcpu->vcpu_id, __func__, exit_reason);
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
 		//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
