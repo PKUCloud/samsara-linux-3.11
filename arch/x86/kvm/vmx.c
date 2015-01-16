@@ -6148,8 +6148,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				/* Now another vcpu is in exclusive commit state, need to rollback*/
 				print_record("vcpu=%d going to commit but another vcpu is in exclusive commit, so rollback\n", vcpu->vcpu_id);
 				commit = 0;
-				vcpu->nr_rollback++;
-				goto unlock;
+				goto rollback;
 			}
 			// Set dirty bit
 			for (i=0; i<online_vcpus; i++) {
@@ -6170,6 +6169,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			#endif
 			vcpu->nr_rollback = 0;
 		} else {
+rollback:
 			vcpu->nr_rollback++;
 			/* Rollback here in the lock */
 			tm_memory_rollback(vcpu);
@@ -6183,7 +6183,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				}
 			}
 		}
-unlock:
 		// Clear conflict bitmap
 		bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 		mutex_unlock(&(kvm->tm_lock));
