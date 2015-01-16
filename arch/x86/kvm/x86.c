@@ -6169,7 +6169,7 @@ restart:
 		} else if (r == KVM_RR_ROLLBACK) {
 			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d, nr_rollback=%d\n",
 				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
-			kvm_x86_ops->tm_memory_rollback(vcpu);
+			//kvm_x86_ops->tm_memory_rollback(vcpu);
 			kvm_x86_ops->tlb_flush(vcpu);
 			vcpu->need_memory_commit = 0;
 			if (kvm_record && mirror_flag == 2) {

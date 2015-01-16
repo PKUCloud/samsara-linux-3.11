@@ -6135,8 +6135,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				vcpu->nr_conflict++;
 				vcpu->is_early_rb = 0;
 			}
-			// Clear conflict bitmap
-			bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 		}
 
 		if (commit) {
@@ -6173,6 +6171,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			vcpu->nr_rollback = 0;
 		} else {
 			vcpu->nr_rollback++;
+			/* Rollback here in the lock */
+			tm_memory_rollback(vcpu);
 			if (!vcpu->exclusive_commit && vcpu->nr_rollback >= RR_CONSEC_RB_TIME) {
 				print_record("vcpu=%d rollback > %d, try to be exclusiv\n",
 					vcpu->vcpu_id, RR_CONSEC_RB_TIME);
@@ -6184,6 +6184,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			}
 		}
 unlock:
+		// Clear conflict bitmap
+		bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 		mutex_unlock(&(kvm->tm_lock));
 
 	} else {
