@@ -5882,16 +5882,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 }
 #else
-/* Rollback one private page */
-void tm_memory_rollback_page(struct kvm_private_mem_page *private_page)
-{
-	kvm_record_spte_check_pfn(private_page->sptep,
-				  private_page->private_pfn);
-	kvm_record_spte_set_pfn(private_page->sptep,
-				private_page->original_pfn);
-	kfree(pfn_to_kaddr(private_page->private_pfn));
-}
-
 /* Commit one private page */
 void tm_memory_commit_page(struct kvm_private_mem_page *private_page)
 {
@@ -5920,7 +5910,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	struct list_head temp_list;
 	void *origin, *private;
 	u64 old_spte;
-	u32 exit_reason = to_vmx(vcpu)->exit_reason;
 
 	print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
 		     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
@@ -5932,8 +5921,10 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		gfn = private_page->gfn;
 		/* Whether this page has been touched by other vcpus */
 		if (test_bit(gfn, vcpu->conflict_bitmap)) {
-			tm_memory_rollback_page(private_page);
+			kvm_record_spte_set_pfn(private_page->sptep,
+				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kfree(private_page);
 			vcpu->arch.nr_holding_pages--;
@@ -5992,8 +5983,10 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 					 &vcpu->arch.holding_pages, link) {
 			print_record("vcpu=%d, %s, collect pages, gfn=0x%llx\n",
 				vcpu->vcpu_id, __func__, private_page->gfn);
-			tm_memory_rollback_page(private_page);
+			kvm_record_spte_set_pfn(private_page->sptep,
+				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kfree(private_page);
 			vcpu->arch.nr_holding_pages--;
@@ -6003,39 +5996,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			}
 		}
 	}
-
-
-	// TEST: Copye inconsistent page
-	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
-				 link) {
-		int i;
-		origin = pfn_to_kaddr(private_page->original_pfn);
-		private = pfn_to_kaddr(private_page->private_pfn);
-		for (i=0; i < PAGE_SIZE; i++) {
-			if (((char *)origin)[i] != ((char *)private)[i]) {
-				print_record("vcpu=%d, %s, content inconsistent, gfn=0x%llx, "
-					"original_pfn=0x%llx, private_pfn=0x%llx, pos=%d\n",
-					vcpu->vcpu_id, __func__, private_page->gfn,
-					private_page->original_pfn, private_page->private_pfn, i);
-				copy_page(private, origin);
-				//break;
-			}
-		}
-	}
-
-/*
-	// TEST: Handle exit_reason == EXIT_REASON_IO_INSTRUCTION
-	if (exit_reason == 30) {
-		list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
-				 link) {
-			tm_memory_rollback_page(private_page);
-			kvm_record_spte_withdraw_wperm(private_page->sptep);
-			list_del(&private_page->link);
-			kfree(private_page);
-			vcpu->arch.nr_holding_pages--;
-		}
-	}
-*/
 	print_record("vcpu=%d, %s, end of tm_memory_commit\n", vcpu->vcpu_id, __func__);
 }
 #endif
@@ -6100,17 +6060,15 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
 				 link) {
 		gfn = private_page->gfn;
-		/* Whether this page has been touched by other vcpus */
-		if (test_bit(gfn, vcpu->conflict_bitmap)) {
-			tm_memory_rollback_page(private_page);
+		/* Whether this page has been touched by other vcpus or by this vcpu
+		 * in this quantum.
+		 */
+		if (test_bit(gfn, vcpu->conflict_bitmap) ||
+			test_bit(gfn, vcpu->dirty_bitmap)) {
+			kvm_record_spte_set_pfn(private_page->sptep,
+				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
-			list_del(&private_page->link);
-			kfree(private_page);
-			vcpu->arch.nr_holding_pages--;
-		} else if (test_bit(gfn, vcpu->dirty_bitmap)) {
-			/* This page was touched by this vcpu in this quantum */
-			tm_memory_rollback_page(private_page);
-			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kfree(private_page);
 			vcpu->arch.nr_holding_pages--;
@@ -6124,8 +6082,10 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 				 link)
 	{
-		tm_memory_rollback_page(private_page);
+		kvm_record_spte_set_pfn(private_page->sptep,
+				private_page->original_pfn);
 		kvm_record_spte_withdraw_wperm(private_page->sptep);
+		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
 		kfree(private_page);
 		vcpu->arch.nr_private_pages--;
