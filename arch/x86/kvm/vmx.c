@@ -5710,6 +5710,7 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 }
 
 extern void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu);
+void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu);
 
 void tm_disable(struct kvm_vcpu *vcpu)
 {
@@ -5739,6 +5740,7 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	vcpu->nr_rollback = 0;
 
 	kvm_record_clear_ept_mirror(vcpu);
+	kvm_record_clear_holding_pages(vcpu);
 
 	up(&(kvm->tm_enter_sem));
 	for (i=0; i<online_vcpus - 1; i++)
@@ -6093,6 +6095,26 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 }
 #endif
+
+void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu)
+{
+	struct kvm_private_mem_page *private_page;
+	struct kvm_private_mem_page *temp;
+
+	print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
+
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+			link) {
+		kvm_record_spte_set_pfn(private_page->sptep,
+			private_page->original_pfn);
+		kvm_record_spte_withdraw_wperm(private_page->sptep);
+		kfree(pfn_to_kaddr(private_page->private_pfn));
+		list_del(&private_page->link);
+		kfree(private_page);
+		vcpu->arch.nr_holding_pages--;
+	}
+	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
+}
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
