@@ -373,6 +373,20 @@ struct kvm_dirty_log {
 	};
 };
 
+ // XELATEX
+#define SET_DMA_BEGIN 0
+#define SET_DMA_DATA  1
+#define SET_DMA_END   2
+#define DMA_START     3
+#define DMA_FINISHED  4
+
+#define DMA_AC_SIZE 32
+struct DMA_AC {
+	int cmd;
+	int size;
+	__u32 gfn[DMA_AC_SIZE];
+};
+
 /* for KVM_SET_SIGNAL_MASK */
 struct kvm_signal_mask {
 	__u32 len;
@@ -864,6 +878,9 @@ struct kvm_device_attr {
 					struct kvm_userspace_memory_region)
 #define KVM_SET_TSS_ADDR          _IO(KVMIO,   0x47)
 #define KVM_SET_IDENTITY_MAP_ADDR _IOW(KVMIO,  0x48, __u64)
+// XELATEX
+#define KVM_DMA_COMMIT            _IOWR(KVMIO, 0x49, struct DMA_AC)
+
 
 /* enable ucontrol for s390 */
 struct kvm_s390_ucas_mapping {

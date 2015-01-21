@@ -2000,6 +2000,43 @@ static int create_vcpu_fd(struct kvm_vcpu *vcpu)
 	return anon_inode_getfd("kvm-vcpu", &kvm_vcpu_fops, vcpu, O_RDWR);
 }
 
+// XELATEX
+static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
+{
+	int online_vcpus = atomic_read(&(kvm->online_vcpus));
+	int i;
+
+	switch (DMA_access->cmd) {
+	case SET_DMA_DATA: {
+		int j;
+		for (i = 0; i < DMA_access->size; i++) {
+			print_record("%s, DMA_access, gfn=0x%x\n", __func__, DMA_access->gfn[i]);
+			for (j=0; j<online_vcpus; j++) {
+				set_bit(DMA_access->gfn[i], kvm->vcpus[j]->DMA_access_bitmap);
+			}
+		}
+		print_record("%s, DMA_access, size=%d\n", __func__, DMA_access->size);
+		break;
+	}
+	case DMA_START:
+		mutex_lock(&(kvm->tm_lock));
+		//sema_init(&(kvm->tm_dma_sem), 0);
+		//atomic_set(&(kvm->tm_dma), 1);
+		print_record("%s, DMA_START\n", __func__);
+		break;
+	case DMA_FINISHED:
+		//for (i=0; i<online_vcpus; i++)
+		//	up(&(kvm->tm_dma_sem));
+		//atomic_set(&(kvm->tm_dma), 0);
+		print_record("%s, DMA_FINISHED\n", __func__);
+		mutex_unlock(&(kvm->tm_lock));
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
 /*
  * Creates some virtual cpus.  Good luck creating more than one.
  */
@@ -2428,6 +2465,19 @@ static long kvm_vm_ioctl(struct file *filp,
 	if (kvm->mm != current->mm)
 		return -EIO;
 	switch (ioctl) {
+	// XELATEX
+	case KVM_DMA_COMMIT: {
+		struct DMA_AC DMA_access;
+
+		if (!kvm_record)
+			return 0;
+		r = -EFAULT;
+		if (copy_from_user(&DMA_access, argp, sizeof(struct DMA_AC)))
+			goto out;
+
+		r = kvm_vm_set_DMA_access(kvm, &DMA_access);
+		break;
+	}
 	case KVM_CREATE_VCPU:
 		r = kvm_vm_ioctl_create_vcpu(kvm, arg);
 		break;

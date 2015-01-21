@@ -308,6 +308,7 @@ struct kvm_vcpu {
 	DECLARE_BITMAP(access_bitmap, TM_BITMAP_SIZE);
 	DECLARE_BITMAP(dirty_bitmap, TM_BITMAP_SIZE);
 	DECLARE_BITMAP(conflict_bitmap, TM_BITMAP_SIZE);
+	DECLARE_BITMAP(DMA_access_bitmap, TM_BITMAP_SIZE);
 	gfn_t access_size;
 	gfn_t dirty_size;
 	gfn_t conflict_size;
@@ -466,6 +467,8 @@ struct kvm {
 	struct spinlock tm_timer_lock;
 	struct semaphore tm_enter_sem;
 	struct semaphore tm_exit_sem;
+	struct semaphore tm_dma_sem;
+	atomic_t tm_dma;
 	atomic_t finished_slaves;
 	struct hrtimer tm_timer;
 	bool tm_timer_set;

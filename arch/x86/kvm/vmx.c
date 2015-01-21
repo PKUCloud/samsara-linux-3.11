@@ -5998,6 +5998,37 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			}
 		}
 	}
+
+	// Copy inconsistent page based on DMA access bitmap
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+				 link) {
+		int i;
+		gfn = private_page->gfn;
+		origin = pfn_to_kaddr(private_page->original_pfn);
+		private = pfn_to_kaddr(private_page->private_pfn);
+		if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
+			print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
+				vcpu->vcpu_id, __func__, gfn);
+			copy_page(private, origin);
+		}
+	}
+/*
+	// TEST: Copy inconsistent pages
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+				 link) {
+		int i;
+		gfn = private_page->gfn;
+		origin = pfn_to_kaddr(private_page->original_pfn);
+		private = pfn_to_kaddr(private_page->private_pfn);
+		for (i=0; i<PAGE_SIZE; i++) {
+			if (((char*)origin)[i] != ((char*)private)[i]) {
+				copy_page(private, origin);
+				print_record("vcpu=%d, %s, content inconsistent, gfn=0x%llx\n",
+					vcpu->vcpu_id, __func__, gfn);
+			}
+		}
+	}
+*/
 	print_record("vcpu=%d, %s, end of tm_memory_commit\n", vcpu->vcpu_id, __func__);
 }
 #endif
@@ -6054,6 +6085,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	struct kvm_private_mem_page *private_page;
 	struct kvm_private_mem_page *temp;
 	gfn_t gfn;
+	void *origin, *private;
 
 	print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
 		     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
@@ -6093,6 +6125,20 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		vcpu->arch.nr_private_pages--;
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+
+	// Copy inconsistent page based on DMA access bitmap
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+				 link) {
+		int i;
+		gfn = private_page->gfn;
+		origin = pfn_to_kaddr(private_page->original_pfn);
+		private = pfn_to_kaddr(private_page->private_pfn);
+		if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
+			print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
+				vcpu->vcpu_id, __func__, gfn);
+			copy_page(private, origin);
+		}
+	}
 }
 #endif
 
@@ -6114,6 +6160,16 @@ void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu)
 		vcpu->arch.nr_holding_pages--;
 	}
 	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
+}
+
+void inline tm_wait_DMA(struct kvm_vcpu *vcpu)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	if (atomic_read(&(kvm->tm_dma)) == 1) {
+		print_record("vcpu=%d, %s, Wait for DMA finished\n", vcpu->vcpu_id, __func__);
+		down_interruptible(&(kvm->tm_dma_sem));
+	}
 }
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
@@ -6143,6 +6199,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 		mutex_lock(&(kvm->tm_lock));
 
+		// Wait for DMA finished
+		//tm_wait_DMA(vcpu);
+
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
 			// Detect conflict
 			#ifdef RR_PROFILE_CONFLICT
@@ -6151,7 +6210,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 						vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
 			#else
 			if (vcpu->is_early_rb ||
-					tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
+					tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE) ||
+					tm_detect_conflict(vcpu->access_bitmap, vcpu->DMA_access_bitmap, TM_BITMAP_SIZE)) {
 			#endif
 				commit = 0;
 				vcpu->nr_conflict++;
@@ -6207,6 +6267,11 @@ rollback:
 		}
 		// Clear conflict bitmap
 		bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+		// Clear DMA bitmap
+		if (atomic_read(&(kvm->tm_dma)) == 0)
+			bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
+		else
+			print_record("vcpu=%d, %s, error: Why here?\n", vcpu->vcpu_id, __func__);
 		mutex_unlock(&(kvm->tm_lock));
 
 	} else {
@@ -6267,6 +6332,9 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
 	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 
+	// Wait for DMA finished
+	//tm_wait_DMA(vcpu);
+
 	/* Do we really need the tm_lock here */
 	mutex_lock(&kvm->tm_lock);
 	/* Spread the dirty_bitmap to other vcpus's conflict_bitmap */
@@ -6279,7 +6347,9 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 
 	/* Commit memory here */
 	tm_memory_commit(vcpu);
-	
+
+	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
+
 	mutex_unlock(&kvm->tm_lock);
 
 	/* Reset bitmaps */

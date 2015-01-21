@@ -7128,6 +7128,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
 	INIT_LIST_HEAD(&(vcpu->events_list));
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->nr_test = 0;

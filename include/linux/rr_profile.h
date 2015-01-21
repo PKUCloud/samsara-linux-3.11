@@ -17,7 +17,7 @@
 #define RR_AD_BIT_OPT
 /* Early rollback and early check is exclusive */
 //#define RR_EARLY_ROLLBACK
-//#define RR_EARLY_CHECK
+#define RR_EARLY_CHECK
 
 /* If defined, we use the vcpu.arch.holding_pages to hold a list of pages that
  * have been COW. We will not withdraw the write permission and free the private
@@ -25,8 +25,8 @@
  */
 #define RR_HOLDING_PAGES
 /* Maximum length of vcpu.arch.holding_pages list */
-#define RR_HOLDING_PAGES_MAXM 128
-#define RR_HOLDING_PAGES_TARGET_NR 64
+#define RR_HOLDING_PAGES_MAXM        512
+#define RR_HOLDING_PAGES_TARGET_NR   256
 
 struct vmexit_states {
 	uint64_t num;
