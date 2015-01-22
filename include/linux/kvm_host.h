@@ -322,6 +322,7 @@ struct kvm_vcpu {
 	int need_memory_commit;
 	int rr_state;
 	int is_early_rb;
+	int need_dma_check;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;

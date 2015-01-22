@@ -6000,17 +6000,20 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	}
 
 	// Copy inconsistent page based on DMA access bitmap
-	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
-				 link) {
-		int i;
-		gfn = private_page->gfn;
-		origin = pfn_to_kaddr(private_page->original_pfn);
-		private = pfn_to_kaddr(private_page->private_pfn);
-		if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
-			//print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
-			//	vcpu->vcpu_id, __func__, gfn);
-			copy_page(private, origin);
+	if (vcpu->need_dma_check) {
+		list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+					 link) {
+			int i;
+			gfn = private_page->gfn;
+			origin = pfn_to_kaddr(private_page->original_pfn);
+			private = pfn_to_kaddr(private_page->private_pfn);
+			if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
+				//print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
+				//	vcpu->vcpu_id, __func__, gfn);
+				copy_page(private, origin);
+			}
 		}
+		vcpu->need_dma_check = 0;
 	}
 /*
 	// TEST: Copy inconsistent pages

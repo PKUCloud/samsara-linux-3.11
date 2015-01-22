@@ -2020,6 +2020,9 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 	}
 	case DMA_START:
 		mutex_lock(&(kvm->tm_lock));
+		for (i=0; i<online_vcpus; i++) {
+			kvm->vcpus[i]->need_dma_check = 1;
+		}
 		//sema_init(&(kvm->tm_dma_sem), 0);
 		//atomic_set(&(kvm->tm_dma), 1);
 		print_record("%s, DMA_START\n", __func__);

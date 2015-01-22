@@ -7132,6 +7132,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&(vcpu->events_list));
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->nr_test = 0;
+	vcpu->need_dma_check = 0;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;
