@@ -5464,9 +5464,9 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 
-	if (vcpu->is_recording) {
-		print_record("vcpu=%d, %s, gfn=0x%llx\n", vcpu->vcpu_id, __func__, gpa>>PAGE_SHIFT);
-	}
+	//if (vcpu->is_recording) {
+	//	print_record("vcpu=%d, %s, gfn=0x%llx\n", vcpu->vcpu_id, __func__, gpa>>PAGE_SHIFT);
+	//}
 
 	ret = handle_mmio_page_fault_common(vcpu, gpa, true);
 	if (likely(ret == RET_MMIO_PF_EMULATE))
@@ -5913,9 +5913,9 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	void *origin, *private;
 	u64 old_spte;
 
-	print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
-		     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
-		     vcpu->arch.nr_holding_pages);
+	//print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
+	//	     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
+	//	     vcpu->arch.nr_holding_pages);
 	INIT_LIST_HEAD(&temp_list); /* Hold pages temporary */
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
@@ -5983,8 +5983,8 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		// Delete old holding_pages 
 		list_for_each_entry_safe(private_page, temp,
 					 &vcpu->arch.holding_pages, link) {
-			print_record("vcpu=%d, %s, collect pages, gfn=0x%llx\n",
-				vcpu->vcpu_id, __func__, private_page->gfn);
+			//print_record("vcpu=%d, %s, collect pages, gfn=0x%llx\n",
+			//	vcpu->vcpu_id, __func__, private_page->gfn);
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6007,8 +6007,8 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		origin = pfn_to_kaddr(private_page->original_pfn);
 		private = pfn_to_kaddr(private_page->private_pfn);
 		if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
-			print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
-				vcpu->vcpu_id, __func__, gfn);
+			//print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
+			//	vcpu->vcpu_id, __func__, gfn);
 			copy_page(private, origin);
 		}
 	}
@@ -6029,7 +6029,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		}
 	}
 */
-	print_record("vcpu=%d, %s, end of tm_memory_commit\n", vcpu->vcpu_id, __func__);
+	//print_record("vcpu=%d, %s, end of tm_memory_commit\n", vcpu->vcpu_id, __func__);
 }
 #endif
 
@@ -6087,9 +6087,9 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	gfn_t gfn;
 	void *origin, *private;
 
-	print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
-		     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
-		     vcpu->arch.nr_holding_pages);
+	//print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
+	//	     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
+	//	     vcpu->arch.nr_holding_pages);
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
 				 link) {
@@ -6328,7 +6328,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	int i;
 	int online_vcpus = atomic_read(&kvm->online_vcpus);
 
-	print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
+	//print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
 	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 
@@ -7648,7 +7648,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		}
 	}
 	#endif
-print_record("vcpu=%d, %s, exit_reason=%d\n", vcpu->vcpu_id, __func__, exit_reason);
+//print_record("vcpu=%d, %s, exit_reason=%d\n", vcpu->vcpu_id, __func__, exit_reason);
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
 		//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
