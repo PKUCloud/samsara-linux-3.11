@@ -6026,6 +6026,7 @@ restart:
 		// kvm_x86_ops->tm_memory_commit(vcpu);
 		// kvm_x86_ops->tlb_flush(vcpu);
 		kvm_x86_ops->tm_commit_memory_again(vcpu);
+		vcpu->need_memory_commit = 0;
 	}
 
 	vcpu->rr_state = 0;
@@ -7114,6 +7115,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	// XELATEX
 	vcpu->is_kicked = false;
 	INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
+	INIT_LIST_HEAD(&(vcpu->commit_again_gfn_list));
 	vcpu->is_trapped = false;
 	vcpu->is_recording = false;
 	//rsr-debug

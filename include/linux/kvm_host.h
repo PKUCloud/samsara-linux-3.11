@@ -240,6 +240,11 @@ struct rr_event {
 	
 };
 
+struct gfn_list {
+	struct list_head link;
+	gfn_t gfn;
+};
+
 struct kvm_vcpu {
 	struct kvm *kvm;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -298,6 +303,7 @@ struct kvm_vcpu {
 	// XELATEX
 	bool is_kicked;
 	struct list_head commit_sptep_list;
+	struct list_head commit_again_gfn_list;
 	unsigned long mmu_vcpu_valid_gen;
 	bool is_trapped;
 	unsigned long long nr_vmexit;

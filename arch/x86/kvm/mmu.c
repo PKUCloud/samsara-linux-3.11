@@ -4077,6 +4077,45 @@ out_unlock:
 }
 
 // XELATEX
+int gfn_clear_AD_bit(struct kvm_vcpu *vcpu, gfn_t gfn)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t addr = (u64)gfn << PAGE_SHIFT;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+	unsigned index;
+	u64 *sptep;
+
+	if (level != PT64_ROOT_LEVEL) {
+		printk(KERN_ERR "XELATEX - NO PT64_ROOT_LEVEL support\n");
+		return -1;
+	}
+
+	if (vcpu->arch.mmu.root_hpa == INVALID_PAGE) {
+		printk(KERN_ERR "XELATEX - root_hpa == INVALID_PAGE\n");
+		return -1;
+	}
+
+	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
+		index = SHADOW_PT_INDEX(addr, level);
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (sptep == 0xffff87ffffffffffULL)
+			printk(KERN_ERR "vcpu=%d, index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
+						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
+				vcpu->vcpu_id, index, sptep, shadow_addr, __va(shadow_addr), level,
+				vcpu->arch.mmu.root_hpa);
+		if (!is_shadow_present_pte(*sptep)) {
+			return -1;
+		}
+		*sptep &= ~(VMX_EPT_ACCESS_BIT);
+		if (is_last_spte(*sptep, level)) {
+			*sptep &= ~(VMX_EPT_DIRTY_BIT);
+			return 0;
+		}
+		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
+	}
+	return 0;
+}
+
 void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 {
 	int level = vcpu->arch.mmu.shadow_root_level;
@@ -4164,6 +4203,16 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		return NULL;
 
 	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+
+	// Generate commit again gfn list
+	if (vcpu->need_memory_commit) {
+		if (write) {
+			struct gfn_list *gfn_node = kmalloc(sizeof(struct gfn_list), GFP_ATOMIC);
+			gfn_node->gfn = gfn;
+			list_add(gfn_node, &(vcpu->commit_again_gfn_list));
+		}
+		gfn_clear_AD_bit(vcpu, gfn);
+	}
 
 	return kaddr;
 }

@@ -6330,10 +6330,17 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 	int i;
 	int online_vcpus = atomic_read(&kvm->online_vcpus);
+	struct gfn_list *gfn_node, *temp;
 
 	//print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
-	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+
+	// Fill in conflict_bitmap
+	list_for_each_entry_safe(gfn_node, temp, &(vcpu->commit_again_gfn_list), link) {
+		set_bit(gfn_node->gfn, vcpu->conflict_bitmap);
+		list_del(&gfn_node->link);
+	}
 
 	// Wait for DMA finished
 	//tm_wait_DMA(vcpu);
