@@ -7135,6 +7135,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->nr_test = 0;
 	vcpu->need_dma_check = 0;
+	vcpu->tm_version = 0;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;
@@ -7193,6 +7194,8 @@ void kvm_arch_init_record(struct kvm *kvm)
 	kvm->timestamp = 0;
 	kvm->tm_last_commit_vcpu = -1;
 	atomic_set(&kvm->tm_normal_commit, 1);
+	atomic_set(&kvm->tm_get_version, 0);
+	atomic_set(&kvm->tm_put_version, 1);
 	init_waitqueue_head(&kvm->tm_exclusive_commit_que);
 }
 

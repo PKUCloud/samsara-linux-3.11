@@ -329,6 +329,8 @@ struct kvm_vcpu {
 	int rr_state;
 	int is_early_rb;
 	int need_dma_check;
+	/* Used to decide if this vcpu can go into guest or not, init to 0 */
+	int tm_version;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
@@ -482,6 +484,9 @@ struct kvm {
 	bool tm_timer_ready;
 	ktime_t tm_record_time;
 	atomic_t tm_trap_count;
+	/* Used to decide if one vcpu can go into guest or not */
+	atomic_t tm_get_version; /* Init to 0 */
+	atomic_t tm_put_version; /* Init to 1 */
 	union {
 		unsigned long long timestamp;
 		unsigned long long tm_turn;

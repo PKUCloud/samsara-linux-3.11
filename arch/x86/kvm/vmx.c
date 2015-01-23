@@ -5726,6 +5726,8 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	kvm->record_master = false;
 	kvm->tm_last_commit_vcpu = -1;
 	atomic_set(&kvm->tm_normal_commit, 1);
+	atomic_set(&kvm->tm_get_version, 0);
+	atomic_set(&kvm->tm_put_version, 1);
 	vcpu->is_kicked = false;
 	vcpu->is_trapped = false;
 	vcpu->is_recording = false;
@@ -5738,6 +5740,7 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	vcpu->conflict_size = 1;
 	vcpu->exclusive_commit = 0;
 	vcpu->nr_rollback = 0;
+	vcpu->tm_version = 0;
 
 	kvm_record_clear_ept_mirror(vcpu);
 	kvm_record_clear_holding_pages(vcpu);
