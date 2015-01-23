@@ -6339,9 +6339,9 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
 	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 
-	// Fill in conflict_bitmap
+	// Fill in dirty_bitmap
 	list_for_each_entry_safe(gfn_node, temp, &(vcpu->commit_again_gfn_list), link) {
-		set_bit(gfn_node->gfn, vcpu->conflict_bitmap);
+		set_bit(gfn_node->gfn, vcpu->dirty_bitmap);
 		list_del(&gfn_node->link);
 	}
 
