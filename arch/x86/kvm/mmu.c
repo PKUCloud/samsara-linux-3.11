@@ -4209,7 +4209,7 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		if (write) {
 			struct gfn_list *gfn_node = kmalloc(sizeof(struct gfn_list), GFP_ATOMIC);
 			gfn_node->gfn = gfn;
-			list_add(gfn_node, &(vcpu->commit_again_gfn_list));
+			list_add(&gfn_node->link, &(vcpu->commit_again_gfn_list));
 		}
 		gfn_clear_AD_bit(vcpu, gfn);
 	}
