@@ -1470,7 +1470,7 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 	unsigned long addr;
 	void *kaddr;
 
-	if (kvm_record) {
+	if (vcpu->is_recording) {
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 0);
 		if (kaddr == NULL) {
 			addr = gfn_to_hva_read(kvm, gfn);
@@ -1569,7 +1569,7 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 	void *kaddr;
 	unsigned long addr;
 
-	if (kvm_record) {
+	if (vcpu->is_recording) {
 		//if (vcpu->rr_state == 1) {
 		//	print_record("vcpu=%d, %s\n", vcpu->vcpu_id, __func__);
 		//}

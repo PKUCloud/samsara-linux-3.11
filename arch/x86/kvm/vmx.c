@@ -5943,9 +5943,9 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	}
 
 	/* May be useless */
-	if (vcpu->arch.nr_holding_pages == 0) {
-		INIT_LIST_HEAD(&vcpu->arch.holding_pages);
-	}
+	//if (vcpu->arch.nr_holding_pages == 0) {
+	//	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
+	//}
 
 	/* Traverse the private_pages */
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
@@ -6359,6 +6359,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	tm_memory_commit(vcpu);
 
 	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
+	//bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 
 	mutex_unlock(&kvm->tm_lock);
 
