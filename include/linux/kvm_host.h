@@ -314,6 +314,7 @@ struct kvm_vcpu {
 	DECLARE_BITMAP(access_bitmap, TM_BITMAP_SIZE);
 	DECLARE_BITMAP(dirty_bitmap, TM_BITMAP_SIZE);
 	DECLARE_BITMAP(conflict_bitmap, TM_BITMAP_SIZE);
+	DECLARE_BITMAP(private_conflict_bitmap, TM_BITMAP_SIZE);
 	DECLARE_BITMAP(DMA_access_bitmap, TM_BITMAP_SIZE);
 	gfn_t access_size;
 	gfn_t dirty_size;
@@ -326,6 +327,7 @@ struct kvm_vcpu {
 	int nr_rollback;	/* Number of continuous rollback */
 
 	int need_memory_commit;
+	int need_check_version;	/* Need to check tm_version before enter guest */
 	int rr_state;
 	int is_early_rb;
 	int need_dma_check;

@@ -6271,6 +6271,11 @@ rollback:
 				}
 			}
 		}
+		/* Get the tm_version */
+		vcpu->tm_version = atomic_inc_return(&(kvm->tm_get_version));
+		print_record("vcpu=%d get version %d\n", vcpu->vcpu_id,
+			     vcpu->tm_version);
+
 		// Clear conflict bitmap
 		bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 		// Clear DMA bitmap
@@ -7613,6 +7618,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	int is_early_check;
 
 	vcpu->need_memory_commit = 0;
+	vcpu->need_check_version = 0;
 	// First time, we do not handle it here.
 	if (!vcpu->is_recording) {
 		printk(KERN_ERR "error: vcpu %d %s when vcpu->is_recording is false\n",
@@ -7673,11 +7679,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		} else if (ret == 1) {
 			vcpu->need_memory_commit = 1;
 			vcpu->rr_state = 1;
+			vcpu->need_check_version = 1;
 			if (is_early_check == 1)
 				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, COMMIT=========\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
+			vcpu->need_check_version = 1;
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, ROLLBACK=========\n", vcpu->vcpu_id);
 			return KVM_RR_ROLLBACK;

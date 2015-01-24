@@ -5894,6 +5894,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	struct rr_event *tmp;
 	static u64 commit_count;
 	static int mirror_flag;
+	struct kvm *kvm = vcpu->kvm;
 
 restart:
 	if (vcpu->requests) {	// Check if there is any requests which are not handled.
@@ -6029,6 +6030,16 @@ restart:
 		vcpu->need_memory_commit = 0;
 	}
 
+	/* See if we need to check version berfore enter guest */
+	if (vcpu->is_recording && vcpu->need_check_version) {
+		while (vcpu->tm_version != atomic_read((&kvm->tm_put_version))) {
+			// print_record("vcpu=%d wait, tm_version %d put_version "
+			// 	     "%d\n", vcpu->vcpu_id, vcpu->tm_version,
+			// 	     atomic_read(&kvm->tm_put_version));
+			yield();
+		}
+	}
+
 	vcpu->rr_state = 0;
 	kvm_x86_ops->tlb_flush(vcpu);
 	preempt_disable();
@@ -6072,6 +6083,13 @@ restart:
 	if (req_immediate_exit)
 		smp_send_reschedule(vcpu->cpu);
 
+	/* See if we need to increase the tm_put_version */
+	if (vcpu->is_recording && vcpu->need_check_version) {
+		/* We come here means tm_version equals tm_put_version */
+		print_record("vcpu=%d go through the version check\n",
+			     vcpu->vcpu_id);
+		atomic_inc(&(kvm->tm_put_version));
+	}
 	kvm_guest_enter(); // Guess: this is RCU and scheduling related.
 
 	if (unlikely(vcpu->arch.switch_db_regs)) {
@@ -7129,6 +7147,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->conflict_size = 1;
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->private_conflict_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
 	INIT_LIST_HEAD(&(vcpu->events_list));
@@ -7136,6 +7155,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->nr_test = 0;
 	vcpu->need_dma_check = 0;
 	vcpu->tm_version = 0;
+	vcpu->need_check_version = 0;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;
