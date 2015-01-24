@@ -6181,7 +6181,7 @@ void inline tm_wait_DMA(struct kvm_vcpu *vcpu)
 static void tm_check_version(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
-
+/*
 	if (atomic_read(&kvm->tm_put_version) != vcpu->tm_version) {
 		print_record("vcpu=%d %s sleep\n", vcpu->vcpu_id, __func__);
 		if (wait_event_interruptible(kvm->tm_version_que,
@@ -6190,10 +6190,14 @@ static void tm_check_version(struct kvm_vcpu *vcpu)
 			       vcpu->vcpu_id, __func__);
 		}
 	}
+*/
+	while (atomic_read(&kvm->tm_put_version) != vcpu->tm_version) {
+		continue;
+	}
 	print_record("vcpu=%d go through the version check\n",
 		     vcpu->vcpu_id);
 	atomic_inc(&kvm->tm_put_version);
-	wake_up_interruptible(&kvm->tm_version_que);
+	// wake_up_interruptible(&kvm->tm_version_que);
 }
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
