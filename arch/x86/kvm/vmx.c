@@ -5925,7 +5925,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 				 link) {
 		gfn = private_page->gfn;
 		/* Whether this page has been touched by other vcpus */
-		if (test_bit(gfn, vcpu->conflict_bitmap)) {
+		if (test_bit(gfn, vcpu->private_conflict_bitmap)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6103,7 +6103,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		/* Whether this page has been touched by other vcpus or by this vcpu
 		 * in this quantum.
 		 */
-		if (test_bit(gfn, vcpu->conflict_bitmap) ||
+		if (test_bit(gfn, vcpu->private_conflict_bitmap) ||
 			test_bit(gfn, vcpu->dirty_bitmap)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
@@ -6247,7 +6247,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			}
 
 			/* Commit here in the lock */
-			tm_memory_commit(vcpu);
+			// tm_memory_commit(vcpu);
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
 
@@ -6260,7 +6260,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 rollback:
 			vcpu->nr_rollback++;
 			/* Rollback here in the lock */
-			tm_memory_rollback(vcpu);
+			// tm_memory_rollback(vcpu);
 			if (!vcpu->exclusive_commit && vcpu->nr_rollback >= RR_CONSEC_RB_TIME) {
 				print_record("vcpu=%d rollback > %d, try to be exclusiv\n",
 					vcpu->vcpu_id, RR_CONSEC_RB_TIME);
@@ -6275,15 +6275,23 @@ rollback:
 		vcpu->tm_version = atomic_inc_return(&(kvm->tm_get_version));
 		print_record("vcpu=%d get version %d\n", vcpu->vcpu_id,
 			     vcpu->tm_version);
-
+		/* Copy conflict_bitmap to private_conflict_bitmap */
+		bitmap_copy(vcpu->private_conflict_bitmap,
+			    vcpu->conflict_bitmap, TM_BITMAP_SIZE);
 		// Clear conflict bitmap
 		bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+		mutex_unlock(&(kvm->tm_lock));
+
+		if (commit) {
+			tm_memory_commit(vcpu);
+		} else tm_memory_rollback(vcpu);
+
 		// Clear DMA bitmap
 		if (atomic_read(&(kvm->tm_dma)) == 0)
 			bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
 		else
 			print_record("vcpu=%d, %s, error: Why here?\n", vcpu->vcpu_id, __func__);
-		mutex_unlock(&(kvm->tm_lock));
+		// mutex_unlock(&(kvm->tm_lock));
 
 	} else {
 		/* Error to come here when vcpu->is_recording is false */
@@ -6301,6 +6309,7 @@ rollback:
 	// Reset bitmaps
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->private_conflict_bitmap, 0, TM_BITMAP_SIZE);
 
 	if (!kvm_record) {
 		goto record_disable;
@@ -6362,6 +6371,10 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 		bitmap_or(kvm->vcpus[i]->conflict_bitmap, vcpu->dirty_bitmap,
 			  kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
 	}
+	/* Copy conflict_bitmap */
+	bitmap_copy(vcpu->private_conflict_bitmap, vcpu->conflict_bitmap,
+		    TM_BITMAP_SIZE);
+	mutex_unlock(&kvm->tm_lock);
 
 	/* Commit memory here */
 	tm_memory_commit(vcpu);
@@ -6369,11 +6382,12 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
 	//bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 
-	mutex_unlock(&kvm->tm_lock);
+	// mutex_unlock(&kvm->tm_lock);
 
 	/* Reset bitmaps */
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->private_conflict_bitmap, 0, TM_BITMAP_SIZE);
 
 	/* Should not use kvm_make_request here */
 	vmx_flush_tlb(vcpu);
