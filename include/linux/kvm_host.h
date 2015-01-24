@@ -500,6 +500,10 @@ struct kvm {
 	 * this queue.
 	 */
 	wait_queue_head_t tm_exclusive_commit_que;
+	/* If vcpu.tm_version does not equal kvm.tm_put_version, it will need
+	 * to sleep in this queue.
+	 */
+	wait_queue_head_t tm_version_que;
 };
 
 #define kvm_err(fmt, ...) \
