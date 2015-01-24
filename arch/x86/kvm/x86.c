@@ -5894,7 +5894,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	struct rr_event *tmp;
 	static u64 commit_count;
 	static int mirror_flag;
-	struct kvm *kvm = vcpu->kvm;
 
 restart:
 	if (vcpu->requests) {	// Check if there is any requests which are not handled.
@@ -6030,26 +6029,6 @@ restart:
 		vcpu->need_memory_commit = 0;
 	}
 
-	/* See if we need to check version berfore enter guest */
-	if (vcpu->is_recording && vcpu->need_check_version &&
-	    atomic_read(&kvm->tm_put_version) != vcpu->tm_version) {
-		// while (vcpu->tm_version != atomic_read((&kvm->tm_put_version))) {
-		// 	// print_record("vcpu=%d wait, tm_version %d put_version "
-		// 	// 	     "%d\n", vcpu->vcpu_id, vcpu->tm_version,
-		// 	// 	     atomic_read(&kvm->tm_put_version));
-		// 	// yield();
-
-		// }
-		print_record("vcpu=%d %s going to sleep because of version check\n",
-			    vcpu->vcpu_id, __func__);
-		if (wait_event_interruptible(kvm->tm_version_que,
-		    atomic_read(&kvm->tm_put_version) == vcpu->tm_version)) {
-			printk(KERN_ERR "error: vcpu=%d %s interrupted\n",
-			       vcpu->vcpu_id, __func__);
-		}
-		print_record("vcpu=%d %s wake up\n", vcpu->vcpu_id, __func__);
-	}
-
 	vcpu->rr_state = 0;
 	kvm_x86_ops->tlb_flush(vcpu);
 	preempt_disable();
@@ -6093,14 +6072,6 @@ restart:
 	if (req_immediate_exit)
 		smp_send_reschedule(vcpu->cpu);
 
-	/* See if we need to increase the tm_put_version */
-	if (vcpu->is_recording && vcpu->need_check_version) {
-		/* We come here means tm_version equals tm_put_version */
-		print_record("vcpu=%d go through the version check\n",
-			     vcpu->vcpu_id);
-		atomic_inc(&(kvm->tm_put_version));
-		wake_up_interruptible(&kvm->tm_version_que);
-	}
 	kvm_guest_enter(); // Guess: this is RCU and scheduling related.
 
 	if (unlikely(vcpu->arch.switch_db_regs)) {

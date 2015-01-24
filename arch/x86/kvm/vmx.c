@@ -6178,6 +6178,24 @@ void inline tm_wait_DMA(struct kvm_vcpu *vcpu)
 	}
 }
 
+static void tm_check_version(struct kvm_vcpu *vcpu)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	if (atomic_read(&kvm->tm_put_version) != vcpu->tm_version) {
+		print_record("vcpu=%d %s sleep\n", vcpu->vcpu_id, __func__);
+		if (wait_event_interruptible(kvm->tm_version_que,
+		    atomic_read(&kvm->tm_put_version) == vcpu->tm_version)) {
+			printk(KERN_ERR "error: vcpu=%d %s interruptted\n",
+			       vcpu->vcpu_id, __func__);
+		}
+	}
+	print_record("vcpu=%d go through the version check\n",
+		     vcpu->vcpu_id);
+	atomic_inc(&kvm->tm_put_version);
+	wake_up_interruptible(&kvm->tm_version_que);
+}
+
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -6286,6 +6304,8 @@ rollback:
 			tm_memory_commit(vcpu);
 		} else tm_memory_rollback(vcpu);
 
+		tm_check_version(vcpu);
+
 		// Clear DMA bitmap
 		if (atomic_read(&(kvm->tm_dma)) == 0)
 			bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
@@ -6374,7 +6394,6 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	/* Copy conflict_bitmap */
 	bitmap_copy(vcpu->private_conflict_bitmap, vcpu->conflict_bitmap,
 		    TM_BITMAP_SIZE);
-	mutex_unlock(&kvm->tm_lock);
 
 	/* Commit memory here */
 	tm_memory_commit(vcpu);
@@ -6382,7 +6401,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
 	//bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 
-	// mutex_unlock(&kvm->tm_lock);
+	mutex_unlock(&kvm->tm_lock);
 
 	/* Reset bitmaps */
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
