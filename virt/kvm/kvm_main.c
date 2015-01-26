@@ -2020,7 +2020,7 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 	}
 	case DMA_START:
 		// mutex_lock(&(kvm->tm_lock));
-		write_lock(&(kvm->tm_rwlock));
+		down_write(&(kvm->tm_rwlock));
 		for (i=0; i<online_vcpus; i++) {
 			kvm->vcpus[i]->need_dma_check = 1;
 		}
@@ -2034,7 +2034,7 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 		//atomic_set(&(kvm->tm_dma), 0);
 		print_record("%s, DMA_FINISHED\n", __func__);
 		// mutex_unlock(&(kvm->tm_lock));
-		write_unlock(&(kvm->tm_rwlock));
+		up_write(&(kvm->tm_rwlock));
 		break;
 	default:
 		break;

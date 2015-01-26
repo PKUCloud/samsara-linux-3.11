@@ -6225,7 +6225,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			print_record("vcpu=%d wake up\n", vcpu->vcpu_id);
 		}
 
-		read_lock(&(kvm->tm_rwlock));
+		down_read(&(kvm->tm_rwlock));
 		mutex_lock(&(kvm->tm_lock));
 
 		// Wait for DMA finished
@@ -6318,7 +6318,7 @@ rollback:
 		else
 			print_record("vcpu=%d, %s, error: Why here?\n", vcpu->vcpu_id, __func__);
 		// mutex_unlock(&(kvm->tm_lock));
-		read_unlock(&(kvm->tm_rwlock));
+		up_read(&(kvm->tm_rwlock));
 
 	} else {
 		/* Error to come here when vcpu->is_recording is false */
@@ -6389,7 +6389,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	// Wait for DMA finished
 	//tm_wait_DMA(vcpu);
 
-	read_lock(&kvm->tm_rwlock);
+	down_read(&kvm->tm_rwlock);
 	/* Do we really need the tm_lock here */
 	mutex_lock(&kvm->tm_lock);
 	/* Spread the dirty_bitmap to other vcpus's conflict_bitmap */
@@ -6412,7 +6412,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 
 	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
 
-	read_unlock(&kvm->tm_rwlock);
+	up_read(&kvm->tm_rwlock);
 
 	/* Reset bitmaps */
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);

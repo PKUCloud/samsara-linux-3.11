@@ -7203,7 +7203,7 @@ void kvm_arch_init_record(struct kvm *kvm)
 	atomic_set(&kvm->tm_normal_commit, 1);
 	atomic_set(&kvm->tm_get_version, 0);
 	atomic_set(&kvm->tm_put_version, 1);
-	rwlock_init(&(kvm->tm_rwlock));
+	init_rwsem(&(kvm->tm_rwlock));
 	init_waitqueue_head(&kvm->tm_exclusive_commit_que);
 	init_waitqueue_head(&kvm->tm_version_que);
 }

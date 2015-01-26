@@ -491,7 +491,8 @@ struct kvm {
 	/* Used to decide if one vcpu can go into guest or not */
 	atomic_t tm_get_version; /* Init to 0 */
 	atomic_t tm_put_version; /* Init to 1 */
-	rwlock_t tm_rwlock;	/* Read/write lock for DMA and vcpus */
+	//rwlock_t tm_rwlock;	/* Read/write lock for DMA and vcpus */
+	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
 
 	union {
 		unsigned long long timestamp;
