@@ -6020,13 +6020,16 @@ restart:
 		goto cancel_injection;
 	}
 
-	/* Need to commit memory here */
+	/* Need to commit memory here.
+	 * Note: we should NOT clear need_memory_commit here because it may
+	 * fail at the first try to enter guest and we need to commit memory
+	 * again until it enter guest.
+	 */
 	if (kvm_record && vcpu->need_memory_commit) {
 		// kvm_record_clean_ept(vcpu);
 		// kvm_x86_ops->tm_memory_commit(vcpu);
 		// kvm_x86_ops->tlb_flush(vcpu);
 		kvm_x86_ops->tm_commit_memory_again(vcpu);
-		vcpu->need_memory_commit = 0;
 	}
 
 	vcpu->rr_state = 0;
