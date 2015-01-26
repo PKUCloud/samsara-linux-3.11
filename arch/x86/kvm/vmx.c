@@ -5925,7 +5925,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 				 link) {
 		gfn = private_page->gfn;
 		/* Whether this page has been touched by other vcpus */
-		if (test_bit(gfn, vcpu->private_conflict_bitmap)) {
+		if (test_bit(gfn, vcpu->private_cb)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6103,8 +6103,8 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		/* Whether this page has been touched by other vcpus or by this vcpu
 		 * in this quantum.
 		 */
-		if (test_bit(gfn, vcpu->private_conflict_bitmap) ||
-			test_bit(gfn, vcpu->dirty_bitmap)) {
+		if (test_bit(gfn, vcpu->private_cb) ||
+		    test_bit(gfn, vcpu->dirty_bitmap)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6236,10 +6236,10 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			#ifdef RR_PROFILE_CONFLICT
 			if (vcpu->is_early_rb ||
 					tm_detect_and_print_conflict(vcpu, vcpu->access_bitmap, 
-						vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
+						vcpu->public_cb, TM_BITMAP_SIZE)) {
 			#else
 			if (vcpu->is_early_rb ||
-					tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE) ||
+					tm_detect_conflict(vcpu->access_bitmap, vcpu->public_cb, TM_BITMAP_SIZE) ||
 					tm_detect_conflict(vcpu->access_bitmap, vcpu->DMA_access_bitmap, TM_BITMAP_SIZE)) {
 			#endif
 				commit = 0;
@@ -6265,8 +6265,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
 					continue;
-				bitmap_or(kvm->vcpus[i]->conflict_bitmap, vcpu->dirty_bitmap,
-					kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
+				bitmap_or(kvm->vcpus[i]->public_cb, vcpu->dirty_bitmap,
+					kvm->vcpus[i]->public_cb, TM_BITMAP_SIZE);
 			}
 
 			/* Commit here in the lock */
@@ -6299,10 +6299,11 @@ rollback:
 		print_record("vcpu=%d get version %d\n", vcpu->vcpu_id,
 			     vcpu->tm_version);
 		/* Copy conflict_bitmap to private_conflict_bitmap */
-		bitmap_copy(vcpu->private_conflict_bitmap,
-			    vcpu->conflict_bitmap, TM_BITMAP_SIZE);
+		// bitmap_copy(vcpu->private_conflict_bitmap,
+		//	    vcpu->conflict_bitmap, TM_BITMAP_SIZE);
 		// Clear conflict bitmap
-		bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+		// bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+		swap(vcpu->public_cb, vcpu->private_cb);
 		mutex_unlock(&(kvm->tm_lock));
 
 		if (commit) {
@@ -6335,7 +6336,7 @@ rollback:
 	// Reset bitmaps
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
-	bitmap_clear(vcpu->private_conflict_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->private_cb, 0, TM_BITMAP_SIZE);
 
 	if (!kvm_record) {
 		goto record_disable;
@@ -6395,12 +6396,13 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	for (i = 0; i < online_vcpus; ++i) {
 		if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
 			continue;
-		bitmap_or(kvm->vcpus[i]->conflict_bitmap, vcpu->dirty_bitmap,
-			  kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
+		bitmap_or(kvm->vcpus[i]->public_cb, vcpu->dirty_bitmap,
+			  kvm->vcpus[i]->public_cb, TM_BITMAP_SIZE);
 	}
 	/* Copy conflict_bitmap */
-	bitmap_copy(vcpu->private_conflict_bitmap, vcpu->conflict_bitmap,
-		    TM_BITMAP_SIZE);
+	// bitmap_copy(vcpu->private_conflict_bitmap, vcpu->conflict_bitmap,
+	//	    TM_BITMAP_SIZE);
+	swap(vcpu->private_cb, vcpu->public_cb);
 
 	/* Commit memory here */
 	tm_memory_commit(vcpu);
@@ -6415,7 +6417,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	/* Reset bitmaps */
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
-	bitmap_clear(vcpu->private_conflict_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->private_cb, 0, TM_BITMAP_SIZE);
 
 	/* Should not use kvm_make_request here */
 	vmx_flush_tlb(vcpu);
@@ -7688,7 +7690,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	#ifdef RR_EARLY_ROLLBACK
 	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
 		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
-		if (test_bit(gfn, vcpu->conflict_bitmap)) {
+		if (test_bit(gfn, vcpu->public_cb)) {
 			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
 			print_record("vcpu=%d, early rollback, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
@@ -7702,7 +7704,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	is_early_check = 0;
 	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
 		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
-		if (test_bit(gfn, vcpu->conflict_bitmap)) {
+		if (test_bit(gfn, vcpu->public_cb)) {
 			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
 			print_record("vcpu=%d, early check, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
