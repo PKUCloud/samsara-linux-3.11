@@ -493,6 +493,7 @@ struct kvm {
 	atomic_t tm_put_version; /* Init to 1 */
 	//rwlock_t tm_rwlock;	/* Read/write lock for DMA and vcpus */
 	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
+	bool tm_dma_holding_sem;	/* Whether DMA is holding the tm_rwlock */
 
 	union {
 		unsigned long long timestamp;

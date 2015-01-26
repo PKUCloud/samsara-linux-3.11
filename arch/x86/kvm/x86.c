@@ -7200,6 +7200,7 @@ void kvm_arch_init_record(struct kvm *kvm)
 	spin_lock_init(&(kvm->tm_timer_lock));
 	kvm->timestamp = 0;
 	kvm->tm_last_commit_vcpu = -1;
+	kvm->tm_dma_holding_sem = false;
 	atomic_set(&kvm->tm_normal_commit, 1);
 	atomic_set(&kvm->tm_get_version, 0);
 	atomic_set(&kvm->tm_put_version, 1);

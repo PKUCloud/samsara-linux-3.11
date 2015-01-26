@@ -2021,6 +2021,7 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 	case DMA_START:
 		// mutex_lock(&(kvm->tm_lock));
 		down_write(&(kvm->tm_rwlock));
+		kvm->tm_dma_holding_sem = true;
 		for (i=0; i<online_vcpus; i++) {
 			kvm->vcpus[i]->need_dma_check = 1;
 		}
@@ -2035,6 +2036,7 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 		print_record("%s, DMA_FINISHED\n", __func__);
 		// mutex_unlock(&(kvm->tm_lock));
 		up_write(&(kvm->tm_rwlock));
+		kvm->tm_dma_holding_sem = false;
 		break;
 	default:
 		break;
@@ -2474,7 +2476,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	case KVM_DMA_COMMIT: {
 		struct DMA_AC DMA_access;
 
-		if (!kvm_record)
+		if (!kvm_record && !kvm->tm_dma_holding_sem)
 			return 0;
 		r = -EFAULT;
 		if (copy_from_user(&DMA_access, argp, sizeof(struct DMA_AC)))
