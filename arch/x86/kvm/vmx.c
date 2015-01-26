@@ -6006,7 +6006,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	if (vcpu->need_dma_check) {
 		list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
 					 link) {
-			int i;
 			gfn = private_page->gfn;
 			origin = pfn_to_kaddr(private_page->original_pfn);
 			private = pfn_to_kaddr(private_page->private_pfn);
@@ -6135,7 +6134,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	// Copy inconsistent page based on DMA access bitmap
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
 				 link) {
-		int i;
 		gfn = private_page->gfn;
 		origin = pfn_to_kaddr(private_page->original_pfn);
 		private = pfn_to_kaddr(private_page->private_pfn);
@@ -7656,7 +7654,6 @@ static int vmx_tm_commit(struct kvm_vcpu *vcpu)
 static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
-	struct kvm *kvm = vcpu->kvm;
 	u32 exit_reason = vmx->exit_reason;
 	int ret;
 	int is_early_check;

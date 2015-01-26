@@ -4098,10 +4098,10 @@ int gfn_clear_AD_bit(struct kvm_vcpu *vcpu, gfn_t gfn)
 	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (sptep == 0xffff87ffffffffffULL)
+		if ((u64)sptep == 0xffff87ffffffffffULL)
 			printk(KERN_ERR "vcpu=%d, index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
 						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
-				vcpu->vcpu_id, index, sptep, shadow_addr, __va(shadow_addr), level,
+				vcpu->vcpu_id, index, (u64)sptep, shadow_addr, (u64)__va(shadow_addr), level,
 				vcpu->arch.mmu.root_hpa);
 		if (!is_shadow_present_pte(*sptep)) {
 			return -1;
@@ -4137,10 +4137,10 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (sptep == 0xffff87ffffffffffULL)
+		if ((u64)sptep == 0xffff87ffffffffffULL)
 			printk(KERN_ERR "vcpu=%d, index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
 						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
-				vcpu->vcpu_id, index, sptep, shadow_addr, __va(shadow_addr), level,
+				vcpu->vcpu_id, index, (u64)sptep, shadow_addr, (u64)__va(shadow_addr), level,
 				vcpu->arch.mmu.root_hpa);
 		if (!is_shadow_present_pte(*sptep)) {
 			return NULL;

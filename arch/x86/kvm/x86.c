@@ -2801,7 +2801,7 @@ static int kvm_vcpu_ioctl_set_lapic(struct kvm_vcpu *vcpu,
 static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
 				    struct rsr_lapic *s)
 {
-	struct kvm_lapic_state *lapic = s->regs;
+	struct kvm_lapic_state *lapic = (struct kvm_lapic_state *)(s->regs);
 	//vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
 	kvm_apic_post_state_restore(vcpu, lapic);
 	update_cr8_intercept(vcpu);

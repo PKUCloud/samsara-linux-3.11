@@ -212,7 +212,10 @@ static int kvm_getset_apic(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	//rsr-debug
 	struct rsr_lapic *lapic = &env->lapic;
 	//end rsr-debug
-	int i, ret;
+	int ret;
+#ifdef CONFIG_RSR_CHECKPOINT_DEBUG
+	int i;
+#endif
 	
 	if (!set) {
 		memset(lapic, 0, sizeof(struct rsr_lapic));

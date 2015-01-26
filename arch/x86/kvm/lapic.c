@@ -1665,7 +1665,6 @@ void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu,
 		struct kvm_lapic_state *s)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
-	int i;
 
 	kvm_lapic_set_base(vcpu, vcpu->arch.apic_base);
 	/* set SPIV separately to get count of SW disabled APICs right */
