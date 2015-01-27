@@ -6373,6 +6373,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	int i;
 	int online_vcpus = atomic_read(&kvm->online_vcpus);
 	struct gfn_list *gfn_node, *temp;
+	bool is_clean = list_empty(&vcpu->commit_again_gfn_list);
 
 	//print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
@@ -6388,7 +6389,13 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	//tm_wait_DMA(vcpu);
 
 	down_read(&kvm->tm_rwlock);
-	/* Do we really need the tm_lock here */
+
+	/* See if we really has something to commit again */
+	if (is_clean && !vcpu->need_dma_check) {
+		up_read(&kvm->tm_rwlock);
+		return 0;
+	}
+
 	mutex_lock(&kvm->tm_lock);
 	/* Spread the dirty_bitmap to other vcpus's conflict_bitmap */
 	for (i = 0; i < online_vcpus; ++i) {
