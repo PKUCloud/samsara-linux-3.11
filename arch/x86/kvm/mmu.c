@@ -4187,7 +4187,7 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		//print_record("vcpu=%d, warning: go to tdp_page_fault() path in %s\n", vcpu->vcpu_id, __func__);
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
-			print_record("vcpu=%d, error: tdp_page_fault() fail in %s for gfn 0xllx\n",
+			printk(KERN_ERR "vcpu=%d, error: tdp_page_fault() fail in %s for gfn 0x%llx\n",
 				vcpu->vcpu_id, __func__, gfn);
 			return NULL;
 		}
