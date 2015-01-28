@@ -792,6 +792,7 @@ struct kvm_x86_ops {
 	int (*rr_apic_accept_irq)(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map);
+	void (*tm_chunk_list_check_and_del)(struct kvm_vcpu *vcpu);
 };
 
 struct kvm_arch_async_pf {

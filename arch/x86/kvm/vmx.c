@@ -6198,6 +6198,59 @@ static void tm_check_version(struct kvm_vcpu *vcpu)
 	// wake_up_interruptible(&kvm->tm_version_que);
 }
 
+static inline void tm_chunk_list_insert(struct kvm_vcpu *vcpu)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	spin_lock(&kvm->chunk_list_lock);
+	list_add_tail(&vcpu->chunk_info.link, &kvm->chunk_list);
+	spin_unlock(&kvm->chunk_list_lock);
+}
+
+static inline void tm_chunk_list_set_state(struct kvm_vcpu *vcpu, int state)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	spin_lock(&kvm->chunk_list_lock);
+	vcpu->chunk_info.state = state;
+	spin_unlock(&kvm->chunk_list_lock);
+}
+
+void tm_chunk_list_check_and_del(struct kvm_vcpu *vcpu)
+{
+	struct kvm *kvm = vcpu->kvm;
+	struct list_head *head = &kvm->chunk_list;
+	struct chunk_info *chunk, *temp;
+	bool can_leave = true;
+retry:
+	can_leave = true;
+	spin_lock(&kvm->chunk_list_lock);
+	list_for_each_entry_safe(chunk, temp, head, link) {
+		if (chunk->vcpu_id == vcpu->vcpu_id) {
+			/* We reach our own chunk node, which means that we
+			 * can delete this node and enter guest.
+			 */
+			list_del(&chunk->link);
+			chunk->state = RR_CHUNK_IDLE;
+			break;
+		}
+		if (chunk->action == KVM_RR_COMMIT &&
+		    chunk->state != RR_CHUNK_FINISHED) {
+			/* There is one vcpu before us and it is going to
+			 * commit, so we need to wait for it.
+			 */
+			can_leave = false;
+			break;
+		}
+	}
+	spin_unlock(&kvm->chunk_list_lock);
+	if (!can_leave) {
+		yield();
+		goto retry;
+	}
+}
+EXPORT_SYMBOL_GPL(tm_chunk_list_check_and_del);
+
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -6293,14 +6346,14 @@ rollback:
 			}
 		}
 		/* Get the tm_version */
-		vcpu->tm_version = atomic_inc_return(&(kvm->tm_get_version));
-		print_record("vcpu=%d get version %d\n", vcpu->vcpu_id,
-			     vcpu->tm_version);
-		/* Copy conflict_bitmap to private_conflict_bitmap */
-		// bitmap_copy(vcpu->private_conflict_bitmap,
-		//	    vcpu->conflict_bitmap, TM_BITMAP_SIZE);
-		// Clear conflict bitmap
-		// bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+		// vcpu->tm_version = atomic_inc_return(&(kvm->tm_get_version));
+		// print_record("vcpu=%d get version %d\n", vcpu->vcpu_id,
+		// 	     vcpu->tm_version);
+		/* Insert chunk_info to kvm->chunk_list */
+		vcpu->chunk_info.action = commit ? KVM_RR_COMMIT : KVM_RR_ROLLBACK;
+		vcpu->chunk_info.state = RR_CHUNK_BUSY;
+		tm_chunk_list_insert(vcpu);
+
 		swap(vcpu->public_cb, vcpu->private_cb);
 		mutex_unlock(&(kvm->tm_lock));
 
@@ -6308,7 +6361,8 @@ rollback:
 			tm_memory_commit(vcpu);
 		} else tm_memory_rollback(vcpu);
 
-		tm_check_version(vcpu);
+		// tm_check_version(vcpu);
+		tm_chunk_list_set_state(vcpu, RR_CHUNK_FINISHED);
 
 		// Clear DMA bitmap
 		if (atomic_read(&(kvm->tm_dma)) == 0)
@@ -7666,7 +7720,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	int is_early_check;
 
 	vcpu->need_memory_commit = 0;
-	vcpu->need_check_version = 0;
+	vcpu->need_check_chunk_info = 0;
 	// First time, we do not handle it here.
 	if (!vcpu->is_recording) {
 		printk(KERN_ERR "error: vcpu %d %s when vcpu->is_recording is false\n",
@@ -7727,13 +7781,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		} else if (ret == 1) {
 			vcpu->need_memory_commit = 1;
 			vcpu->rr_state = 1;
-			vcpu->need_check_version = 1;
+			vcpu->need_check_chunk_info = 1;
 			if (is_early_check == 1)
 				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, COMMIT=========\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
-			vcpu->need_check_version = 1;
+			vcpu->need_check_chunk_info = 1;
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, ROLLBACK=========\n", vcpu->vcpu_id);
 			return KVM_RR_ROLLBACK;
@@ -9351,6 +9405,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.tm_memory_commit = tm_memory_commit,
 	.tm_memory_rollback = tm_memory_rollback,
  	.rr_apic_accept_irq = __rr_apic_accept_irq,
+	.tm_chunk_list_check_and_del = tm_chunk_list_check_and_del,
 };
 
 static int __init vmx_init(void)

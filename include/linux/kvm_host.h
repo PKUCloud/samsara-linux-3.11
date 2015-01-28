@@ -245,6 +245,18 @@ struct gfn_list {
 	gfn_t gfn;
 };
 
+/* Macros for chunk_info.state */
+#define RR_CHUNK_IDLE		0
+#define RR_CHUNK_BUSY		1
+#define RR_CHUNK_FINISHED	2
+
+struct chunk_info {
+	struct list_head link;
+	int vcpu_id;
+	int action;	/* KVM_RR_COMMIT or KVM_RR_ROLLBACK */
+	int state;
+};
+
 struct kvm_vcpu {
 	struct kvm *kvm;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -329,12 +341,16 @@ struct kvm_vcpu {
 	int nr_rollback;	/* Number of continuous rollback */
 
 	int need_memory_commit;
-	int need_check_version;	/* Need to check tm_version before enter guest */
+	/* Need to check kvm.chunk_list to if there are some unfinished chunks
+	 * before we enter guest.
+	 */
+	int need_check_chunk_info;
 	int rr_state;
 	int is_early_rb;
 	int need_dma_check;
 	/* Used to decide if this vcpu can go into guest or not, init to 0 */
 	int tm_version;
+	struct chunk_info chunk_info;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
@@ -494,6 +510,9 @@ struct kvm {
 	//rwlock_t tm_rwlock;	/* Read/write lock for DMA and vcpus */
 	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
 	bool tm_dma_holding_sem;	/* Whether DMA is holding the tm_rwlock */
+
+	struct list_head chunk_list;
+	spinlock_t chunk_list_lock;
 
 	union {
 		unsigned long long timestamp;

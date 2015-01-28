@@ -6032,6 +6032,14 @@ restart:
 		kvm_x86_ops->tm_commit_memory_again(vcpu);
 	}
 
+	/* Check if we need to wait other vcpus to finish commit/rollback
+	 * memory before we enter guest.
+	 */
+	if (vcpu->is_recording && vcpu->need_check_chunk_info) {
+		kvm_x86_ops->tm_chunk_list_check_and_del(vcpu);
+		vcpu->need_check_chunk_info = 0;
+	}
+
 	vcpu->rr_state = 0;
 	kvm_x86_ops->tlb_flush(vcpu);
 	preempt_disable();
@@ -7142,7 +7150,9 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->nr_test = 0;
 	vcpu->need_dma_check = 0;
 	vcpu->tm_version = 0;
-	vcpu->need_check_version = 0;
+	vcpu->need_check_chunk_info = 0;
+	vcpu->chunk_info.vcpu_id = vcpu->vcpu_id;
+	vcpu->chunk_info.state = RR_CHUNK_IDLE;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;
@@ -7198,6 +7208,8 @@ void kvm_arch_init_record(struct kvm *kvm)
 	kvm->tm_timer_set = false;
 	kvm->tm_timer_ready = false;
 	spin_lock_init(&(kvm->tm_timer_lock));
+	spin_lock_init(&(kvm->chunk_list_lock));
+	INIT_LIST_HEAD(&(kvm->chunk_list));
 	kvm->timestamp = 0;
 	kvm->tm_last_commit_vcpu = -1;
 	kvm->tm_dma_holding_sem = false;
