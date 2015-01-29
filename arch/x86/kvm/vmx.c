@@ -5711,6 +5711,9 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 
 extern void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu);
 void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu);
+#ifdef RR_ROLLBACK_PAGES
+void kvm_record_clear_rollback_pages(struct kvm_vcpu *vcpu);
+#endif
 
 void tm_disable(struct kvm_vcpu *vcpu)
 {
@@ -5744,6 +5747,9 @@ void tm_disable(struct kvm_vcpu *vcpu)
 
 	kvm_record_clear_ept_mirror(vcpu);
 	kvm_record_clear_holding_pages(vcpu);
+#ifdef RR_ROLLBACK_PAGES
+	kvm_record_clear_rollback_pages(vcpu);
+#endif
 
 	up(&(kvm->tm_enter_sem));
 	for (i=0; i<online_vcpus - 1; i++)
@@ -6104,6 +6110,17 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		 */
 		if (test_bit(gfn, vcpu->private_cb) ||
 		    test_bit(gfn, vcpu->dirty_bitmap)) {
+#ifdef RR_ROLLBACK_PAGES
+			/* We do nothing here but keep these dirty pages in a
+			 * list and copy the new content back before entering
+			 * guest.
+			 */
+			list_move_tail(&private_page->link,
+				       &vcpu->arch.rollback_pages);
+			vcpu->arch.nr_holding_pages--;
+			vcpu->arch.nr_rollback_pages++;
+			continue;
+#endif
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6121,6 +6138,17 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 				 link)
 	{
+#ifdef RR_ROLLBACK_PAGES
+		/* We do nothing here but keep these dirty pages in a
+		 * list and copy the new content back before entering
+		 * guest.
+		 */
+		list_move_tail(&private_page->link,
+			       &vcpu->arch.rollback_pages);
+		vcpu->arch.nr_private_pages--;
+		vcpu->arch.nr_rollback_pages++;
+		continue;
+#endif
 		kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6165,6 +6193,28 @@ void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu)
 	}
 	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
 }
+
+#ifdef RR_ROLLBACK_PAGES
+void kvm_record_clear_rollback_pages(struct kvm_vcpu *vcpu)
+{
+	struct kvm_private_mem_page *private_page;
+	struct kvm_private_mem_page *temp;
+
+	print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
+
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.rollback_pages,
+				 link) {
+		kvm_record_spte_set_pfn(private_page->sptep,
+					private_page->original_pfn);
+		kvm_record_spte_withdraw_wperm(private_page->sptep);
+		kfree(pfn_to_kaddr(private_page->private_pfn));
+		list_del(&private_page->link);
+		kfree(private_page);
+		vcpu->arch.nr_rollback_pages--;
+	}
+	INIT_LIST_HEAD(&vcpu->arch.rollback_pages);
+}
+#endif
 
 void inline tm_wait_DMA(struct kvm_vcpu *vcpu)
 {
@@ -6250,6 +6300,27 @@ retry:
 	}
 }
 EXPORT_SYMBOL_GPL(tm_chunk_list_check_and_del);
+
+#ifdef RR_ROLLBACK_PAGES
+void tm_copy_rollback_pages(struct kvm_vcpu *vcpu)
+{
+	void *origin, *private;
+	struct kvm_private_mem_page *private_page, *temp;
+
+	print_record("vcpu=%d %s copy %d pages\n", vcpu->vcpu_id, __func__,
+		     vcpu->arch.nr_rollback_pages);
+	list_for_each_entry_safe(private_page, temp,
+				 &vcpu->arch.rollback_pages, link) {
+		origin = pfn_to_kaddr(private_page->original_pfn);
+		private = pfn_to_kaddr(private_page->private_pfn);
+		copy_page(private, origin);
+		list_move_tail(&private_page->link, &vcpu->arch.holding_pages);
+		vcpu->arch.nr_rollback_pages--;
+		vcpu->arch.nr_holding_pages++;
+	}
+}
+EXPORT_SYMBOL_GPL(tm_copy_rollback_pages);
+#endif
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
@@ -9406,6 +9477,9 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.tm_memory_rollback = tm_memory_rollback,
  	.rr_apic_accept_irq = __rr_apic_accept_irq,
 	.tm_chunk_list_check_and_del = tm_chunk_list_check_and_del,
+#ifdef RR_ROLLBACK_PAGES
+	.tm_copy_rollback_pages = tm_copy_rollback_pages,
+#endif
 };
 
 static int __init vmx_init(void)

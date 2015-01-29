@@ -5894,6 +5894,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	struct rr_event *tmp;
 	static u64 commit_count;
 	static int mirror_flag;
+	bool is_rollback;
 
 restart:
 	if (vcpu->requests) {	// Check if there is any requests which are not handled.
@@ -6036,8 +6037,13 @@ restart:
 	 * memory before we enter guest.
 	 */
 	if (vcpu->is_recording && vcpu->need_check_chunk_info) {
+		is_rollback = vcpu->chunk_info.action == KVM_RR_ROLLBACK;
 		kvm_x86_ops->tm_chunk_list_check_and_del(vcpu);
 		vcpu->need_check_chunk_info = 0;
+#ifdef RR_ROLLBACK_PAGES
+		if (is_rollback)
+			kvm_x86_ops->tm_copy_rollback_pages(vcpu);
+#endif
 	}
 
 	vcpu->rr_state = 0;
@@ -7163,6 +7169,10 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->arch.nr_private_pages = 0;
 	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
 	vcpu->arch.nr_holding_pages = 0;
+#ifdef RR_ROLLBACK_PAGES
+	INIT_LIST_HEAD(&vcpu->arch.rollback_pages);
+	vcpu->arch.nr_rollback_pages = 0;
+#endif
 	vcpu->need_memory_commit = 0;
 	vcpu->rr_state = 0;
 	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);

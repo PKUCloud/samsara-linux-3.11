@@ -547,6 +547,11 @@ struct kvm_vcpu_arch {
 	int nr_private_pages;
 	struct list_head holding_pages; /* For pages that have been COW before */
 	int nr_holding_pages;
+#ifdef RR_ROLLBACK_PAGES
+	/* For pages that need to rollback */
+	struct list_head rollback_pages;
+	int nr_rollback_pages;
+#endif
 
 	struct list_head ept_mirror;	/* A mirror of the EPT and its content */
 };
@@ -793,6 +798,9 @@ struct kvm_x86_ops {
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map);
 	void (*tm_chunk_list_check_and_del)(struct kvm_vcpu *vcpu);
+#ifdef RR_ROLLBACK_PAGES
+	void (*tm_copy_rollback_pages)(struct kvm_vcpu *vcpu);
+#endif
 };
 
 struct kvm_arch_async_pf {

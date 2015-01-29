@@ -28,6 +28,14 @@
 #define RR_HOLDING_PAGES_MAXM        512
 #define RR_HOLDING_PAGES_TARGET_NR   256
 
+/* If defined, we use a separate list to hold pages need to rollback and before
+ * entering guest, we copy the new content of those pages.
+ * BUG: If kvm read/write guest pages after we rollback while other vcpus haven't
+ * finished commit yet, we may read old contents. This bug is introduced in the
+ * commit adding kvm.chunk_list.
+ */
+#define RR_ROLLBACK_PAGES
+
 struct vmexit_states {
 	uint64_t num;
 	uint64_t time;
