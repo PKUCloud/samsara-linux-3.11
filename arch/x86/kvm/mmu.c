@@ -2841,7 +2841,18 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 //print_record("vcpu=%d, %s, 2, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	/* We should use GFP_ATOMIC here, because it will be called while holding spinlock */
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
+	if (!private_mem_page) {
+		printk(KERN_ERR "error: vcpu=%d %s fail to kmalloc for "
+		       "private_mem_page\n", vcpu->vcpu_id, __func__);
+		return;
+	}
 	new_page = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+	if (!new_page) {
+		printk(KERN_ERR "error: vcpu=%d %s fail to kmalloc for "
+		       "new_page\n", vcpu->vcpu_id, __func__);
+		kfree(private_mem_page);
+		return;
+	}
 	private_mem_page->gfn = gfn;
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
@@ -4124,20 +4135,22 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	unsigned index;
 	u64 *sptep;
 
-	if (level != PT64_ROOT_LEVEL) {
-		printk(KERN_ERR "XELATEX - NO PT64_ROOT_LEVEL support\n");
+	if (unlikely(level != PT64_ROOT_LEVEL)) {
+		printk(KERN_ERR "error: vcpu=%d %s no PT64_ROOT_LEVEL support\n",
+		       vcpu->vcpu_id, __func__);
 		return NULL;
 	}
 
-	if (vcpu->arch.mmu.root_hpa == INVALID_PAGE) {
-		printk(KERN_ERR "XELATEX - root_hpa == INVALID_PAGE\n");
+	if (unlikely(vcpu->arch.mmu.root_hpa == INVALID_PAGE)) {
+		printk(KERN_ERR "error: vcpu=%d %s root_hpa == INVALID_PAGE\n",
+		       vcpu->vcpu_id, __func__);
 		return (void *)INVALID_PAGE;
 	}
 
 	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if ((u64)sptep == 0xffff87ffffffffffULL)
+		if (unlikely((u64)sptep == 0xffff87ffffffffffULL))
 			printk(KERN_ERR "vcpu=%d, index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
 						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
 				vcpu->vcpu_id, index, (u64)sptep, shadow_addr, (u64)__va(shadow_addr), level,
@@ -4166,7 +4179,6 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
 	}
 
-	//printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 	return NULL;
 }
 
@@ -4187,19 +4199,19 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		//print_record("vcpu=%d, warning: go to tdp_page_fault() path in %s\n", vcpu->vcpu_id, __func__);
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
-			printk(KERN_ERR "vcpu=%d, error: tdp_page_fault() fail in %s for gfn 0x%llx\n",
+			printk(KERN_ERR "error: vcpu=%d %s tdp_page_fault() "
+			       "fail for gfn 0x%llx\n",
 				vcpu->vcpu_id, __func__, gfn);
 			return NULL;
 		}
 		//print_record("vcpu=%d, reclaim write for gfn 0x%llx\n", vcpu->vcpu_id, gfn);
 		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 		if (kaddr == NULL) {
-			print_record("vcpu=%d, error: %s fail for gfn 0x%llx\n",
+			printk(KERN_ERR "error: vcpu=%d %s fail for gfn 0x%llx\n",
 				vcpu->vcpu_id, __func__, gfn);
 			return NULL;
 		}
-	}
-	else if (kaddr == (void *)INVALID_PAGE)
+	} else if (kaddr == (void *)INVALID_PAGE)
 		return NULL;
 
 	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
