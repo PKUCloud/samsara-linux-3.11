@@ -6026,7 +6026,7 @@ restart:
 	 * fail at the first try to enter guest and we need to commit memory
 	 * again until it enter guest.
 	 */
-	if (kvm_record && vcpu->need_memory_commit) {
+	if (vcpu->is_recording && vcpu->need_memory_commit) {
 		// kvm_record_clean_ept(vcpu);
 		// kvm_x86_ops->tm_memory_commit(vcpu);
 		// kvm_x86_ops->tlb_flush(vcpu);
