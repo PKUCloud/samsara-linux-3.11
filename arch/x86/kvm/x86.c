@@ -7159,6 +7159,10 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->need_check_chunk_info = 0;
 	vcpu->chunk_info.vcpu_id = vcpu->vcpu_id;
 	vcpu->chunk_info.state = RR_CHUNK_IDLE;
+#ifdef RR_BEBACKOFF
+	vcpu->rr_timer_value = 0;
+	vcpu->nr_commit = 0;
+#endif
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;

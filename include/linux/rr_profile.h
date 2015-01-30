@@ -10,8 +10,24 @@
 // 500M mem is 128K
 #define TM_BITMAP_SIZE 1024*1024
 
-// Params
+/* If defined, use Binary exponential backoff to decide next chunk's preemption
+ * timer value.
+ */
+// #define RR_BEBACKOFF
+
+#ifdef RR_BEBACKOFF
+
+#define RR_CONSEC_RB_TIME 4
+#define RR_BEBACKOFF_START_RB_TIME 1
+#define RR_BEASCEND_START_CM_TIME 1
+#define RR_BEBACKOFF_MINM 100UL
+#define RR_BEBACKOFF_LINE 1000UL
+
+#else
+
 #define RR_CONSEC_RB_TIME 3
+
+#endif
 
 // Optimizations
 #define RR_AD_BIT_OPT

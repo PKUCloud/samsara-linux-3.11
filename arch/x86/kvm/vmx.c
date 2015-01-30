@@ -5745,6 +5745,10 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	vcpu->nr_rollback = 0;
 	vcpu->tm_version = 0;
 
+#ifdef RR_BEBACKOFF
+	vcpu->nr_commit = 0;
+#endif
+
 	kvm_record_clear_ept_mirror(vcpu);
 	kvm_record_clear_holding_pages(vcpu);
 #ifdef RR_ROLLBACK_PAGES
@@ -5840,6 +5844,10 @@ int tm_unsync_init(void *opaque)
 	kvm_mmu_reload(vcpu);
 	//kvm_record_count = KVM_RECORD_COUNT - 1;
 	vcpu->is_recording = true;
+#ifdef RR_BEBACKOFF
+	vcpu->rr_timer_value = kvm_record_timer_value;
+	print_record("vcpu=%d timer value is %lu\n", vcpu->vcpu_id, vcpu->rr_timer_value);
+#endif
 
 	if (kvm_record_separate_mem) {
 		print_record("Start HARD_MMU record vcpu %d ---------------------\n",
@@ -6325,6 +6333,32 @@ void tm_copy_rollback_pages(struct kvm_vcpu *vcpu)
 EXPORT_SYMBOL_GPL(tm_copy_rollback_pages);
 #endif
 
+#ifdef RR_BEBACKOFF
+static void tm_update_timer_value(struct kvm_vcpu *vcpu)
+{
+	u32 current_timer_val = vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
+	u32 next_timer_val = vcpu->rr_timer_value;
+	u32 ticks = vcpu->rr_timer_value - current_timer_val;
+
+	if (vcpu->nr_rollback == RR_BEBACKOFF_START_RB_TIME) {
+		next_timer_val /= 2;
+		if (next_timer_val > RR_BEBACKOFF_LINE)
+			next_timer_val = RR_BEBACKOFF_LINE;
+	} else if (vcpu->nr_rollback > RR_BEBACKOFF_START_RB_TIME) {
+		/* Need to Binary exponential backoff */
+		next_timer_val = ticks / 2;
+		if (next_timer_val < RR_BEBACKOFF_MINM) {
+			next_timer_val = RR_BEBACKOFF_MINM;
+		}
+	} else {
+		/* Commit */
+		next_timer_val = kvm_record_timer_value;
+	}
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, next_timer_val);
+	vcpu->rr_timer_value = next_timer_val;
+}
+#endif
+
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -6404,8 +6438,14 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				print_record("PROFILE,vcpu=%d,consecutive_rb,%d\n", vcpu->vcpu_id, vcpu->nr_rollback);
 			#endif
 			vcpu->nr_rollback = 0;
+#ifdef RR_BEBACKOFF
+			vcpu->nr_commit++;
+#endif
 		} else {
 rollback:
+#ifdef RR_BEBACKOFF
+			vcpu->nr_commit = 0;
+#endif
 			vcpu->nr_rollback++;
 			/* Rollback here in the lock */
 			// tm_memory_rollback(vcpu);
@@ -6468,7 +6508,12 @@ rollback:
 		goto record_disable;
 	}
 
+#ifdef RR_BEBACKOFF
+	tm_update_timer_value(vcpu);
+#else
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
+#endif
+
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
 		vcpu->mmu_vcpu_valid_gen ++;
 		// Zap all mmu pages every TM_MMU_INVALID_GEN turns
