@@ -6113,12 +6113,8 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
 				 link) {
 		gfn = private_page->gfn;
-		/* Whether this page has been touched by other vcpus or by this vcpu
-		 * in this quantum.
-		 */
-		if (test_bit(gfn, vcpu->private_cb) ||
-		    test_bit(gfn, vcpu->dirty_bitmap)) {
 #ifdef RR_ROLLBACK_PAGES
+		if (test_bit(gfn, vcpu->dirty_bitmap)) {
 			/* We do nothing here but keep these dirty pages in a
 			 * list and copy the new content back before entering
 			 * guest.
@@ -6127,8 +6123,21 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 				       &vcpu->arch.rollback_pages);
 			vcpu->arch.nr_holding_pages--;
 			vcpu->arch.nr_rollback_pages++;
-			continue;
-#endif
+		} else if (test_bit(gfn, vcpu->private_cb)) {
+			kvm_record_spte_set_pfn(private_page->sptep,
+						private_page->original_pfn);
+			kvm_record_spte_withdraw_wperm(private_page->sptep);
+			kfree(pfn_to_kaddr(private_page->private_pfn));
+			list_del(&private_page->link);
+			kfree(private_page);
+			vcpu->arch.nr_holding_pages--;
+		}
+#else
+		/* Whether this page has been touched by other vcpus or by this vcpu
+		 * in this quantum.
+		 */
+		if (test_bit(gfn, vcpu->private_cb) ||
+		    test_bit(gfn, vcpu->dirty_bitmap)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6137,6 +6146,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 			kfree(private_page);
 			vcpu->arch.nr_holding_pages--;
 		}
+#endif
 	}
 	if (vcpu->arch.nr_holding_pages == 0) {
 		INIT_LIST_HEAD(&vcpu->arch.holding_pages);
