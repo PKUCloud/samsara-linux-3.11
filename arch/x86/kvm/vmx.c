@@ -5745,6 +5745,12 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	vcpu->nr_rollback = 0;
 	vcpu->tm_version = 0;
 
+	re_bitmap_destroy(&vcpu->access_bitmap);
+	re_bitmap_destroy(&vcpu->conflict_bitmap_1);
+	re_bitmap_destroy(&vcpu->conflict_bitmap_2);
+	re_bitmap_destroy(&vcpu->dirty_bitmap);
+	re_bitmap_destroy(&vcpu->DMA_access_bitmap);
+
 #ifdef RR_BEBACKOFF
 	vcpu->nr_commit = 0;
 #endif
@@ -5826,7 +5832,7 @@ int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu,
 int tm_detect_conflict(struct region_bitmap *access_bm,
 		       struct region_bitmap *conflict_bm)
 {
-	return re_bitmap_intersects(access_bm, conflict_bm);
+	return re_bitmap_intersects(conflict_bm, access_bm);	/* Notice the order */
 }
 
 int tm_unsync_init(void *opaque)

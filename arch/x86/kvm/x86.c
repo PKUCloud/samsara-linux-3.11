@@ -7144,11 +7144,11 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->access_size = 1;
 	vcpu->dirty_size = 1;
 	vcpu->conflict_size = 1;
-	re_bitmap_init(&vcpu->access_bitmap);
-	re_bitmap_init(&vcpu->conflict_bitmap_1);
-	re_bitmap_init(&vcpu->conflict_bitmap_2);
-	re_bitmap_init(&vcpu->dirty_bitmap);
-	re_bitmap_init(&vcpu->DMA_access_bitmap);
+	re_bitmap_init(&vcpu->access_bitmap, true);
+	re_bitmap_init(&vcpu->conflict_bitmap_1, false);
+	re_bitmap_init(&vcpu->conflict_bitmap_2, false);
+	re_bitmap_init(&vcpu->dirty_bitmap, true);
+	re_bitmap_init(&vcpu->DMA_access_bitmap, false);
 	INIT_LIST_HEAD(&(vcpu->events_list));
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->public_cb = &vcpu->conflict_bitmap_1;
