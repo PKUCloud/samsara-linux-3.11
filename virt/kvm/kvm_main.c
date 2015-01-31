@@ -2012,7 +2012,8 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 		for (i = 0; i < DMA_access->size; i++) {
 			print_record("%s, DMA_access, gfn=0x%x\n", __func__, DMA_access->gfn[i]);
 			for (j=0; j<online_vcpus; j++) {
-				set_bit(DMA_access->gfn[i], kvm->vcpus[j]->DMA_access_bitmap);
+				re_set_bit(DMA_access->gfn[i],
+					   &kvm->vcpus[j]->DMA_access_bitmap);
 			}
 		}
 		print_record("%s, DMA_access, size=%d\n", __func__, DMA_access->size);

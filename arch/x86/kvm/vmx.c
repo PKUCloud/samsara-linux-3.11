@@ -5792,8 +5792,9 @@ record_disable:
 }
 EXPORT_SYMBOL_GPL(tm_commit);
 
-int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu, unsigned long *access_bm,
-	unsigned long *conflict_bm, int nbits)
+int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu,
+				 struct region_bitmap *access_bm,
+				 struct region_bitmap *conflict_bm, int nbits)
 {
 	int k;
 	int nr = BITS_TO_LONGS(nbits);
@@ -5803,10 +5804,10 @@ int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu, unsigned long *access_bm
 	int num = 0;
 
 	for (k = 0; k < nr; k++) {
-		if (access_bm[k] & conflict_bm[k]) {
+		if (access_bm->bitmap[k] & conflict_bm->bitmap[k]) {
 			gfn = k * BITS_PER_BYTE * sizeof(long);
 			for (i=0; i<BITS_PER_BYTE*sizeof(long); i++) {
-				if ((access_bm[k] >> i) & 1) {
+				if ((access_bm->bitmap[k] >> i) & 1) {
 					print_record("vcpu=%d,PROFILE_CONFLICT,gfn,0x%llx\n",
 						vcpu->vcpu_id, gfn+i);
 					num ++;
@@ -5822,16 +5823,10 @@ int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu, unsigned long *access_bm
 	return ret;
 }
 
-int tm_detect_conflict(unsigned long *access_bm, unsigned long *conflict_bm, int nbits)
+int tm_detect_conflict(struct region_bitmap *access_bm,
+		       struct region_bitmap *conflict_bm)
 {
-	int k;
-	int nr = BITS_TO_LONGS(nbits);
-
-	for (k = 0; k < nr; k++) {
-		if (access_bm[k] & conflict_bm[k])
-			return 1;
-	}
-	return 0;
+	return re_bitmap_intersects(access_bm, conflict_bm);
 }
 
 int tm_unsync_init(void *opaque)
@@ -5939,7 +5934,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 				 link) {
 		gfn = private_page->gfn;
 		/* Whether this page has been touched by other vcpus */
-		if (test_bit(gfn, vcpu->private_cb)) {
+		if (re_test_bit(gfn, vcpu->private_cb)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -5947,7 +5942,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			list_del(&private_page->link);
 			kfree(private_page);
 			vcpu->arch.nr_holding_pages--;
-		} else if (test_bit(gfn, vcpu->dirty_bitmap)) {
+		} else if (re_test_bit(gfn, &vcpu->dirty_bitmap)) {
 			/* This page was touched by this vcpu in this quantum */
 			tm_memory_commit_page(private_page);
 			list_move_tail(&private_page->link, &temp_list);
@@ -6023,7 +6018,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			gfn = private_page->gfn;
 			origin = pfn_to_kaddr(private_page->original_pfn);
 			private = pfn_to_kaddr(private_page->private_pfn);
-			if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
+			if (re_test_bit(gfn, &vcpu->DMA_access_bitmap)) {
 				//print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
 				//	vcpu->vcpu_id, __func__, gfn);
 				copy_page(private, origin);
@@ -6114,7 +6109,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 				 link) {
 		gfn = private_page->gfn;
 #ifdef RR_ROLLBACK_PAGES
-		if (test_bit(gfn, vcpu->dirty_bitmap)) {
+		if (re_test_bit(gfn, &vcpu->dirty_bitmap)) {
 			/* We do nothing here but keep these dirty pages in a
 			 * list and copy the new content back before entering
 			 * guest.
@@ -6123,7 +6118,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 				       &vcpu->arch.rollback_pages);
 			vcpu->arch.nr_holding_pages--;
 			vcpu->arch.nr_rollback_pages++;
-		} else if (test_bit(gfn, vcpu->private_cb)) {
+		} else if (re_test_bit(gfn, vcpu->private_cb)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 						private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6136,8 +6131,8 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		/* Whether this page has been touched by other vcpus or by this vcpu
 		 * in this quantum.
 		 */
-		if (test_bit(gfn, vcpu->private_cb) ||
-		    test_bit(gfn, vcpu->dirty_bitmap)) {
+		if (re_test_bit(gfn, vcpu->private_cb) ||
+		    re_test_bit(gfn, &vcpu->dirty_bitmap)) {
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6184,7 +6179,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 			gfn = private_page->gfn;
 			origin = pfn_to_kaddr(private_page->original_pfn);
 			private = pfn_to_kaddr(private_page->private_pfn);
-			if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
+			if (re_test_bit(gfn, &vcpu->DMA_access_bitmap)) {
 				// print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
 				//	vcpu->vcpu_id, __func__, gfn);
 				copy_page(private, origin);
@@ -6404,12 +6399,14 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			// Detect conflict
 			#ifdef RR_PROFILE_CONFLICT
 			if (vcpu->is_early_rb ||
-					tm_detect_and_print_conflict(vcpu, vcpu->access_bitmap, 
+					tm_detect_and_print_conflict(vcpu, &vcpu->access_bitmap, 
 						vcpu->public_cb, TM_BITMAP_SIZE)) {
 			#else
 			if (vcpu->is_early_rb ||
-					tm_detect_conflict(vcpu->access_bitmap, vcpu->public_cb, TM_BITMAP_SIZE) ||
-					tm_detect_conflict(vcpu->access_bitmap, vcpu->DMA_access_bitmap, TM_BITMAP_SIZE)) {
+			    tm_detect_conflict(&vcpu->access_bitmap,
+					       vcpu->public_cb) ||
+			    tm_detect_conflict(&vcpu->access_bitmap,
+					       &vcpu->DMA_access_bitmap)) {
 			#endif
 				commit = 0;
 				vcpu->nr_conflict++;
@@ -6434,8 +6431,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
 					continue;
-				bitmap_or(kvm->vcpus[i]->public_cb, vcpu->dirty_bitmap,
-					kvm->vcpus[i]->public_cb, TM_BITMAP_SIZE);
+				re_bitmap_or(kvm->vcpus[i]->public_cb,
+					     &vcpu->dirty_bitmap);
 			}
 
 			/* Commit here in the lock */
@@ -6490,7 +6487,7 @@ rollback:
 
 		// Clear DMA bitmap
 		if (atomic_read(&(kvm->tm_dma)) == 0)
-			bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
+			re_bitmap_clear(&vcpu->DMA_access_bitmap);
 		else
 			print_record("vcpu=%d, %s, error: Why here?\n", vcpu->vcpu_id, __func__);
 		// mutex_unlock(&(kvm->tm_lock));
@@ -6510,9 +6507,9 @@ rollback:
 		*/
 	}
 	// Reset bitmaps
-	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
-	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
-	bitmap_clear(vcpu->private_cb, 0, TM_BITMAP_SIZE);
+	re_bitmap_clear(&vcpu->access_bitmap);
+	re_bitmap_clear(&vcpu->dirty_bitmap);
+	re_bitmap_clear(vcpu->private_cb);
 
 	if (!kvm_record) {
 		goto record_disable;
@@ -6564,7 +6561,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 
 	// Fill in dirty_bitmap
 	list_for_each_entry_safe(gfn_node, temp, &(vcpu->commit_again_gfn_list), link) {
-		set_bit(gfn_node->gfn, vcpu->dirty_bitmap);
+		re_set_bit(gfn_node->gfn, &vcpu->dirty_bitmap);
 		list_del(&gfn_node->link);
 	}
 
@@ -6584,8 +6581,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	for (i = 0; i < online_vcpus; ++i) {
 		if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
 			continue;
-		bitmap_or(kvm->vcpus[i]->public_cb, vcpu->dirty_bitmap,
-			  kvm->vcpus[i]->public_cb, TM_BITMAP_SIZE);
+		re_bitmap_or(kvm->vcpus[i]->public_cb, &vcpu->dirty_bitmap);
 	}
 	/* Copy conflict_bitmap */
 	// bitmap_copy(vcpu->private_conflict_bitmap, vcpu->conflict_bitmap,
@@ -6598,14 +6594,14 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	//bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 	mutex_unlock(&kvm->tm_lock);
 
-	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
+	re_bitmap_clear(&vcpu->DMA_access_bitmap);
 
 	up_read(&kvm->tm_rwlock);
 
 	/* Reset bitmaps */
-	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
-	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
-	bitmap_clear(vcpu->private_cb, 0, TM_BITMAP_SIZE);
+	re_bitmap_clear(&vcpu->access_bitmap);
+	re_bitmap_clear(&vcpu->dirty_bitmap);
+	re_bitmap_clear(vcpu->private_cb);
 
 	/* Should not use kvm_make_request here */
 	vmx_flush_tlb(vcpu);
@@ -7877,7 +7873,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	#ifdef RR_EARLY_ROLLBACK
 	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
 		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
-		if (test_bit(gfn, vcpu->public_cb)) {
+		if (re_test_bit(gfn, vcpu->public_cb)) {
 			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
 			print_record("vcpu=%d, early rollback, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
@@ -7891,7 +7887,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	is_early_check = 0;
 	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
 		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
-		if (test_bit(gfn, vcpu->public_cb)) {
+		if (re_test_bit(gfn, vcpu->public_cb)) {
 			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
 			print_record("vcpu=%d, early check, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 			exit_reason = EXIT_REASON_PREEMPTION_TIMER;

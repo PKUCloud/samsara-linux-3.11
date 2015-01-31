@@ -2720,10 +2720,10 @@ static void __always_inline __mmu_print_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep
 static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t addr)
 {
 	if (*sptep & VMX_EPT_DIRTY_BIT || *sptep & VMX_EPT_ACCESS_BIT) {
-		set_bit(gpa >> PAGE_SHIFT, vcpu->access_bitmap);
+		re_set_bit(gpa >> PAGE_SHIFT, &vcpu->access_bitmap);
 		vcpu->access_size = (gpa >> PAGE_SHIFT) + 1;
 		if (*sptep & VMX_EPT_DIRTY_BIT) {
-			set_bit(gpa >> PAGE_SHIFT, vcpu->dirty_bitmap);
+			re_set_bit(gpa >> PAGE_SHIFT, &vcpu->dirty_bitmap);
 			//print_record("vcpu=%d, set_AD_bit, gfn=0x%llx\n", vcpu->vcpu_id, gpa >> PAGE_SHIFT);
 			vcpu->dirty_size = (gpa >> PAGE_SHIFT) + 1;
 		}

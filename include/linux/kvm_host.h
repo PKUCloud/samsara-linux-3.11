@@ -27,6 +27,7 @@
 #include <asm/signal.h>
 // XELATEX
 #include <linux/rr_profile.h>
+#include <linux/region_bitmap.h>
 
 #include <linux/kvm.h>
 #include <linux/kvm_para.h>
@@ -323,13 +324,13 @@ struct kvm_vcpu {
 	unsigned long long nr_conflict;
 	bool is_conflict;
 	bool is_recording;
-	DECLARE_BITMAP(access_bitmap, TM_BITMAP_SIZE);
-	DECLARE_BITMAP(dirty_bitmap, TM_BITMAP_SIZE);
-	DECLARE_BITMAP(conflict_bitmap_1, TM_BITMAP_SIZE); /* Double buffers */
-	DECLARE_BITMAP(conflict_bitmap_2, TM_BITMAP_SIZE);
-	DECLARE_BITMAP(DMA_access_bitmap, TM_BITMAP_SIZE);
-	unsigned long *public_cb;	/* Public conflict bitmap */
-	unsigned long *private_cb;	/* Private conflict bitmap */
+	struct region_bitmap access_bitmap;
+	struct region_bitmap dirty_bitmap;
+	struct region_bitmap conflict_bitmap_1;	/* Double buffers */
+	struct region_bitmap conflict_bitmap_2;
+	struct region_bitmap DMA_access_bitmap;
+	struct region_bitmap *public_cb;	/* Public conflict bitmap */
+	struct region_bitmap *private_cb;	/* Private conflict bitmap */
 	gfn_t access_size;
 	gfn_t dirty_size;
 	gfn_t conflict_size;
