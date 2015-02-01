@@ -92,7 +92,18 @@ static inline void re_bitmap_init(struct region_bitmap *re_bitmap,
 static inline void re_bitmap_clear(struct region_bitmap *re_bitmap)
 {
 	unsigned long low, high;
+	int i, size;
+	struct bits_list *blist = &re_bitmap->blist;
+	unsigned long *bitmap = re_bitmap->bitmap;
 
+	if (re_bitmap->bits_list_valid) {
+		/* Clear the bitmap through the list */
+		size = blist->nbits;
+		for (i = 0; i < size; ++i) {
+			clear_bit(blist->bits[i], bitmap);
+		}
+		goto out;
+	}
 	low = re_bitmap->low;
 	high = re_bitmap->high;
 	if (likely(low <= high)) {
@@ -101,9 +112,10 @@ static inline void re_bitmap_clear(struct region_bitmap *re_bitmap)
 	} else {
 		bitmap_clear(re_bitmap->bitmap, 0, RE_BITMAP_SIZE);
 	}
+out:
 	re_bitmap->low = RE_BITMAP_MAX;
 	re_bitmap->high = RE_BITMAP_MIN;
-	
+
 	bits_list_clear(&re_bitmap->blist);
 }
 
@@ -120,7 +132,7 @@ static inline void re_set_bit(unsigned long nr, struct region_bitmap *re_bitmap)
 	if (nr > re_bitmap->high)
 		re_bitmap->high = nr;
 
-	if (likely(re_bitmap->bits_list_valid)) {
+	if (re_bitmap->bits_list_valid) {
 		bits_list_insert(&re_bitmap->blist, nr);
 	}
 }
@@ -138,6 +150,7 @@ static inline void re_bitmap_or(struct region_bitmap *dst,
 {
 	int i, size;
 	const struct bits_list *blist = &src->blist;
+	unsigned long *bitmap = dst->bitmap;
 
 	/* Assumptions based on our system */
 	if (unlikely(!src->bits_list_valid || dst->bits_list_valid)) {
@@ -145,7 +158,7 @@ static inline void re_bitmap_or(struct region_bitmap *dst,
 	}
 	size = blist->nbits;
 	for (i = 0; i < size; ++i) {
-		set_bit(blist->bits[i], dst->bitmap);
+		set_bit(blist->bits[i], bitmap);
 	}
 	dst->low = min(src->low, dst->low);
 	dst->high = max(src->high, dst->high);
