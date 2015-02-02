@@ -360,6 +360,8 @@ struct kvm_vcpu {
 	struct CPUX86State vcpu_checkpoint;
 	int check_rollback;
 	//end kvm_vcpu_checkpoint_rollback rsr
+
+	struct vcpu_rr_states rr_states;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)

@@ -5725,6 +5725,33 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu,"
 			"nr_vmexit=%llu, nr_conflict=%llu\n",
 			vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
+	if (vcpu->vcpu_id == 0) {
+		for (i=1; i<online_vcpus; i++) {
+			PROFILE_CALCULATE(total_commit_time);
+			PROFILE_CALCULATE(tm_lock_time);
+			PROFILE_CALCULATE(tm_rwlock_time);
+			PROFILE_CALCULATE(wait_time);
+			PROFILE_CALCULATE(exclusive_time);
+			PROFILE_CALCULATE(detect_conflict_time);
+			PROFILE_CALCULATE(set_dirty_time);
+			PROFILE_CALCULATE(memory_time);
+			PROFILE_CALCULATE(clear_bitmap_time);
+			PROFILE_CALCULATE(clear_dma_bitmap_time);
+			PROFILE_CALCULATE(walk_mmu_time);
+		}
+		PROFILE_PRINT(total_commit_time);
+		PROFILE_PRINT(tm_lock_time);
+		PROFILE_PRINT(tm_rwlock_time);
+		PROFILE_PRINT(wait_time);
+		PROFILE_PRINT(exclusive_time);
+		PROFILE_PRINT(detect_conflict_time);
+		PROFILE_PRINT(set_dirty_time);
+		PROFILE_PRINT(memory_time);
+		PROFILE_PRINT(clear_bitmap_time);
+		PROFILE_PRINT(clear_dma_bitmap_time);
+		PROFILE_PRINT(walk_mmu_time);
+	}
+
 	kvm_record = false;
 	kvm->record_master = false;
 	kvm->tm_last_commit_vcpu = -1;
@@ -6378,12 +6405,15 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 	int commit = 1;
 
 	if (vcpu->is_recording) {
+		PROFILE_BEGIN(walk_mmu_time);
 		if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
 				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
+		PROFILE_END(walk_mmu_time);
 
 		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
+			PROFILE_BEGIN(exclusive_time);
 			/* Now anothter vcpu is in exclusive commit state */
 			print_record("vcpu=%d is going to sleep because of exclusive commit\n", vcpu->vcpu_id);
 			if (wait_event_interruptible(kvm->tm_exclusive_commit_que,
@@ -6393,15 +6423,21 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				return -1;
 			}
 			print_record("vcpu=%d wake up\n", vcpu->vcpu_id);
+			PROFILE_END(exclusive_time);
 		}
 
+		PROFILE_BEGIN(tm_rwlock_time);
 		down_read(&(kvm->tm_rwlock));
+		PROFILE_END(tm_rwlock_time);
+		PROFILE_BEGIN(tm_lock_time);
 		mutex_lock(&(kvm->tm_lock));
+		PROFILE_END(tm_lock_time);
 
 		// Wait for DMA finished
 		//tm_wait_DMA(vcpu);
 
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
+			PROFILE_BEGIN(detect_conflict_time);
 			// Detect conflict
 			#ifdef RR_PROFILE_CONFLICT
 			if (vcpu->is_early_rb ||
@@ -6418,6 +6454,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				vcpu->nr_conflict++;
 				vcpu->is_early_rb = 0;
 			}
+			PROFILE_END(detect_conflict_time);
 		}
 
 		if (commit) {
@@ -6433,6 +6470,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				commit = 0;
 				goto rollback;
 			}
+			PROFILE_BEGIN(set_dirty_time);
 			// Set dirty bit
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
@@ -6440,16 +6478,17 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				re_bitmap_or(kvm->vcpus[i]->public_cb,
 					     &vcpu->dirty_bitmap);
 			}
+			PROFILE_END(set_dirty_time);
 
 			/* Commit here in the lock */
 			// tm_memory_commit(vcpu);
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
 
-			#ifdef RR_PROFILE
-			if (vcpu->nr_rollback != 0)
-				print_record("PROFILE,vcpu=%d,consecutive_rb,%d\n", vcpu->vcpu_id, vcpu->nr_rollback);
-			#endif
+			//#ifdef RR_PROFILE
+			//if (vcpu->nr_rollback != 0)
+			//	print_record("PROFILE,vcpu=%d,consecutive_rb,%d\n", vcpu->vcpu_id, vcpu->nr_rollback);
+			//#endif
 			vcpu->nr_rollback = 0;
 #ifdef RR_BEBACKOFF
 			vcpu->nr_commit++;
@@ -6484,19 +6523,23 @@ rollback:
 		swap(vcpu->public_cb, vcpu->private_cb);
 		mutex_unlock(&(kvm->tm_lock));
 
+		PROFILE_BEGIN(memory_time);
 		if (commit) {
 			tm_memory_commit(vcpu);
 		} else tm_memory_rollback(vcpu);
+		PROFILE_END(memory_time);
 
 		// tm_check_version(vcpu);
 		tm_chunk_list_set_state(vcpu, RR_CHUNK_FINISHED);
 
+		PROFILE_BEGIN(clear_dma_bitmap_time);
 		// Clear DMA bitmap
 		if (atomic_read(&(kvm->tm_dma)) == 0)
 			re_bitmap_clear(&vcpu->DMA_access_bitmap);
 		else
 			print_record("vcpu=%d, %s, error: Why here?\n", vcpu->vcpu_id, __func__);
 		// mutex_unlock(&(kvm->tm_lock));
+		PROFILE_END(clear_dma_bitmap_time);
 		up_read(&(kvm->tm_rwlock));
 
 	} else {
@@ -6512,10 +6555,12 @@ rollback:
 		printk(KERN_ERR "XELATEX - after sync - vcpu=%d\n", vcpu->vcpu_id);
 		*/
 	}
+	PROFILE_BEGIN(clear_bitmap_time);
 	// Reset bitmaps
 	re_bitmap_clear(&vcpu->access_bitmap);
 	re_bitmap_clear(&vcpu->dirty_bitmap);
 	re_bitmap_clear(vcpu->private_cb);
+	PROFILE_END(clear_bitmap_time);
 
 	if (!kvm_record) {
 		goto record_disable;
@@ -6582,7 +6627,9 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 		return 0;
 	}
 
+	PROFILE_BEGIN(tm_lock_time);
 	mutex_lock(&kvm->tm_lock);
+	PROFILE_END(tm_lock_time);
 	/* Spread the dirty_bitmap to other vcpus's conflict_bitmap */
 	for (i = 0; i < online_vcpus; ++i) {
 		if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
@@ -6594,8 +6641,10 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	//	    TM_BITMAP_SIZE);
 	swap(vcpu->private_cb, vcpu->public_cb);
 
+	PROFILE_BEGIN(memory_time);
 	/* Commit memory here */
 	tm_memory_commit(vcpu);
+	PROFILE_END(memory_time);
 
 	//bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 	mutex_unlock(&kvm->tm_lock);

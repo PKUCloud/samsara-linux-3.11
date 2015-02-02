@@ -6030,7 +6030,9 @@ restart:
 		// kvm_record_clean_ept(vcpu);
 		// kvm_x86_ops->tm_memory_commit(vcpu);
 		// kvm_x86_ops->tlb_flush(vcpu);
+		PROFILE_BEGIN(total_commit_time);
 		kvm_x86_ops->tm_commit_memory_again(vcpu);
+		PROFILE_END(total_commit_time);
 	}
 
 	/* Check if we need to wait other vcpus to finish commit/rollback
@@ -6038,7 +6040,9 @@ restart:
 	 */
 	if (vcpu->is_recording && vcpu->need_check_chunk_info) {
 		is_rollback = vcpu->chunk_info.action == KVM_RR_ROLLBACK;
+		PROFILE_BEGIN(wait_time);
 		kvm_x86_ops->tm_chunk_list_check_and_del(vcpu);
+		PROFILE_END(wait_time);
 		vcpu->need_check_chunk_info = 0;
 #ifdef RR_ROLLBACK_PAGES
 		if (is_rollback)
@@ -6161,7 +6165,9 @@ restart:
 		vcpu->need_chkpt = 0;
 		vcpu->rr_state = 0;
 
+		PROFILE_BEGIN(total_commit_time);
 		r = kvm_x86_ops->check_rr_commit(vcpu);
+		PROFILE_END(total_commit_time);
 		// Only for test
 		/*
 		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR) {
