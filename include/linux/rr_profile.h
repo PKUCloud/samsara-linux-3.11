@@ -76,7 +76,7 @@ struct vcpu_rr_states {
 	uint64_t profile_detect_conflict_time, profile_set_dirty_time, profile_memory_time;
 	uint64_t profile_clear_bitmap_time, profile_clear_dma_bitmap_time;
 	uint64_t profile_walk_mmu_time;
-				
+	uint64_t profile_total_chunk_size, profile_chunk_num;
 	int exit_reason;
 };
 

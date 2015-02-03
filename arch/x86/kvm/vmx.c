@@ -5738,6 +5738,11 @@ void tm_disable(struct kvm_vcpu *vcpu)
 			PROFILE_CALCULATE(clear_bitmap_time);
 			PROFILE_CALCULATE(clear_dma_bitmap_time);
 			PROFILE_CALCULATE(walk_mmu_time);
+			PROFILE_CALCULATE(total_chunk_size);
+			PROFILE_CALCULATE(chunk_num);
+			vcpu->nr_sync += kvm->vcpus[i]->nr_sync;
+			vcpu->nr_vmexit += kvm->vcpus[i]->nr_vmexit;
+			vcpu->nr_conflict += kvm->vcpus[i]->nr_conflict;
 		}
 		PROFILE_PRINT(total_commit_time);
 		PROFILE_PRINT(tm_lock_time);
@@ -5750,6 +5755,12 @@ void tm_disable(struct kvm_vcpu *vcpu)
 		PROFILE_PRINT(clear_bitmap_time);
 		PROFILE_PRINT(clear_dma_bitmap_time);
 		PROFILE_PRINT(walk_mmu_time);
+		PROFILE_PRINT(total_chunk_size);
+		PROFILE_PRINT(chunk_num);
+		printk(KERN_ERR "PROFILE - AVG chunk size=%llu\n",
+			vcpu->rr_states.profile_total_chunk_size/vcpu->rr_states.profile_chunk_num);
+		printk(KERN_ERR "PROFILE - nr_sync=%llu, nr_vmexit=%llu, nr_conflict=%llu\n",
+			vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
 	}
 
 	kvm_record = false;
@@ -7882,6 +7893,12 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
+static inline void rr_profile_chunk_size(struct kvm_vcpu *vcpu)
+{
+	vcpu->rr_states.profile_chunk_num ++;
+	vcpu->rr_states.profile_total_chunk_size += kvm_record_timer_value - vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
+}
+
 static int vmx_tm_commit(struct kvm_vcpu *vcpu)
 {
 	if (kvm_record_type == KVM_RECORD_PREEMPTION)
@@ -7954,6 +7971,9 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
 		//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
+		#ifdef RR_PROFILE
+		rr_profile_chunk_size(vcpu);
+		#endif
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
