@@ -87,5 +87,6 @@ struct printf_spec {
 };
  
 int print_record(const char* fmt, ...);
+int print_real_log(const char* fmt, ...);
 
 #endif

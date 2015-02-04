@@ -6408,6 +6408,22 @@ static void tm_update_timer_value(struct kvm_vcpu *vcpu)
 }
 #endif
 
+extern void get_random_bytes(void *buf, int nbytes);
+
+inline void record_real_log(struct kvm_vcpu *vcpu)
+{
+	struct kvm *kvm = vcpu->kvm;
+	unsigned long rcx, rip;
+	unsigned int bc;
+	if (vcpu->vcpu_id == kvm->last_record_vcpu_id)
+		return;
+	rcx = kvm_register_read(vcpu, VCPU_REGS_RCX);
+	rip = vmcs_readl(GUEST_RIP);
+	kvm->last_record_vcpu_id = vcpu->vcpu_id;
+	get_random_bytes(&bc, sizeof(unsigned int));
+	print_real_log("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, bc);
+}
+
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -6504,6 +6520,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 #ifdef RR_BEBACKOFF
 			vcpu->nr_commit++;
 #endif
+			record_real_log(vcpu);
 		} else {
 rollback:
 #ifdef RR_BEBACKOFF

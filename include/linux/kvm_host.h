@@ -535,6 +535,8 @@ struct kvm {
 	 * to sleep in this queue.
 	 */
 	wait_queue_head_t tm_version_que;
+	/* vcpu that just record */
+	int last_record_vcpu_id;
 };
 
 #define kvm_err(fmt, ...) \

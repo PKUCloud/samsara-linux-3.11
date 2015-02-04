@@ -17,6 +17,7 @@
 #include <linux/device.h>
 
 #include "logger.h"
+#include <linux/rr_profile.h>
 
 int logger_major = LOGGER_MAJOR;          //device major number
 int logger_quantum = LOGGER_QUANTUM;         //quantum size
@@ -1277,8 +1278,11 @@ static int __print_record(const char* fmt, va_list args)
 }
 
 
-int print_record(const char* fmt, ...)
+inline int print_record(const char* fmt, ...)
 {
+#ifdef PRINT_REAL_LOG
+	return 0;
+#else
 	va_list args;  
 	int r; 
 
@@ -1304,10 +1308,47 @@ int print_record(const char* fmt, ...)
 out:
 	spin_unlock(&logger_dev.dev_lock);
 	va_end(args);
-	return r;   
+	return r;
+#endif
 }
 
 EXPORT_SYMBOL_GPL(print_record);
+
+inline int print_real_log(const char* fmt, ...)
+{
+#ifndef PRINT_REAL_LOG
+		return 0;
+#else
+	va_list args;  
+	int r; 
+
+	va_start(args, fmt);
+	
+	spin_lock(&logger_dev.dev_lock);
+	if(logger_dev.state != NORMAL) {
+		r = -1;
+		goto out;
+	}
+	r = __print_record(fmt, args);
+
+	//just for test
+	//va_end(args);
+	//va_start(args, fmt);
+	//vprintk_emit(0, -1, NULL, 0, fmt, args);
+
+	logger_dev.size += r;
+	if(logger_dev.size >= logger_quantum) {
+		wake_up_interruptible(&logger_dev.queue);
+	}
+
+out:
+	spin_unlock(&logger_dev.dev_lock);
+	va_end(args);
+	return r;
+#endif
+}
+
+EXPORT_SYMBOL_GPL(print_real_log);
 
 module_init(logger_init);
 module_exit(logger_cleanup);
