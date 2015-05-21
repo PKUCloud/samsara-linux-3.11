@@ -5980,6 +5980,9 @@ restart:
 		vcpu_checkpoint(vcpu);
 
 		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
+			print_real_log("2 %d %d %d %d 0x%llx, %d, 0x%llx\n",
+					e->delivery_mode, e->vector, e->level, e->trig_mode,
+					vcpu->arch.regs[VCPU_REGS_RIP], 0, vcpu->arch.regs[VCPU_REGS_RCX]);
 			list_del(&(e->link));
 			kfree(e);
 		}

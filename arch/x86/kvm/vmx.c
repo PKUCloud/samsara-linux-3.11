@@ -4898,6 +4898,8 @@ static int handle_io(struct kvm_vcpu *vcpu)
 
 	if (string || in) {
 		//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d, string=%d, in=%d\n", __func__, __LINE__, string, in);
+		print_real_log("3 %d 0x%llx, %d, 0x%llx\n",
+				0, vcpu->arch.regs[VCPU_REGS_RIP], 0, vcpu->arch.regs[VCPU_REGS_RCX]);
 		return emulate_instruction(vcpu, 0) == EMULATE_DONE;
 	}
 
