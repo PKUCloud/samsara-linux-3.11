@@ -4258,12 +4258,12 @@ static void vmx_record_setup(struct vcpu_vmx *vmx)
 			&& !(vmx->preemption_begin)) {
 		printk(KERN_ERR "vcpu %d %s KVM_RECORD_PREEMPTION\n", vmx->vcpu.vcpu_id, __func__);
 		vmx->preemption_begin = true;
-		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
 		vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
 		vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 	} else if (kvm_record_type == KVM_RECORD_TIMER && !(kvm->tm_timer_ready)) {
 		printk(KERN_ERR "vcpu %d %s KVM_RECORD_TIMER\n", vmx->vcpu.vcpu_id, __func__);
-		kvm->tm_record_time = ktime_set(0, US_TO_NS(kvm_record_timer_value));
+		kvm->tm_record_time = ktime_set(0, US_TO_NS(rr_ctrl.timer_value));
 		hrtimer_init(&(kvm->tm_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		kvm->tm_timer.function = &vmx_record_timer_callback;
 		kvm->tm_timer_set = false;
@@ -5826,7 +5826,7 @@ int tm_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 	// Prepare for new quantum
 	if (kvm_record_type == KVM_RECORD_PREEMPTION)
-		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
 	kvm_mmu_unload(vcpu);
 	vcpu->is_kicked = false;
 	vcpu->is_trapped = false;
@@ -5886,15 +5886,9 @@ int tm_unsync_init(void *opaque)
 	//kvm_record_count = KVM_RECORD_COUNT - 1;
 	vcpu->is_recording = true;
 #ifdef RR_BEBACKOFF
-	vcpu->rr_timer_value = kvm_record_timer_value;
+	vcpu->rr_timer_value = rr_ctrl.timer_value;
 	print_record("vcpu=%d timer value is %lu\n", vcpu->vcpu_id, vcpu->rr_timer_value);
 #endif
-
-	if (kvm_record_separate_mem) {
-		print_record("Start HARD_MMU record vcpu %d ---------------------\n",
-				vcpu->vcpu_id);
-	}
-
 	return 0;
 }
 
@@ -6403,7 +6397,7 @@ static void tm_update_timer_value(struct kvm_vcpu *vcpu)
 		}
 	} else {
 		/* Commit */
-		next_timer_val = kvm_record_timer_value;
+		next_timer_val = rr_ctrl.timer_value;
 	}
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, next_timer_val);
 	vcpu->rr_timer_value = next_timer_val;
@@ -6599,7 +6593,7 @@ rollback:
 #ifdef RR_BEBACKOFF
 	tm_update_timer_value(vcpu);
 #else
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
 #endif
 
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
@@ -7915,7 +7909,7 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 static inline void rr_profile_chunk_size(struct kvm_vcpu *vcpu)
 {
 	vcpu->rr_states.profile_chunk_num ++;
-	vcpu->rr_states.profile_total_chunk_size += kvm_record_timer_value - vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
+	vcpu->rr_states.profile_total_chunk_size += rr_ctrl.timer_value - vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
 }
 
 static int vmx_tm_commit(struct kvm_vcpu *vcpu)

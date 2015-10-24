@@ -147,6 +147,9 @@ extern struct kmem_cache *kvm_vcpu_cache;
 extern raw_spinlock_t kvm_lock;
 extern struct list_head vm_list;
 
+/* Record and replay */
+extern struct kvm_rr_ctrl rr_ctrl;
+
 struct kvm_io_range {
 	gpa_t addr;
 	int len;
@@ -1173,12 +1176,6 @@ extern bool kvm_rebooting;
 extern bool kvm_record;
 extern int kvm_record_type;
 extern int kvm_record_mode;
-extern u32 kvm_record_timer_value;
-extern struct kmem_cache *kvm_tm_page_cache;
-extern int kvm_record_print_log;
-extern int kvm_record_count;
-extern int kvm_record_separate_mem;
-#define KVM_RECORD_COUNT 10
 
 struct kvm_device_ops;
 

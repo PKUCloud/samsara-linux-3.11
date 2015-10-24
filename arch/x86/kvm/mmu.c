@@ -2896,19 +2896,15 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
 					spte = VMX_EPT_ACCESS_BIT;
 				}
-				if (kvm_record_print_log)
-					__mmu_print_AD_bit(vcpu, &spte, gfn<<PAGE_SHIFT, pfn<<PAGE_SHIFT);
 				__mmu_set_AD_bit(vcpu, &spte, gfn<<PAGE_SHIFT, pfn<<PAGE_SHIFT);
 			}
 
-			if (vcpu->is_recording && kvm_record_separate_mem) {
-				if (!write) {
-					/* Read trap
-					 * Do not give the write mask so that vcpu will trap when
-					 * it writes to this page next time.
-					 */
-					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
-				}
+			if (vcpu->is_recording && !write) {
+				/* Read trap
+				 * Do not give the write mask so that vcpu will trap when
+				 * it writes to this page next time.
+				 */
+				pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
 			}
 
 			mmu_set_spte(vcpu, iterator.sptep, pte_access,
@@ -2924,7 +2920,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			//direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
 
-			if (vcpu->is_recording && kvm_record_separate_mem &&
+			if (vcpu->is_recording &&
 				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
 				if (!write) {
 				} else {
@@ -2994,8 +2990,6 @@ static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, 
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 		if (is_last_spte(*sptep, level)) {
-			if (kvm_record_print_log)
-				__mmu_print_AD_bit(vcpu, sptep, new_gpa, new_addr);
 			__mmu_set_AD_bit(vcpu, sptep, new_gpa, new_addr);
 		} else {
  			__mmu_walk_spt(vcpu, new_addr, level - 1, new_gpa);
@@ -3023,52 +3017,10 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
 }
 
-static void memslot_walk_spt(struct kvm_vcpu *vcpu, int level)
-{
-	struct kvm *kvm = vcpu->kvm;
-	struct kvm_memory_slot *slot;
-	struct kvm_shadow_walk_iterator iterator;
-	gfn_t gfn;
-	u64 spte;
-	pfn_t pfn;
-	u64 *sptep;
-
-	kvm_for_each_memslot(slot, kvm->memslots) {
-	if (kvm_record_print_log)
-		for (gfn = slot->base_gfn; gfn < slot->base_gfn+slot->npages; gfn++) {
-			for_each_shadow_entry_lockless(vcpu, (u64)gfn << PAGE_SHIFT, iterator, spte) {
-				sptep = iterator.sptep;
-				if (!is_shadow_present_pte(*sptep))
-					break;
-				if (iterator.level == level && is_shadow_present_pte(*iterator.sptep)) {
-					pfn = (*iterator.sptep & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT;
-					if (kvm_record_print_log) {
-						if (*sptep & VMX_EPT_DIRTY_BIT && *sptep & VMX_EPT_ACCESS_BIT)
-							print_record("\tAD pfn = 0x%llx gfn = 0x%llx\n",
-									pfn, gfn);
-						else {
-							if (*sptep & VMX_EPT_DIRTY_BIT)
-								print_record("\tD pfn = 0x%llx gfn = 0x%llx\n",
-										pfn, gfn);
-							else if (*sptep & VMX_EPT_ACCESS_BIT)
-								print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
-										pfn, gfn);
-						}
-					}
-					break;
-				}
-				*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
-			}
-		}
-	}
-}
-
 // XELATEX
 static int tm_walk_mmu(struct kvm_vcpu *vcpu, int level)
 {
 	// Choose one between these two
-	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
-		memslot_walk_spt(vcpu, level);
 	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU)
 		mmu_walk_spt(vcpu);
 	return 0;

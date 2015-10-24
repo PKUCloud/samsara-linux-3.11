@@ -80,24 +80,17 @@ static atomic_t hardware_enable_failed;
 struct kmem_cache *kvm_vcpu_cache;
 EXPORT_SYMBOL_GPL(kvm_vcpu_cache);
 
-// XELATEX
-struct kmem_cache *kvm_tm_page_cache;
-EXPORT_SYMBOL_GPL(kvm_tm_page_cache);
+/* Record and replay */
+struct kvm_rr_ctrl rr_ctrl;
+EXPORT_SYMBOL_GPL(rr_ctrl);
 
+// XELATEX
 bool kvm_record;
 EXPORT_SYMBOL_GPL(kvm_record);
 int kvm_record_type;
 EXPORT_SYMBOL_GPL(kvm_record_type);
 int kvm_record_mode;
 EXPORT_SYMBOL_GPL(kvm_record_mode);
-u32 kvm_record_timer_value;
-EXPORT_SYMBOL_GPL(kvm_record_timer_value);
-int kvm_record_print_log;
-EXPORT_SYMBOL_GPL(kvm_record_print_log);
-int kvm_record_count;
-EXPORT_SYMBOL_GPL(kvm_record_count);
-int kvm_record_separate_mem;
-EXPORT_SYMBOL_GPL(kvm_record_separate_mem);
 
 extern int print_record(const char* fmt, ...);
 
@@ -2782,14 +2775,12 @@ static long kvm_dev_ioctl_check_extension_generic(long arg)
 	return kvm_dev_ioctl_check_extension(arg);
 }
 
-// XELATEX
-
 static long kvm_dev_ioctl(struct file *filp,
 			  unsigned int ioctl, unsigned long arg)
 {
 	long r = -EINVAL;
 	void __user *argp = (void __user *)arg;
-	struct kvm_record_ctrl kvm_rc;
+	struct kvm_rr_ctrl rr_ctrl_user;
 
 	switch (ioctl) {
 	case KVM_GET_API_VERSION:
@@ -2801,44 +2792,36 @@ static long kvm_dev_ioctl(struct file *filp,
 	case KVM_CREATE_VM:
 		r = kvm_dev_ioctl_create_vm(arg);
 		break;
-	// XELATEX
-	case KVM_ENABLE_RECORD:
-		if (copy_from_user(&kvm_rc, argp, sizeof(struct kvm_record_ctrl))) {
-			r = -1;
+
+	case KVM_RR_CTRL:
+		if (copy_from_user(&rr_ctrl_user, argp, sizeof(rr_ctrl_user))) {
+			r = -EFAULT;
 			break;
 		}
-		if (kvm_record && kvm_record_type != kvm_rc.kvm_record_type) {
-			printk(KERN_ERR "XELATEX - kvm_record already enabled, please disable first\n");
-			r = -1;
-			break;
+		r = 0;
+		if (rr_ctrl_user.enabled == 0) {
+			/* Disable recording */
+			rr_ctrl = rr_ctrl_user;
+			printk(KERN_INFO "KVM_RR_CTRL, disabled\n");
+			/* For compatibility */
+			kvm_record = false;
+		} else {
+			/* Enable recording */
+			if (rr_ctrl.enabled == 0) {
+				rr_ctrl = rr_ctrl_user;
+				printk(KERN_INFO "KVM_RR_CTRL, enabled with "
+				       "ctrl: 0x%x, timer_value: %d\n",
+				       rr_ctrl.ctrl, rr_ctrl.timer_value);
+
+				/* For compatibility */
+				kvm_record = true;
+				kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
+				kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MMU;
+			} else
+				r = -EBUSY;
 		}
-		kvm_record_count = KVM_RECORD_COUNT;
-		kvm_record = true;
-		kvm_record_type = kvm_rc.kvm_record_type;
-		//kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MMU;
-		//kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MEMSLOT;
-		//kvm_record_mode = KVM_RECORD_SOFTWARE;
-		kvm_record_mode = kvm_rc.kvm_record_mode;
-		kvm_record_print_log = kvm_rc.print_log;
-		kvm_record_timer_value = kvm_rc.kvm_record_timer_value;
-		if (kvm_record_timer_value == 0)
-			kvm_record_timer_value = KVM_DEFAULT_PREEMPTION_VALUE;
-		kvm_record_separate_mem = kvm_rc.separate_mem;
-		//kvm_record_type = KVM_RECORD_PREEMPTION;
-		//kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
-		//kvm_record_type = KVM_RECORD_TIMER;
-		printk(KERN_ERR "XELATEX - kvm_record ENABLED, type=%d, arg=%u\n",
-				kvm_record_type, kvm_record_timer_value);
-		//if (arg == 0)
-		//	arg = KVM_DEFAULT_PREEMPTION_VALUE;
-		//kvm_record_timer_value = arg;
-		r = 0;
 		break;
-	case KVM_DISABLE_RECORD:
-		kvm_record = false;
-		printk(KERN_ERR "XELATEX - kvm_record DISABLED\n");
-		r = 0;
-		break;
+
 	case KVM_CHECK_EXTENSION:
 		r = kvm_dev_ioctl_check_extension_generic(arg);
 		break;
@@ -3357,14 +3340,6 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 		goto out_free_3;
 	}
 
-	// XELATEX
-	kvm_tm_page_cache = kmem_cache_create("kvm_rm_page", sizeof(struct kvm_tm_page),
-			ARCH_MIN_TASKALIGN, 0, NULL);
-	if (!kvm_tm_page_cache) {
-		r = -ENOMEM;
-		goto out_free_4;
-	}
-
 	r = kvm_async_pf_init();
 	if (r)
 		goto out_free;
@@ -3398,9 +3373,6 @@ out_undebugfs:
 out_unreg:
 	kvm_async_pf_deinit();
 out_free:
-// XELATEX
-	kmem_cache_destroy(kvm_tm_page_cache);
-out_free_4:
 	kmem_cache_destroy(kvm_vcpu_cache);
 out_free_3:
 	unregister_reboot_notifier(&kvm_reboot_notifier);
@@ -3424,8 +3396,6 @@ void kvm_exit(void)
 	kvm_exit_debug();
 	misc_deregister(&kvm_dev);
 	kmem_cache_destroy(kvm_vcpu_cache);
-	// XELATEX
-	kmem_cache_destroy(kvm_tm_page_cache);
 	kvm_async_pf_deinit();
 	unregister_syscore_ops(&kvm_syscore_ops);
 	unregister_reboot_notifier(&kvm_reboot_notifier);

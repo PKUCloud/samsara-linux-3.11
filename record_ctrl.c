@@ -10,160 +10,159 @@
 #include <limits.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <memory.h>
 
-#define KVMIO 0xAE
-#define KVM_ENABLE_RECORD         _IO(KVMIO, 0x09)
-#define KVM_DISABLE_RECORD        _IO(KVMIO, 0x0a)
-#define KVM_GET_API_VERSION       _IO(KVMIO,   0x00)
+/* Definitions for KVM fd. Shoud be synchronized with
+ * include/uapi/linux/kvm.h
+ */
+#define KVMIO				0xAE
+#define KVM_RR_CTRL			_IO(KVMIO, 0x09)
 
-#define KVM_RECORD_PREEMPTION 0
-#define KVM_RECORD_TIMER 1
-#define KVM_RECORD_UNSYNC_PREEMPTION 2
-#define KVM_RECORD_MAX_TYPE 3
+/* Decide how to get accessed memory */
+#define KVM_RR_CTRL_MEM_MASK		0x7U
+#define KVM_RR_CTRL_MEM_SOFTWARE	0x0U
+#define KVM_RR_CTRL_MEM_EPT		0x1U
+#define KVM_RR_CTRL_MEM_MEMSLOT		0x2U
 
-#define KVM_RECORD_SOFTWARE 0
-#define KVM_RECORD_HARDWARE_WALK_MMU 1
-#define KVM_RECORD_HARDWARE_WALK_MEMSLOT 2
-#define KVM_RECORD_MAX_MODE 3
+/* Decide record and replay mode */
+#define KVM_RR_CTRL_MODE_MASK		(0x3U << 3)
+#define KVM_RR_CTRL_MODE_SYNC		0x0U
+#define KVM_RR_CTRL_MODE_ASYNC		(0x1U << 3)
 
-#define LOGGER_IOC_MAGIC 0XAF
-#define LOGGER_FLUSH	_IO(LOGGER_IOC_MAGIC, 0)
+/* Decide how to kick vcpu */
+#define KVM_RR_CTRL_KICK_MASK		(0x3U << 5)
+#define KVM_RR_CTRL_KICK_PREEMPTION	0x0U
+#define KVM_RR_CTRL_KICK_TIMER		(0x1U << 5)
 
+struct kvm_rr_ctrl {
+	__u16 enabled;
+	__u16 ctrl;
+	__u32 timer_value;
+};
 
-/**
-*fname: the file name of the device to map
-*fname_log: the output file name of the log
-*/
-void log2file(const char *fname, const char *fname_log)
+/* Definitions for logger fd */
+#define LOGGER_IOC_MAGIC		0XAF
+#define LOGGER_FLUSH			_IO(LOGGER_IOC_MAGIC, 0)
+
+struct arg_desc {
+	int id;
+	char *name;
+};
+
+struct arg_desc RR_CTRL_MEM[] = {
+	{KVM_RR_CTRL_MEM_SOFTWARE, "SOFTWARE"},
+	{KVM_RR_CTRL_MEM_EPT, "EPT"},
+	{KVM_RR_CTRL_MEM_MEMSLOT, "MEMSLOT"},
+};
+
+struct arg_desc RR_CTRL_MODE[] = {
+	{KVM_RR_CTRL_MODE_SYNC, "SYNC"},
+	{KVM_RR_CTRL_MODE_ASYNC, "ASYNC"},
+};
+
+struct arg_desc RR_CTRL_KICK[] = {
+	{KVM_RR_CTRL_KICK_PREEMPTION, "PREEMPTION"},
+	{KVM_RR_CTRL_KICK_TIMER, "TIMER"},
+};
+
+/*
+ * @fname: the file name of the device to map
+ * @fname_log: the output file name of the log
+ */
+int log2file(const char *fname, const char *fname_log)
 {
 	FILE *f;
 	FILE *f_log;
 	unsigned long offset = 0, len = 4096;
 	void *address = (void*)-1;
 	char *str;
-	int i;
 	int result;
 	char buf[4096];
 
-	//open the file to map
+	/* Open the file to map */
 	if(!(f = fopen(fname, "r"))) {
 		fprintf(stderr, "Fail to open %s: %s\n", fname, strerror(errno));
-		exit(1);
+		return -1;
 	}
 
-	//open the file to write the log into
+	/* Open the file to write the log into */
 	if(!(f_log = fopen(fname_log, "w"))) {
 		fprintf(stderr, "Fail to open %s to write into: %s\n", fname_log, strerror(errno));
-		exit(1);
+		return -1;
 	}
 
-	printf("Logging...\n"
-		"Use flush command to stop logging\n");
-	//i = 0;
+	printf("Start logging. Use flush command to stop it.\n");
 	while(1) {
-		//i++;
-		//mmap
+		/* Mmap */
 		result = fread(buf, 1, len, f);
-
 		if(result != len) {
-			//the kernel has flushed the data
-
+			/* The kernel has flushed the data */
 			if(feof(f)) {
-				//now data is in buf
+				/* Now data are in buf */
 				if(fwrite(buf, 1, result, f_log) != result){
 					fprintf(stderr, "fwrite() %s fail:%s\n", fname_log, strerror(errno));
 					fclose(f);
 					fclose(f_log);
 					exit(1);
 				}
-
-				break;   //finish
+				/* Finish */
+				break;
 			}else {
-				//error
-				fprintf(stderr, "fread file %s error:%s\n", fname, strerror(errno));
+				fprintf(stderr, "fread file() %s error:%s\n", fname, strerror(errno));
 				fclose(f);
 				fclose(f_log);
-				exit(1);
+				return -1;
 			}
 		}
 
-		//now mmap and read the data
+		/* Mmap and read the data */
 		address = mmap(0, len, PROT_READ, MAP_LOCKED | MAP_SHARED, fileno(f), offset);
 		if(address == (void *)-1) {
-			fprintf(stderr, "mmap() file%s error:%s\n",fname, strerror(errno));
+			fprintf(stderr, "mmap() %s error:%s\n",fname, strerror(errno));
 			fclose(f);
 			fclose(f_log);
-			exit(1);
+			return -1;
 		}
 
-		//output the log to fname_log
+		/* Output the log to fname_log */
 		str = (char*)address;
-
-		//fprintf(f_log, "<start>==========\n");
-
 		if(fwrite(str, len, 1, f_log) != 1){
 			fprintf(stderr, "fwrite() %s fail:%s\n", fname_log, strerror(errno));
 			fclose(f);
 			fclose(f_log);
-			exit(1);
+			return -1;
 		}
-		//fprintf(f_log, "\n<end>============\n");
-		//fflush(f_log);
-		//the driver will delete the data that mapped currently
-		//so when we map the same address next time, it will actually be the next page
-		munmap(address, len);
 
+		/* The driver will delete the data that mapped currently,
+		 * so when we map the same address next time, it will
+		 * actually be the next page.
+		 */
+		munmap(address, len);
 		address = (void *)-1;
 	}
 
-	printf("Logs has been written into file %s\n", fname_log);
+	printf("Logged into file %s\n", fname_log);
 	fclose(f);
 	fclose(f_log);
+	return 0;
 }
 
-struct {
-	int type;
-	char *name;
-} kvm_record_arg[] = 
-{ {KVM_RECORD_PREEMPTION, "PREEMPTION"},
-  {KVM_RECORD_TIMER, "TIMER"},
-  {KVM_RECORD_UNSYNC_PREEMPTION, "UNSYNC_PREEMPTION"}
-};
-
-struct {
-	int type;
-	char *name;
-} kvm_record_mode[] =
-{ {KVM_RECORD_SOFTWARE, "SOFT"},
-  {KVM_RECORD_HARDWARE_WALK_MMU, "HARD_MMU"},
-  {KVM_RECORD_HARDWARE_WALK_MEMSLOT, "HARD_MEMSLOT"},
-};
-
-struct kvm_record_ctrl {
-	int kvm_record_type;
-	unsigned kvm_record_timer_value;
-	int kvm_record_mode;
-	int print_log;
-	int separate_mem;
-};
-
-int help() {
+int help()
+{
 	fprintf(stderr, "Usage: \n"
-			"record_ctrl <enable/disable> <record_type> <value> <log_file> [<record_mode> <print_log> <separate_memory>]\n"
-			"\t<record_type> : PREEMPTION, UNSYNC_PREEMPTION, TIMER\n"
-			"\t<record_mode> : SOFT, HARD_MMU, HARD_MEMSLOT; default is SOFT\n"
-			"\t<print_log> : ON/OFF, default is on\n"
-			"\t<separate_memory> : ON/OFF, default is OFF; valid only under HARD_MMU\n"
+			"record_ctrl <enable/disable> <mode> <kick> <mem> <value> [log_file]\n"
+			"\t<mode>: SYNC, ASYNC\n"
+			"\t<kick>: PREEMPTION, TIMER\n"
+			"\t<mem>: SOFTWARE, EPT, MEMSLOT\n"
+			"\t[log_file]: the name of the log; default is \"kern.log\"\n"
+			"\n"
 			"record_ctrl flush\n"
 			"\tFlushes all the data out to the <log_file>. This will stop writting more data\n"
 			"\tto the logger module and flush all the remaining data out to the <log_file>. \n"
 			"\tAfter that the record_ctrl will stop working and return. This command is normally\n"
-			"\tused when the virtual machine has been shutdown.\n"
-			"record_ctrl clean\n"
-			"\tDelete all the data in the logger module and sotp the record_ctrl program working in\n"
-			"\tthe userspace(if any).!NOT IMPLEMENTED YET!\n"
+			"\tused after the virtual machine being shutdowned.\n"
 			"record_ctrl help\n"
-			"\tDisplay the help infomation.\n");
+			"\tDisplay this help information.\n");
 	return -1;
 }
 
@@ -171,50 +170,49 @@ int flush(void)
 {
 	int fd_logger;
 	int ret;
+
 	fd_logger = open("/dev/logger", 0);
-		if(fd_logger < 0) {
-			printf("Open /dev/logger failed\n");
-			return -1;
+	if(fd_logger < 0) {
+		printf("Open /dev/logger failed\n");
+		return -1;
+	}
+	ret = ioctl(fd_logger, LOGGER_FLUSH);
+	if(ret < 0) {
+		printf("Flush failed\n");
+	}
+	close(fd_logger);
+	return ret;
+}
+
+int parseArg(struct arg_desc options[], int n, char *arg)
+{
+	int i;
+
+	for (i = 0; i < n; ++i) {
+		if (strcmp(arg, options[i].name) == 0) {
+			return options[i].id;
 		}
-		ret = ioctl(fd_logger, LOGGER_FLUSH);
-		if(ret < 0) {
-			printf("Flush failed\n");
-			return -1;
-		}
-		return 0;
+	}
+	return -1;
 }
 
 int main(int argc, char **argv)
 {
-	int fd;
 	int record;
+	struct kvm_rr_ctrl rr_ctrl;
 	int ret;
-	long type;
-	unsigned long val;
-	char cmd[256];
-	struct kvm_record_ctrl kvm_rc;
 	int i;
+	int kvm_fd;
 
 	if (argc < 2)
 		return help();
 
 	if(strcmp(argv[1], "flush") == 0) {
-		//flush the logger
 		return flush();
-	} else if(strcmp(argv[1], "clean") == 0) {
-		//clean all the data in the logger and stop swapping to file
-		printf("record_ctrl clean not implemented yet\n");
-		return 0;
-	}else if(strcmp(argv[1], "help") == 0) {
-		//print help info
+	} else if(strcmp(argv[1], "help") == 0) {
 		return help();
 	}
 
-	fd = open("/dev/kvm", 0);
-	if (fd < 0) {
-		printf("Open /dev/kvm failed\n");
-		return -1;
-	}
 	if (strcmp(argv[1], "enable") == 0)
 		record = 1;
 	else if (strcmp(argv[1], "disable") == 0)
@@ -224,59 +222,104 @@ int main(int argc, char **argv)
 		return help();
 	}
 
-	if (record) {
-		char *fname_log = "kern.log";
+	memset(&rr_ctrl, 0, sizeof(rr_ctrl));
 
-		if (argc < 5)
-			return help();
-
-		fname_log = argv[4];
-
-		kvm_rc.kvm_record_type = -1;
-		for (i=0; i<KVM_RECORD_MAX_TYPE; i++)
-			if (strcmp(argv[2], kvm_record_arg[i].name) == 0)
-				kvm_rc.kvm_record_type = kvm_record_arg[i].type;
-		if (kvm_rc.kvm_record_type < 0) {
-			fprintf(stderr, "Unknow record type : %s\n", argv[2]);
-			return help();
-		}
-		sscanf(argv[3], "%u", &(kvm_rc.kvm_record_timer_value));
-		kvm_rc.kvm_record_mode = KVM_RECORD_SOFTWARE;
-		if (argc >= 6)
-			for (i=0; i<KVM_RECORD_MAX_MODE; i++)
-				if (strcmp(argv[5], kvm_record_mode[i].name) == 0)
-					kvm_rc.kvm_record_mode = kvm_record_mode[i].type;
-		kvm_rc.print_log = 1;
-		if (argc >= 7)
-			if (strcmp(argv[6], "OFF") == 0 || strcmp(argv[6], "off") == 0)
-				kvm_rc.print_log = 0;
-
-		kvm_rc.separate_mem = 0;
-		if (argc >= 8)
-			if (strcmp(argv[7], "ON") == 0 || strcmp(argv[7], "on") == 0) {
-				if (kvm_rc.kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU)
-					kvm_rc.separate_mem = 1;
-				else
-					fprintf(stderr, "Can't turn on separate_memory under this mode\n");
-			}
-		printf("separate_mem=%d\n", kvm_rc.separate_mem);
-
-		ret = ioctl(fd, KVM_ENABLE_RECORD, &kvm_rc);
-		if (ret < 0) {
-			printf("KVM_ENABLE_RECORD failed, errno = %d\n"
-				"Please disable kvm_record fisrt if enabled.\n", errno);
-			return -1;
-		}
-		printf("KVM_ENABLE_RECORD, type = %s, val = %u\n", argv[2], kvm_rc.kvm_record_timer_value);
-
-		//record to file
-		log2file("/dev/logger", fname_log);
-
-	} else {
-		ret = ioctl(fd, KVM_DISABLE_RECORD, 0);
-		if (ret < 0)
-			printf("KVM_DISABLE_RECORD failed, errno = %d\n", errno);
-		printf("KVM_DISABLE_RECORD\n");
+	kvm_fd = open("/dev/kvm", 0);
+	if (kvm_fd < 0) {
+		fprintf(stderr, "Fail to open /dev/kvm\n");
+		return -1;
 	}
-	return 0;
+
+	if (record) {
+		const char *fname_log = "kern.log";
+
+		if (argc < 6) {
+			ret = -1;
+			help();
+			goto out;
+		}
+		if(argc == 7) {
+			fname_log = argv[6];
+		}
+		printf("Log: %s\n", fname_log);
+
+		rr_ctrl.enabled = 1;
+
+		// Get mode
+		ret = parseArg(RR_CTRL_MODE,
+			       sizeof(RR_CTRL_MODE) / sizeof(struct arg_desc),
+			       argv[2]);
+		if (ret == -1) {
+			fprintf(stderr, "Unknown mode: %s\n", argv[2]);
+			help();
+			goto out;
+		} else {
+			printf("Mode: %s[%d]\n", argv[2], ret);
+			rr_ctrl.ctrl |= ret;
+		}
+
+		// Get kick
+		ret = parseArg(RR_CTRL_KICK,
+			       sizeof(RR_CTRL_KICK) / sizeof(struct arg_desc),
+			       argv[3]);
+		if (ret == -1) {
+			fprintf(stderr, "Unknown kick: %s\n", argv[3]);
+			help();
+			goto out;
+		} else {
+			printf("Kick: %s[%d]\n", argv[3], ret);
+			rr_ctrl.ctrl |= ret;
+		}
+
+		// Get mem
+		ret = parseArg(RR_CTRL_MEM,
+			       sizeof(RR_CTRL_MEM) / sizeof(struct arg_desc),
+			       argv[4]);
+		if (ret == -1) {
+			fprintf(stderr, "Unknown mem: %s\n", argv[4]);
+			help();
+			goto out;
+		} else {
+			printf("Mem: %s[%d]\n", argv[4], ret);
+			rr_ctrl.ctrl |= ret;
+		}
+
+		// Get value
+		ret = -1;
+		sscanf(argv[5], "%u", &ret);
+		if (ret == -1) {
+			fprintf(stderr, "Unknown value: %s\n", argv[5]);
+			help();
+			goto out;
+		} else {
+			printf("Value: %d\n", ret);
+			rr_ctrl.timer_value = ret;
+		}
+
+		printf("Ctrl: 0x%x\n", rr_ctrl.ctrl);
+
+		ret = ioctl(kvm_fd, KVM_RR_CTRL, &rr_ctrl);
+		if (ret < 0) {
+			fprintf(stderr, "Fail to enable recording: %s\n",
+				strerror(errno));
+			goto out;
+		}
+		printf("Recording enabled\n");
+		ret = log2file("/dev/logger", fname_log);
+	} else {
+		// Disable record and replay
+		rr_ctrl.enabled = 0;
+		ret = ioctl(kvm_fd, KVM_RR_CTRL, &rr_ctrl);
+		if (ret < 0) {
+			fprintf(stderr, "Fail to disable recording: %s\n",
+				strerror(errno));
+		} else {
+			printf("Recording disabled\n");
+		}
+		ret = 0;
+	}
+
+out:
+	close(kvm_fd);
+	return ret;
 }

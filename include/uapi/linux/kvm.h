@@ -540,9 +540,6 @@ struct kvm_ppc_smmu_info {
 #define KVM_GET_API_VERSION       _IO(KVMIO,   0x00)
 #define KVM_CREATE_VM             _IO(KVMIO,   0x01) /* returns a VM fd */
 #define KVM_GET_MSR_INDEX_LIST    _IOWR(KVMIO, 0x02, struct kvm_msr_list)
-// XELATEX
-#define KVM_ENABLE_RECORD         _IO(KVMIO, 0x09)
-#define KVM_DISABLE_RECORD        _IO(KVMIO, 0x0a)
 
 #define KVM_S390_ENABLE_SIE       _IO(KVMIO,   0x06)
 /*
@@ -558,6 +555,32 @@ struct kvm_ppc_smmu_info {
 #define KVM_TRACE_ENABLE          __KVM_DEPRECATED_MAIN_W_0x06
 #define KVM_TRACE_PAUSE           __KVM_DEPRECATED_MAIN_0x07
 #define KVM_TRACE_DISABLE         __KVM_DEPRECATED_MAIN_0x08
+
+/* Record and replay control */
+
+#define KVM_RR_CTRL		_IO(KVMIO, 0x09)
+
+struct kvm_rr_ctrl {
+	__u16 enabled;
+	__u16 ctrl;
+	__u32 timer_value;
+};
+
+/* Decide how to get accessed memory */
+#define KVM_RR_CTRL_MEM_MASK		0x7U
+#define KVM_RR_CTRL_MEM_SOFTWARE	0x0U
+#define KVM_RR_CTRL_MEM_EPT		0x1U
+#define KVM_RR_CTRL_MEM_MEMSLOT		0x2U
+
+/* Decide record and replay mode */
+#define KVM_RR_CTRL_MODE_MASK		(0x3U << 3)
+#define KVM_RR_CTRL_MODE_SYNC		0x0U
+#define KVM_RR_CTRL_MODE_ASYNC		(0x1U << 3)
+
+/* Decide how to kick vcpu */
+#define KVM_RR_CTRL_KICK_MASK		(0x3U << 5)
+#define KVM_RR_CTRL_KICK_PREEMPTION	0x0U
+#define KVM_RR_CTRL_KICK_TIMER		(0x1U << 5)
 
 /*
  * Extension capability list.
@@ -1091,14 +1114,5 @@ struct kvm_assigned_msix_entry {
 #define KVM_RECORD_SOFTWARE 0
 #define KVM_RECORD_HARDWARE_WALK_MMU 1
 #define KVM_RECORD_HARDWARE_WALK_MEMSLOT 2
-
-
-struct kvm_record_ctrl {
-	int kvm_record_type;
-	__u32 kvm_record_timer_value;
-	int kvm_record_mode;
-	int print_log;
-	int separate_mem;
-};
 
 #endif /* __LINUX_KVM_H */
