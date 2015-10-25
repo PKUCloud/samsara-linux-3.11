@@ -40,7 +40,6 @@
 #include "trace.h"
 #include "x86.h"
 #include "cpuid.h"
-#include "logger.h"
 
 #ifndef CONFIG_X86_64
 #define mod_64(x, y) ((x) - (y) * div64_u64(x, y))
@@ -421,8 +420,6 @@ int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq,
 
 static int pv_eoi_put_user(struct kvm_vcpu *vcpu, u8 val)
 {
-	if (kvm_record)
-		print_record("pv_eoi_put_user() gpa 0x%llx\n", vcpu->arch.pv_eoi.data.gpa);
 	return kvm_write_guest_cached(vcpu, &vcpu->arch.pv_eoi.data, &val,
 				      sizeof(val));
 }
@@ -723,9 +720,6 @@ out:
 		break;
 
 	case APIC_DM_INIT:
-
-		if (kvm_record) print_record("APIC_DM_INIT !!!\n");
-		
 		if (!trig_mode || level) {
 			result = 1;
 			/* assumes that there are only KVM_APIC_INIT/SIPI */

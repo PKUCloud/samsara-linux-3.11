@@ -1,26 +1,23 @@
 /*
-* mmap.c  -- memory mapping for the logger module
-*/
+ * mmap.c  -- memory mapping for the logger module
+ */
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/errno.h>
 #include <asm/pgtable.h>
 #include <linux/fs.h>
-
 #include <linux/slab.h>
 
-#include "logger.h"
-
+#include "logger_internal.h"
 
 extern struct kmem_cache *data_cache;
 extern struct kmem_cache *quantum_cache;
 extern int logger_quantum;
 
 /*
-*open and close: keep track of how many times the device is mapped
-* maybe will do some cleanup
-*/
-
+ *open and close: keep track of how many times the device is mapped
+ * maybe will do some cleanup
+ */
 void logger_vma_open(struct vm_area_struct *vma)
 {
 	struct logger_dev *dev = vma->vm_private_data;
@@ -28,9 +25,6 @@ void logger_vma_open(struct vm_area_struct *vma)
 	spin_lock(&dev->dev_lock);
 	++(dev->vmas);
 	spin_unlock(&dev->dev_lock);
-
-	//printk(KERN_NOTICE "logger_vma_open()\n");
-	//printk(KERN_NOTICE "logger_vma_open():start:%lx, end:%lx, vmas:%d\n", vma->vm_start, vma->vm_end, dev->vmas);
 }
 
 void logger_vma_close(struct vm_area_struct *vma)
@@ -59,16 +53,12 @@ void logger_vma_close(struct vm_area_struct *vma)
 
 		spin_unlock(&dev->dev_lock);
 	}
-
 }
-
-
 
 struct vm_operations_struct logger_vm_ops = {
 	.open = logger_vma_open,
 	.close = logger_vma_close,
 };
-
 
 int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 {
@@ -95,7 +85,6 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 		goto err;
 	}
 	assert((ptr != dev->tail) || (dev->end == dev->str) );
-	//printk(KERN_NOTICE "ptr==dev->tail:%d dev->end - dev->str = %ld\n", (int)(ptr==dev->tail), dev->end - dev->str);
 	
 	offset = vma->vm_pgoff;
 	for(ptr = dev->head; ptr && offset;) {
@@ -122,7 +111,6 @@ int logger_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	spin_unlock(&dev->dev_lock);
 	logger_vma_open(vma);
-	//printk(KERN_NOTICE "logger_mmap():start:%lx, end:%lx\n", vma->vm_start, vma->vm_end);
 	return retval;
 
 err:

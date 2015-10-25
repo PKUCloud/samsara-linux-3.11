@@ -208,7 +208,6 @@ retry_walk:
 			goto error;
 		real_gfn = gpa_to_gfn(real_gfn);
 
-		//print_record("XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
 		// XELATEX
 		if (kvm_record && (kaddr = gfn_to_kaddr_ept(vcpu, real_gfn, 0)) != NULL) {
 			memcpy(&pte, kaddr + offset, sizeof(pte));
@@ -227,10 +226,6 @@ retry_walk:
 				goto error;
 		}
 		walker->ptep_user[walker->level - 1] = ptep_user;
-
-		//print_record("XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
-		//if (pte == 0xf4f4f4f4f4f4f4f4)
-		//	printk(KERN_ERR "XELATEX %s, %d, pte=0x%llx\n", __func__, __LINE__, (u64)pte);
 
 		trace_kvm_mmu_paging_element(pte, walker->level);
 

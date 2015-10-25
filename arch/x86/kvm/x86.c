@@ -63,11 +63,11 @@
 #include <asm/xcr.h>
 #include <asm/pvclock.h>
 #include <asm/div64.h>
+#include <asm/logger.h>
 
 //kvm_vcpu_checkpoint_rollback rsr
 #include <asm/kvm_checkpoint_rollback.h>
 //end kvm_vcpu_checkpoint_rollback rsr
-#include "logger.h"
 
 #define MAX_IO_MSRS 256
 #define KVM_MAX_MCE_BANKS 32
@@ -1603,8 +1603,6 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 		pvclock_flags |= PVCLOCK_TSC_STABLE_BIT;
 
 	vcpu->hv_clock.flags = pvclock_flags;
-	//if (kvm_record)
-	//	print_record("%s vcpu->pv_time gpa 0x%llx\n", __func__, vcpu->pv_time.gpa);
 	kvm_write_guest_cached(v, &vcpu->pv_time,
 				&vcpu->hv_clock,
 				sizeof(vcpu->hv_clock));
@@ -1948,8 +1946,6 @@ static void record_steal_time(struct kvm_vcpu *vcpu)
 	vcpu->arch.st.steal.steal += vcpu->arch.st.accum_steal;
 	vcpu->arch.st.steal.version += 2;
 	vcpu->arch.st.accum_steal = 0;
-	//if (kvm_record)
-	//	print_record("record_steal_time() gpa 0x%llx\n", vcpu->arch.st.stime.gpa);
 	kvm_write_guest_cached(vcpu, &vcpu->arch.st.stime,
 		&vcpu->arch.st.steal, sizeof(struct kvm_steal_time));
 }
@@ -5209,9 +5205,6 @@ int kvm_fast_pio_out(struct kvm_vcpu *vcpu, int size, unsigned short port)
 	unsigned long val = kvm_register_read(vcpu, VCPU_REGS_RAX);
 	int ret = emulator_pio_out_emulated(&vcpu->arch.emulate_ctxt,
 					    size, port, &val, 1);
-//if (vcpu->is_recording)
-//print_record("vcpu=%d, %s, port=0x%x, size=%d, val=0x%x\n",
-//vcpu->vcpu_id, __func__, port, size, val);
 	/* do not return to emulator after return from userspace */
 	vcpu->arch.pio.count = 0;
 	return ret;
@@ -5930,7 +5923,6 @@ restart:
 		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 			r = 0;
-			print_record("vcpu=%d, error: TRIPLE_FAULT_ERROR! Disable kvm_record\n", vcpu->vcpu_id);
 			kvm_record = false;
 			printk("vcpu=%d, error: TRIPLE_FAULT_ERROR! kvm_record = false\n", vcpu->vcpu_id);
 			goto out;
@@ -5980,9 +5972,10 @@ restart:
 		vcpu_checkpoint(vcpu);
 
 		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
-			print_real_log("2 %d %d %d %d 0x%llx, %d, 0x%llx\n",
-					e->delivery_mode, e->vector, e->level, e->trig_mode,
-					vcpu->arch.regs[VCPU_REGS_RIP], 0, vcpu->arch.regs[VCPU_REGS_RCX]);
+			RR_LOG("2 %d %d %d %d 0x%llx, %d, 0x%llx\n",
+			       e->delivery_mode, e->vector, e->level,
+			       e->trig_mode, vcpu->arch.regs[VCPU_REGS_RIP],
+			       0, vcpu->arch.regs[VCPU_REGS_RCX]);
 			list_del(&(e->link));
 			kfree(e);
 		}
@@ -6182,21 +6175,12 @@ restart:
 		}
 		*/
 		// XELATEX TEST
-		//print_record("vcpu=%d, %s, root_hpa=0x%llx\n", vcpu->vcpu_id, __func__, vcpu->arch.mmu.root_hpa);
 		if (r == KVM_RR_COMMIT) {
 			++vcpu->nr_test;
-			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d, nr_rollback=%d\n",
-				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
-			//kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
 			commit_count++;
-			// if (vcpu->nr_test % 100 == 98)
-			// 	mirror_flag = 1;
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
-			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d, nr_rollback=%d\n",
-				vcpu->vcpu_id, vcpu->nr_test, vcpu->nr_rollback);
-			//kvm_x86_ops->tm_memory_rollback(vcpu);
 			kvm_x86_ops->tlb_flush(vcpu);
 			vcpu->need_memory_commit = 0;
 			if (kvm_record && mirror_flag == 2) {
@@ -6228,11 +6212,9 @@ restart:
 	r = kvm_x86_ops->handle_exit(vcpu);
 
 	if (vcpu->run->exit_reason == KVM_EXIT_SHUTDOWN){
-		print_record("vcpu=%d, SHUTDOWN! Disable kvm_record\n", vcpu->vcpu_id);
 		kvm_record = false;
 		printk("vcpu=%d, kvm_record = false\n", vcpu->vcpu_id);
 	}
-	
 	return r;
 
 cancel_injection:
@@ -6331,8 +6313,6 @@ static inline int complete_emulated_io(struct kvm_vcpu *vcpu)
 static int complete_emulated_pio(struct kvm_vcpu *vcpu)
 {
 	BUG_ON(!vcpu->arch.pio.count);
-//if (vcpu->is_recording)
-//print_record("vcpu=%d, %s\n", vcpu->vcpu_id, __func__);
 	return complete_emulated_io(vcpu);
 }
 
@@ -7629,8 +7609,6 @@ static void kvm_del_async_pf_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 
 static int apf_put_user(struct kvm_vcpu *vcpu, u32 val)
 {
-	if (kvm_record)
-		print_record("apf_put_user() gpa 0x%llx\n", vcpu->arch.apf.data.gpa);
 	return kvm_write_guest_cached(vcpu, &vcpu->arch.apf.data, &val,
 				      sizeof(val));
 }

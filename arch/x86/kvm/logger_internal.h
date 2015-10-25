@@ -1,5 +1,5 @@
-#ifndef ARCH_X86_LOGGER_LOGGER_H
-#define ARCH_X86_LOGGER_LOGGER_H
+#ifndef __ARCH_X86_LOGGER_INTERNAL_H
+#define __ARCH_X86_LOGGER_INTERNAL_H
 
 #include <linux/cdev.h>
 #include <linux/spinlock.h>
@@ -7,10 +7,10 @@
 #include <linux/wait.h>
 #include <linux/device.h>
 
-
-#define LOGGER_MAJOR 0  //dynamic major by default
-#define LOGGER_QUANTUM 4096   //use a quantum size of 4096
-#define PRINT_TIME 0      //1 - to print timestamp at the front of every message
+#define LOGGER_MAJOR 0		//dynamic major by default
+#define LOGGER_QUANTUM 4096	//use a quantum size of 4096
+/* 1 - to print timestamp at the front of every message */
+#define PRINT_TIME 0
 
 struct logger_quantum {
 	void *data;            //pointer to a page
@@ -43,10 +43,8 @@ struct logger_dev {
 #define NORMAL 0
 #define FLUSHED 1
 
-
 #define LOGGER_IOC_MAGIC 0XAF
 #define LOGGER_FLUSH	_IO(LOGGER_IOC_MAGIC, 0)
-
 
 #define assert(expr) \
         if(unlikely(!(expr))) {				        \
@@ -85,8 +83,4 @@ struct printf_spec {
 	s16	field_width;	/* width of output field */
 	s16	precision;	/* # of digits/chars */
 };
- 
-int print_record(const char* fmt, ...);
-int print_real_log(const char* fmt, ...);
-
 #endif

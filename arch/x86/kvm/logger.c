@@ -15,9 +15,7 @@
 #include <linux/seq_file.h>
 #include <linux/types.h>
 #include <linux/device.h>
-
-#include "logger.h"
-#include <linux/rr_profile.h>
+#include "logger_internal.h"
 
 int logger_major = LOGGER_MAJOR;          //device major number
 int logger_quantum = LOGGER_QUANTUM;         //quantum size
@@ -30,39 +28,27 @@ MODULE_LICENSE("GPL");
 
 struct logger_dev logger_dev;        //the device struct
 
-//declare two cache pointer
+// Declare two cache pointer
 struct kmem_cache *data_cache;    //data page cache
 struct kmem_cache *quantum_cache;   //for struct logger_quantum
 
 struct proc_dir_entry *entry;
-//char buf[4096];
-//size_t size = 4096;
-
-
-EXPORT_SYMBOL_GPL(data_cache);
-EXPORT_SYMBOL_GPL(quantum_cache);
-EXPORT_SYMBOL_GPL(logger_quantum);
-
-
 
 // open function
 int logger_open(struct inode *inode, struct file *filp)
 {
 	struct logger_dev *dev;
+
 	dev = container_of(inode->i_cdev, struct logger_dev, cdev);
-
 	filp->private_data = dev;
-
-	return 0;      //success
+	return 0;
 }
-
 
 //close function
 int logger_release(struct inode *inode, struct file *filp)
 {
 	return 0;
 }
-
 
 //read function
 ssize_t logger_read(struct file *filp, char __user *buf, size_t count,
@@ -133,7 +119,6 @@ flushed:
 	//delete the last page
 	assert((dev->head == dev->tail));
 
-
 	if(likely(dev->size < logger_quantum)) {
 		kmem_cache_free(data_cache, dev->head->data);
 		kmem_cache_free(quantum_cache, dev->head);
@@ -142,15 +127,11 @@ flushed:
 		dev->str = dev->end = NULL;
 		dev->size = 0;
 	}
-
 	*f_pos += ret;
-
-	
 out:
 	spin_unlock(&dev->dev_lock);
 	return ret;
 }
-
 
 //write function
 ssize_t logger_write(struct file *filp, const char __user *buf, size_t count,
@@ -159,10 +140,8 @@ ssize_t logger_write(struct file *filp, const char __user *buf, size_t count,
 	return count;
 }
 
-
 //mmap is available, but confined in a different file mmap.c
 extern int logger_mmap(struct file *filp, struct vm_area_struct *vma);
-
 
 /*
 * The ioctl() implementation
@@ -203,8 +182,6 @@ struct file_operations logger_fops = {
 	.unlocked_ioctl = logger_ioctl
 };
 
-
-
 static int logger_setup_cdev(struct logger_dev *dev)
 {
 	int err, devno = MKDEV(logger_major, 0);
@@ -214,30 +191,33 @@ static int logger_setup_cdev(struct logger_dev *dev)
 	dev->cdev.ops = &logger_fops;
 	err = cdev_add(&dev->cdev, devno, 1);
 
-	if(err)
-		printk(KERN_NOTICE "Error %d adding logger", err);
+	if(err) {
+		pr_err("error: fail to cdev_add() for logger\n");
+		goto out;
+	}
 
-	//err control?
 	dev->logger_class = class_create(THIS_MODULE, "logger");
+	if (IS_ERR(dev->logger_class)) {
+		pr_err("error: fail to class_create() for logger\n");
+		err = -1;
+		goto fail_create_class;
+	}
 	device_create(dev->logger_class, NULL, devno, NULL, "logger");
+	return 0;
 
+fail_create_class:
+	cdev_del(&dev->cdev);
+out:
 	return err;
 }
 
-
-
-
-
-
-/**
-interfaces for seq_file
-*/
+/*
+ * Interfaces for seq_file
+ */
 static void *logger_seq_start(struct seq_file *s, loff_t *pos)
 {
 	int i = *pos;
 	struct logger_quantum *ptr;
-
-	//printk(KERN_ALERT "seq_start\n");
 
 	spin_lock(&logger_dev.dev_lock);
 	ptr = logger_dev.head;
@@ -251,13 +231,10 @@ static void *logger_seq_start(struct seq_file *s, loff_t *pos)
 	else return ptr->data;
 }
 
-
 static void *logger_seq_next(struct seq_file *s, void *v, loff_t *pos)
 {
 	int i = ++(*pos);
 	struct logger_quantum *ptr = logger_dev.head;
-
-	//printk(KERN_ALERT "seq_next\n");
 
 	while(ptr != NULL && i > 0){
 		ptr = ptr->next;
@@ -271,7 +248,6 @@ static void *logger_seq_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void logger_seq_stop(struct seq_file *s, void *v)
 {
-	//printk(KERN_ALERT "seq_stop\n");
 	spin_unlock(&logger_dev.dev_lock);
 }
 
@@ -280,8 +256,6 @@ static int logger_seq_show(struct seq_file *s, void *v)
 	char *str = (char*)v;
 	int i = 0;
 
-	//printk(KERN_ALERT "seq_show\n");
-
 	seq_puts(s, "<start>=================\n");
 	for(i = 0; i < 4096; i++)
 		seq_putc(s, str[i]);
@@ -289,7 +263,6 @@ static int logger_seq_show(struct seq_file *s, void *v)
 
 	return 0;
 }
-
 
 static struct seq_operations logger_seq_ops = {
 	.start = logger_seq_start,
@@ -310,15 +283,9 @@ static struct file_operations logger_file_ops = {
 	.llseek = seq_lseek,
 	.release = seq_release
 };
-
-/**
-end of interfaces for seq_file
-*/
-
-
-
-
-
+/*
+ * End of interfaces for seq_file
+ */
 
 //init function
 int logger_init(void)
@@ -333,21 +300,22 @@ int logger_init(void)
 		logger_major = MAJOR(dev);
 	}
 
-	if(result < 0)
-		return result;
-
+	if(result < 0) {
+		pr_err("error: fail to register_chrdev_region() for logger\n");
+		goto out;
+	}
 
 	memset(&logger_dev, 0, sizeof(struct logger_dev));
 
 	spin_lock_init(&logger_dev.dev_lock);
 	init_waitqueue_head(&logger_dev.queue);
 
-
-	//create cache   //3.11 is different from 2.6
+	//create cache. 3.11 is different from 2.6
 	data_cache = kmem_cache_create("logger_data", logger_quantum,
 		0, 0, NULL);        //no ctor/dtor  SLAB_HWCACHE_ALIGN??
 	if(!data_cache) {
 		result = -ENOMEM;
+		pr_err("error: fail to kmem_cache_create() for logger\n");
 		goto fail_create_cache;
 	}
 
@@ -355,6 +323,7 @@ int logger_init(void)
 		0, 0, NULL);
 	if(!quantum_cache) {
 		result = -ENOMEM;
+		pr_err("error: fail to kmem_cache_create() for logger\n");
 		goto fail_create_cache;
 	}
 
@@ -363,29 +332,36 @@ int logger_init(void)
 	if(result)
 		goto fail_add_dev;
 
-
 	//init the seq interface
 	entry = proc_create("logger", 0, NULL, &logger_file_ops);
-	if(!entry)
-		printk(KERN_ALERT "proc_create():Fail to create proc entry\n");
+	if(!entry) {
+		result = -1;
+		pr_err("error: fail to proc_create() for logger\n");
+		goto fail_add_proc;
+	}
 
 	logger_dev.print_time = logger_print_time;
 
-	printk(KERN_ALERT "Logger init successfully\n");
-	return 0;   //success
+	pr_debug("logger: init successfully\n");
+	result = 0;
+	goto out;
 
-	fail_add_dev:
-		kmem_cache_destroy(quantum_cache);
+fail_add_proc:
+	cdev_del(&logger_dev.cdev);
+	device_destroy(logger_dev.logger_class, MKDEV(logger_major, 0));
+	class_destroy(logger_dev.logger_class);
 
-	fail_create_cache:
-		if(data_cache)
-			kmem_cache_destroy(data_cache);
-		unregister_chrdev_region(dev, 1);
-		printk(KERN_ALERT "logger_init(): fail to create cache\n");
-		return result;
+fail_add_dev:
+	kmem_cache_destroy(quantum_cache);
+
+fail_create_cache:
+	if(data_cache)
+		kmem_cache_destroy(data_cache);
+	unregister_chrdev_region(dev, 1);
+
+out:
+	return result;
 }
-
-
 
 //free the memory
 void logger_trim(void)
@@ -393,7 +369,7 @@ void logger_trim(void)
 	struct logger_quantum *cur, *next;
 	
 	cur = logger_dev.head;
-	if(cur) {
+	while (cur) {
 		next = cur->next;
 		kmem_cache_free(data_cache, cur->data);
 		kmem_cache_free(quantum_cache, cur);
@@ -403,7 +379,6 @@ void logger_trim(void)
 	logger_dev.tail = NULL;
 	logger_dev.str = logger_dev.end = NULL;
 	logger_dev.size = 0;
-	
 }
 
 void logger_cleanup(void)
@@ -431,17 +406,11 @@ void logger_cleanup(void)
 	}
 
 	unregister_chrdev_region(MKDEV(logger_major, 0), 1);
-
-	printk(KERN_ALERT "Logger exit successfully\n");
 }
-
-
-
-
 
 //Called when there is no rom to store log, alloc a new struct logger_quantum and a page
 //Before calling this function, you should get the lock
-static inline int logger_alloc_page(void)
+int logger_alloc_page(void)
 {
 	struct logger_quantum *ptr;
 	int result = 0;
@@ -449,19 +418,18 @@ static inline int logger_alloc_page(void)
 	ptr = kmem_cache_alloc(quantum_cache, GFP_ATOMIC);
 	if(!ptr) {
 		result = -ENOMEM;
-		goto err;
+		pr_err("error: fail to kmem_cache_alloc() for logger\n");
+		goto out;
 	}
+	memset(ptr, 0, sizeof(*ptr));
 
-	ptr->data = ptr->next = NULL;
 	ptr->data = kmem_cache_alloc(data_cache, GFP_ATOMIC);
 	if(!ptr->data) {
 		kmem_cache_free(quantum_cache, ptr);
 		result = -ENOMEM;
-		goto err;
+		pr_err("error: fail to kmem_cache_alloc() for logger\n");
+		goto out;
 	}
-
-	//printk(KERN_ALERT "ptr->data add: %lx\n", (unsigned long)ptr->data);
-	//if((unsigned long)ptr->data & (unsigned long)0xfff) printk(KERN_ALERT "ptr->data not page aligned\n");
 
 	memset(ptr->data, 0, logger_quantum);
 	if(logger_dev.head == NULL) {
@@ -474,13 +442,9 @@ static inline int logger_alloc_page(void)
 	logger_dev.str = (char*)ptr->data;
 	logger_dev.end = logger_dev.str + logger_quantum;
 
-	return 0;
-
-err:
-	printk(KERN_ALERT "logger_alloc_page(): kmem_cache_alloc() fail\n");
+out:
 	return result;
 }
-
 
 static noinline_for_stack
 int skip_atoi(const char **s)
@@ -492,8 +456,6 @@ int skip_atoi(const char **s)
 
 	return i;
 }
-
-
 
 /* Decimal conversion is by far the most typical, and is used
  * for /proc and /sys data. This directly impacts e.g. top performance
@@ -688,8 +650,6 @@ char *put_dec(char *buf, unsigned long long n)
 
 #endif
 
-
-
 //return the length of the total output
 static noinline_for_stack
 int number(char **buf, char **end, unsigned long long num,
@@ -819,7 +779,6 @@ int number(char **buf, char **end, unsigned long long num,
 		++(*buf);
 		++length;
 	}
-	
 
 	//trailing space padding
 	while(--spec.field_width >= 0) {
@@ -829,10 +788,8 @@ int number(char **buf, char **end, unsigned long long num,
 		++(*buf);
 		++length;
 	}
-
 	return length;
 }
-
 
 //return the length of the total output
 static noinline_for_stack
@@ -872,11 +829,6 @@ int string(char **buf, char **end, const char *s, struct printf_spec spec)
 
 	return length;
 }
-
-
-
-
-
 
 /*
 * @fmt: the format string
@@ -1061,10 +1013,8 @@ qualifier:
 		else 
 			spec->type = FORMAT_TYPE_UINT;
 	}
-
 	return ++fmt - start;
 }
-
 
 //should get the lock before calling this function
 static int __print_record(const char* fmt, va_list args)
@@ -1073,7 +1023,6 @@ static int __print_record(const char* fmt, va_list args)
 	char **str, **end;
 	struct printf_spec spec = {0};
 	int i, length = 0;
-
 
 	str = &logger_dev.str;
 	end = &logger_dev.end;
@@ -1268,21 +1217,15 @@ static int __print_record(const char* fmt, va_list args)
 		}
 	}
 
-
 	if(*str < *end)
 		**str = '\0';
 
-	//printk(KERN_ALERT "%s", buf);
 	//the trailing null byte doesn't count towards the total
 	return length;
 }
 
-
-inline int print_record(const char* fmt, ...)
+int rr_log(const char* fmt, ...)
 {
-#ifdef PRINT_REAL_LOG
-	return 0;
-#else
 	va_list args;  
 	int r; 
 
@@ -1295,11 +1238,6 @@ inline int print_record(const char* fmt, ...)
 	}
 	r = __print_record(fmt, args);
 
-	//just for test
-	//va_end(args);
-	//va_start(args, fmt);
-	//vprintk_emit(0, -1, NULL, 0, fmt, args);
-
 	logger_dev.size += r;
 	if(logger_dev.size >= logger_quantum) {
 		wake_up_interruptible(&logger_dev.queue);
@@ -1308,47 +1246,9 @@ inline int print_record(const char* fmt, ...)
 out:
 	spin_unlock(&logger_dev.dev_lock);
 	va_end(args);
-	return r;
-#endif
+	return r;   
 }
-
-EXPORT_SYMBOL_GPL(print_record);
-
-inline int print_real_log(const char* fmt, ...)
-{
-#ifndef PRINT_REAL_LOG
-		return 0;
-#else
-	va_list args;  
-	int r; 
-
-	va_start(args, fmt);
-	
-	spin_lock(&logger_dev.dev_lock);
-	if(logger_dev.state != NORMAL) {
-		r = -1;
-		goto out;
-	}
-	r = __print_record(fmt, args);
-
-	//just for test
-	//va_end(args);
-	//va_start(args, fmt);
-	//vprintk_emit(0, -1, NULL, 0, fmt, args);
-
-	logger_dev.size += r;
-	if(logger_dev.size >= logger_quantum) {
-		wake_up_interruptible(&logger_dev.queue);
-	}
-
-out:
-	spin_unlock(&logger_dev.dev_lock);
-	va_end(args);
-	return r;
-#endif
-}
-
-EXPORT_SYMBOL_GPL(print_real_log);
+EXPORT_SYMBOL_GPL(rr_log);
 
 module_init(logger_init);
 module_exit(logger_cleanup);

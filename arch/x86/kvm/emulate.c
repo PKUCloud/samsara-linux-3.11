@@ -28,7 +28,6 @@
 
 #include "x86.h"
 #include "tss.h"
-#include "logger.h"
 
 /*
  * Operand types
@@ -758,7 +757,6 @@ static int do_insn_fetch(struct x86_emulate_ctxt *ctxt,
 	if (unlikely(ctxt->_eip + size - ctxt->eip > 15))
 		return X86EMUL_UNHANDLEABLE;
 	while (size--) {
-		//if (kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 		rc = do_insn_fetch_byte(ctxt, dest++);
 		if (rc != X86EMUL_CONTINUE)
 			return rc;
@@ -4118,7 +4116,6 @@ int x86_decode_insn(struct x86_emulate_ctxt *ctxt, void *insn, int insn_len)
 	ctxt->fetch.end = ctxt->fetch.start + insn_len;
 	if (insn_len > 0)
 		memcpy(ctxt->fetch.data, insn, insn_len);
-	//if(kvm_record) print_record("XELATEX - %s, %d\n", __func__, __LINE__);
 
 	switch (mode) {
 	case X86EMUL_MODE_REAL:
@@ -4188,7 +4185,6 @@ int x86_decode_insn(struct x86_emulate_ctxt *ctxt, void *insn, int insn_len)
 
 		ctxt->rex_prefix = 0;
 	}
-	//if(kvm_record) print_record("%s, %d\n", __func__, __LINE__);
 
 done_prefixes:
 
@@ -4482,8 +4478,6 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 	}
 
 	if ((ctxt->src.type == OP_MEM) && !(ctxt->d & NoAccess)) {
-		//if (kvm_record) printk(KERN_ERR "XELATEX - %s, %d, addr.seg=0x%x, addr.ea=0x%lx, bytes=0x%x\n",
-		//		__func__, __LINE__, ctxt->src.addr.mem.seg, ctxt->src.addr.mem.ea, ctxt->src.bytes);
 		rc = segmented_read(ctxt, ctxt->src.addr.mem,
 				    ctxt->src.valptr, ctxt->src.bytes);
 		if (rc != X86EMUL_CONTINUE)

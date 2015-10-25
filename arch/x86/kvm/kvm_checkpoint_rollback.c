@@ -12,8 +12,6 @@
 
 #include "irq.h"
 
-#include "logger.h"
-
 //rsr-debug
 #include "mmu.h"
 //end rsr-debug

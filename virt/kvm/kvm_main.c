@@ -92,8 +92,6 @@ EXPORT_SYMBOL_GPL(kvm_record_type);
 int kvm_record_mode;
 EXPORT_SYMBOL_GPL(kvm_record_mode);
 
-extern int print_record(const char* fmt, ...);
-
 static __read_mostly struct preempt_ops kvm_preempt_ops;
 
 struct dentry *kvm_debugfs_dir;
@@ -1563,16 +1561,11 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 	unsigned long addr;
 
 	if (vcpu->is_recording) {
-		//if (vcpu->rr_state == 1) {
-		//	print_record("vcpu=%d, %s\n", vcpu->vcpu_id, __func__);
-		//}
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
 		if (kaddr == NULL) {
 			addr = gfn_to_hva(kvm, gfn);
 			if (!kvm_is_error_hva(addr)) {
 				printk(KERN_ERR "vcpu=%d, error: %s get INVALID_PAGE of non-error hva: "
-					   "gfn=0x%llx, offset=0x%x\n", vcpu->vcpu_id, __func__, gfn, offset);
-				print_record("vcpu=%d, error: %s get INVALID_PAGE of non-error hva: "
 					   "gfn=0x%llx, offset=0x%x\n", vcpu->vcpu_id, __func__, gfn, offset);
 			}
 			return -EFAULT;
@@ -2003,13 +1996,11 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 	case SET_DMA_DATA: {
 		int j;
 		for (i = 0; i < DMA_access->size; i++) {
-			print_record("%s, DMA_access, gfn=0x%x\n", __func__, DMA_access->gfn[i]);
 			for (j=0; j<online_vcpus; j++) {
 				re_set_bit(DMA_access->gfn[i],
 					   &kvm->vcpus[j]->DMA_access_bitmap);
 			}
 		}
-		print_record("%s, DMA_access, size=%d\n", __func__, DMA_access->size);
 		break;
 	}
 	case DMA_START:
@@ -2021,13 +2012,11 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 		}
 		//sema_init(&(kvm->tm_dma_sem), 0);
 		//atomic_set(&(kvm->tm_dma), 1);
-		print_record("%s, DMA_START\n", __func__);
 		break;
 	case DMA_FINISHED:
 		//for (i=0; i<online_vcpus; i++)
 		//	up(&(kvm->tm_dma_sem));
 		//atomic_set(&(kvm->tm_dma), 0);
-		print_record("%s, DMA_FINISHED\n", __func__);
 		// mutex_unlock(&(kvm->tm_lock));
 		up_write(&(kvm->tm_rwlock));
 		kvm->tm_dma_holding_sem = false;

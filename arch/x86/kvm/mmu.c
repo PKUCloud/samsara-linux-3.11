@@ -22,7 +22,6 @@
 #include "mmu.h"
 #include "x86.h"
 #include "kvm_cache_regs.h"
-#include "logger.h"
 
 #include <linux/kvm_host.h>
 #include <linux/types.h>
@@ -36,13 +35,13 @@
 #include <linux/srcu.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-// XELATEX
 #include <linux/rr_profile.h>
 
 #include <asm/page.h>
 #include <asm/cmpxchg.h>
 #include <asm/io.h>
 #include <asm/vmx.h>
+#include <asm/logger.h>
 
 /*
  * When setting this variable to true it enables Two-Dimensional-Paging
@@ -2700,22 +2699,6 @@ static void direct_pte_prefetch(struct kvm_vcpu *vcpu, u64 *sptep)
 	__direct_pte_prefetch(vcpu, sp, sptep);
 }
 
-// XELATEX
-static void __always_inline __mmu_print_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t addr)
-{
-	if (*sptep & VMX_EPT_DIRTY_BIT && *sptep & VMX_EPT_ACCESS_BIT)
-		print_record("\tAD pfn = 0x%llx gfn = 0x%llx\n",
-				addr >> PAGE_SHIFT, gpa >> PAGE_SHIFT);
-	else {
-		if (*sptep & VMX_EPT_DIRTY_BIT)
-			print_record("\tD pfn = 0x%llx gfn = 0x%llx\n",
-					addr >> PAGE_SHIFT, gpa >> PAGE_SHIFT);
-		else if (*sptep & VMX_EPT_ACCESS_BIT)
-			print_record("\tA pfn = 0x%llx gfn = 0x%llx\n",
-					addr >> PAGE_SHIFT, gpa >> PAGE_SHIFT);
-	}
-}
-
 // Set access and dirty bitmap
 static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t addr)
 {
@@ -2724,7 +2707,6 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 		vcpu->access_size = (gpa >> PAGE_SHIFT) + 1;
 		if (*sptep & VMX_EPT_DIRTY_BIT) {
 			re_set_bit(gpa >> PAGE_SHIFT, &vcpu->dirty_bitmap);
-			//print_record("vcpu=%d, set_AD_bit, gfn=0x%llx\n", vcpu->vcpu_id, gpa >> PAGE_SHIFT);
 			vcpu->dirty_size = (gpa >> PAGE_SHIFT) + 1;
 		}
 	}
@@ -2805,10 +2787,6 @@ void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete)
 
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages
 		, link) {
-		print_record("private_mem: vcpu %d origin_pfn 0x%llx private_pfn 0x%llx\n",
-			vcpu->vcpu_id, private_page->original_pfn, private_page->private_pfn,
-			*(private_page->sptep));
-
 		if (delete) {
 			list_del(&private_page->link);
 			kfree(private_page);
@@ -2834,11 +2812,6 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 	struct kvm_private_mem_page *private_mem_page;
 	u64 old_spte;
 
-//print_record("vcpu=%d, %s, 1, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
-	if (vcpu->rr_state == 1) {
-		print_record("vcpu=%d, warning: %s, cow after memory commit\n", vcpu->vcpu_id, __func__);
-	}
-//print_record("vcpu=%d, %s, 2, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	/* We should use GFP_ATOMIC here, because it will be called while holding spinlock */
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
 	if (!private_mem_page) {
@@ -2857,22 +2830,14 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 	private_mem_page->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
-//print_record("vcpu=%d, %s, 3, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	copy_page(new_page, pfn_to_kaddr(pfn));
 	old_spte = *sptep;
-//print_record("vcpu=%d, %s, 4, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
-//print_record("vcpu=%d, %s, 5, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 
-	//print_record("vcpu=%d,memory_cow(#%d) spte 0x%llx pfn 0x%llx -> spte "
-	//	     "0x%llx pfn 0x%llx\n", vcpu->vcpu_id,
-	//	     vcpu->arch.nr_private_pages, old_spte, pfn,
-	//	     *sptep, private_mem_page->private_pfn);
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages++;
 }
-
 
 static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			int map_writable, int level, gfn_t gfn, pfn_t pfn,
@@ -2924,17 +2889,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
 				if (!write) {
 				} else {
-//print_record("vcpu=%d, %s, 1, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
-//	"sptep=0x%llx, spte=0x%llx\n",
-//	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
-//	iterator.sptep, *iterator.sptep);
 					kvm_record_memory_cow(vcpu, iterator.sptep, pfn, gfn);
-					//print_record("gfn 0x%llx\n", gfn);
-//print_record("vcpu=%d, PROFILE_COW, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
-//print_record("vcpu=%d, %s, 2, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
-//	"sptep=0x%llx, spte=0x%llx\n",
-//	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,
-//	iterator.sptep, *iterator.sptep);
 					kvm_x86_ops->tlb_flush(vcpu);
 				}
 			}
@@ -3047,7 +3002,6 @@ void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu)
 		count++;
 	}
 	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);
-	print_record("kvm_record_clear_ept_mirror %d items\n", count);
 }
 EXPORT_SYMBOL_GPL(kvm_record_clear_ept_mirror);
 
@@ -3135,7 +3089,8 @@ static void kvm_record_ept_mirror_check_one(struct kvm_vcpu *vcpu, gpa_t gpa,
 	void *page;
 
 	if (list_empty(&vcpu->arch.ept_mirror)) {
-		print_record("error: mirror has no item with gpa 0x%llx spte 0x%llx\n",
+		RR_ERR("error: vcpu=%d mirror has no item with gpa 0x%llx "
+			"spte 0x%llx", vcpu->vcpu_id,
 			gpa, spte);
 		return;
 	}
@@ -3144,13 +3099,13 @@ static void kvm_record_ept_mirror_check_one(struct kvm_vcpu *vcpu, gpa_t gpa,
 		if (pte_page->gpa == gpa) {
 			list_del(&pte_page->link);
 			if (pte_page->spte != spte) {
-				print_record("error: gpa 0x%llx mapped spte 0x%llx in mirror but "
-					"0x%llx now\n", gpa, pte_page->spte, spte);
+				RR_ERR("error: gpa 0x%llx mapped spte 0x%llx in mirror but "
+					"0x%llx now", gpa, pte_page->spte, spte);
 			} else {
 				page = __va(page_addr);
 				if (!__compare_page(pte_page->page, page)) {
-					print_record("error: content of the page mismatch gpa "
-						"0x%llx spte 0x%llx\n", gpa, spte);
+					RR_ERR("error: content of the page mismatch gpa "
+						"0x%llx spte 0x%llx", gpa, spte);
 				}
 			}
 
@@ -3160,13 +3115,13 @@ static void kvm_record_ept_mirror_check_one(struct kvm_vcpu *vcpu, gpa_t gpa,
 			return;
 		} else if (pte_page->gpa < gpa) {
 			list_del(&pte_page->link);
-			print_record("error: mismatch item in mirror gpa 0x%llx spte "
-				"0x%llx\n", pte_page->gpa, pte_page->spte);
+			RR_ERR("error: mismatch item in mirror gpa 0x%llx spte "
+				"0x%llx", pte_page->gpa, pte_page->spte);
 			kfree(pte_page->page);
 			kfree(pte_page);
 		} else {
-			print_record("error: mirror has no item with gpa 0x%llx "
-						 "spte 0x%llx\n", gpa, spte);
+			RR_ERR("error: mirror has no item with gpa 0x%llx "
+						 "spte 0x%llx", gpa, spte);
 			return;
 		}
 	}
@@ -3201,7 +3156,6 @@ void kvm_record_check_ept_mirror(struct kvm_vcpu *vcpu)
 	int level = vcpu->arch.mmu.shadow_root_level;
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
 
-	print_record("kvm_record_check_ept_mirror()\n");
 	__mmu_walk_spt_check(vcpu, shadow_addr, level, 0);
 }
 EXPORT_SYMBOL_GPL(kvm_record_check_ept_mirror);
@@ -3251,7 +3205,6 @@ void kvm_record_clean_ept(struct kvm_vcpu *vcpu)
 	int level = vcpu->arch.mmu.shadow_root_level;
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
 
-	//print_record("kvm_record_clean_ept()\n");
 	__mmu_walk_spt_clean(vcpu, shadow_addr, level, 0);
 }
 EXPORT_SYMBOL_GPL(kvm_record_clean_ept);
@@ -3275,8 +3228,6 @@ static void __mmu_walk_spt_check_ad(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
 
 		if ((*sptep & VMX_EPT_ACCESS_BIT) && (accessed == 0)) {
-			print_record("error: vcpu %d mismatch ad bit spte 0x%llx gpa 0x%llx level %d\n",
-						 vcpu->vcpu_id, *sptep, new_gpa, level);
 			printk(KERN_ERR "error: vcpu %d mismatch ad bit spte 0x%llx gpa 0x%llx level %d\n",
 				  vcpu->vcpu_id, *sptep, new_gpa, level);
 		}
@@ -3293,7 +3244,6 @@ void kvm_record_check_ept_ad(struct kvm_vcpu *vcpu)
 {
 	int level = vcpu->arch.mmu.shadow_root_level;
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-	print_record("vcpu %d %s\n", vcpu->vcpu_id, __func__);
 	__mmu_walk_spt_check_ad(vcpu, shadow_addr, level, 0, 1);
 }
 EXPORT_SYMBOL_GPL(kvm_record_check_ept_ad);
@@ -3481,7 +3431,6 @@ static bool fast_page_fault(struct kvm_vcpu *vcpu, gva_t gva, int level,
 	 */
 	if (!spte_is_locklessly_modifiable(spte))
 		goto exit;
-	
 	/*
 	 * Currently, fast page fault only works for direct mapping since
 	 * the gfn is not stable for indirect shadow page.
@@ -3492,9 +3441,6 @@ exit:
 	trace_fast_page_fault(vcpu, gva, error_code, iterator.sptep,
 			      spte, ret);
 	walk_shadow_page_lockless_end(vcpu);
-	if (kvm_record && ret) {
-		print_record("warning: fast_page_fault() gpa 0x%llx\n", gva);
-	}
 	return ret;
 }
 
@@ -3930,7 +3876,6 @@ static int kvm_arch_setup_async_pf(struct kvm_vcpu *vcpu, gva_t gva, gfn_t gfn)
 {
 	struct kvm_arch_async_pf arch;
 
-	print_record("kvm_arch_setup_async_pf()\n");
 	arch.token = (vcpu->arch.apf.id++ << 12) | vcpu->vcpu_id;
 	arch.gfn = gfn;
 	arch.direct_map = vcpu->arch.mmu.direct_map;
@@ -4119,13 +4064,10 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 			*/
 			if (write) {
 				if (!(*sptep & PT_WRITABLE_MASK)) {
-					print_record("vcpu=%d, %s lack of PT_WRITABLE_MASK for gfn 0x%llx, sptep=0x%llx, spte=0x%llx\n",
-						vcpu->vcpu_id, __func__, gfn, sptep, *sptep);
 					return NULL;
 				}
 				*sptep |= VMX_EPT_DIRTY_BIT;
 			}
-			//print_record("__gfn_to_kaddr_ept gfn 0x%llx spte 0x%llx write %d\n", gfn, *sptep, write);
 			return (u64 *)__va(*sptep & PT64_BASE_ADDR_MASK);
 		}
 		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
@@ -4148,7 +4090,6 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	if (kaddr == NULL) {
 		if (write)
 			error_code |= PFERR_WRITE_MASK;
-		//print_record("vcpu=%d, warning: go to tdp_page_fault() path in %s\n", vcpu->vcpu_id, __func__);
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
 			printk(KERN_ERR "error: vcpu=%d %s tdp_page_fault() "
@@ -4156,7 +4097,6 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 				vcpu->vcpu_id, __func__, gfn);
 			return NULL;
 		}
-		//print_record("vcpu=%d, reclaim write for gfn 0x%llx\n", vcpu->vcpu_id, gfn);
 		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 		if (kaddr == NULL) {
 			printk(KERN_ERR "error: vcpu=%d %s fail for gfn 0x%llx\n",

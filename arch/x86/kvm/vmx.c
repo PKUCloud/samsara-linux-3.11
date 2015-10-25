@@ -19,7 +19,6 @@
 #include "irq.h"
 #include "mmu.h"
 #include "cpuid.h"
-#include "logger.h"
 
 #include <linux/kvm_host.h>
 #include <linux/module.h>
@@ -44,6 +43,7 @@
 #include <asm/xcr.h>
 #include <asm/perf_event.h>
 #include <asm/kexec.h>
+#include <asm/logger.h>
 
 #include "trace.h"
 
@@ -4897,9 +4897,9 @@ static int handle_io(struct kvm_vcpu *vcpu)
 	++vcpu->stat.io_exits;
 
 	if (string || in) {
-		//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d, string=%d, in=%d\n", __func__, __LINE__, string, in);
-		print_real_log("3 %d 0x%llx, %d, 0x%llx\n",
-				0, vcpu->arch.regs[VCPU_REGS_RIP], 0, vcpu->arch.regs[VCPU_REGS_RCX]);
+		RR_LOG("3 %d 0x%llx, %d, 0x%llx\n", 0,
+		       vcpu->arch.regs[VCPU_REGS_RIP], 0,
+		       vcpu->arch.regs[VCPU_REGS_RCX]);
 		return emulate_instruction(vcpu, 0) == EMULATE_DONE;
 	}
 
@@ -5466,10 +5466,6 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 
-	//if (vcpu->is_recording) {
-	//	print_record("vcpu=%d, %s, gfn=0x%llx\n", vcpu->vcpu_id, __func__, gpa>>PAGE_SHIFT);
-	//}
-
 	ret = handle_mmio_page_fault_common(vcpu, gpa, true);
 	if (likely(ret == RET_MMIO_PF_EMULATE))
 		return x86_emulate_instruction(vcpu, gpa, 0, NULL, 0) ==
@@ -5611,7 +5607,6 @@ int __tm_commit(void *opaque)
 	}
 
 	// Reset variants
-	print_record("XELATEX turn %llu============================\n", kvm->tm_turn);
 	kvm->record_master = false;
 
 	return 0;
@@ -5838,37 +5833,6 @@ record_disable:
 }
 EXPORT_SYMBOL_GPL(tm_commit);
 
-int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu,
-				 struct region_bitmap *access_bm,
-				 struct region_bitmap *conflict_bm, int nbits)
-{
-	int k;
-	int nr = BITS_TO_LONGS(nbits);
-	int ret = 0;
-	int i;
-	gfn_t gfn;
-	int num = 0;
-
-	for (k = 0; k < nr; k++) {
-		if (access_bm->bitmap[k] & conflict_bm->bitmap[k]) {
-			gfn = k * BITS_PER_BYTE * sizeof(long);
-			for (i=0; i<BITS_PER_BYTE*sizeof(long); i++) {
-				if ((access_bm->bitmap[k] >> i) & 1) {
-					print_record("vcpu=%d,PROFILE_CONFLICT,gfn,0x%llx\n",
-						vcpu->vcpu_id, gfn+i);
-					num ++;
-				}
-			}
-			ret = 1;
-		}
-	}
-	if (ret == 1) {
-		print_record("vcpu=%d,PROFILE_CONFLICT,END\n", vcpu->vcpu_id);
-		print_record("vcpu=%d,PROFILE_CONFLICT_NUM,%d\n", vcpu->vcpu_id, num);
-	}
-	return ret;
-}
-
 int tm_detect_conflict(struct region_bitmap *access_bm,
 		       struct region_bitmap *conflict_bm)
 {
@@ -5887,7 +5851,6 @@ int tm_unsync_init(void *opaque)
 	vcpu->is_recording = true;
 #ifdef RR_BEBACKOFF
 	vcpu->rr_timer_value = rr_ctrl.timer_value;
-	print_record("vcpu=%d timer value is %lu\n", vcpu->vcpu_id, vcpu->rr_timer_value);
 #endif
 	return 0;
 }
@@ -5908,8 +5871,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	void *origin, *private;
 	u64 old_spte;
 
-	print_record("vcpu=%d, memory_commit() %d pages=====================\n",
-		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -5923,11 +5884,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 		/* Widthdraw the write permission */
 		kvm_record_spte_withdraw_wperm(private_page->sptep);
-		//print_record("memory_commit() spte 0x%llx pfn 0x%llx -> "
-		//	     "spte 0x%llx pfn 0x%llx\n",
-		//	     old_spte, private_page->private_pfn,
-		//	     *(private_page->sptep),
-		//	     private_page->original_pfn);
 		kfree(private);
 		list_del(&private_page->link);
 		kfree(private_page);
@@ -5965,9 +5921,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 	void *origin, *private;
 	u64 old_spte;
 
-	//print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
-	//	     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
-	//	     vcpu->arch.nr_holding_pages);
 	INIT_LIST_HEAD(&temp_list); /* Hold pages temporary */
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
@@ -6018,11 +5971,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 			/* Widthdraw the write permission */
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
-			//print_record("memory_commit() spte 0x%llx pfn 0x%llx -> "
-			//	     "spte 0x%llx pfn 0x%llx\n",
-			//	     old_spte, private_page->private_pfn,
-			//	     *(private_page->sptep),
-			//	     private_page->original_pfn);
 			kfree(private);
 			list_del(&private_page->link);
 			kfree(private_page);
@@ -6035,8 +5983,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		// Delete old holding_pages 
 		list_for_each_entry_safe(private_page, temp,
 					 &vcpu->arch.holding_pages, link) {
-			//print_record("vcpu=%d, %s, collect pages, gfn=0x%llx\n",
-			//	vcpu->vcpu_id, __func__, private_page->gfn);
 			kvm_record_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 			kvm_record_spte_withdraw_wperm(private_page->sptep);
@@ -6059,8 +6005,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			origin = pfn_to_kaddr(private_page->original_pfn);
 			private = pfn_to_kaddr(private_page->private_pfn);
 			if (re_test_bit(gfn, &vcpu->DMA_access_bitmap)) {
-				//print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
-				//	vcpu->vcpu_id, __func__, gfn);
 				copy_page(private, origin);
 			}
 		}
@@ -6077,13 +6021,10 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		for (i=0; i<PAGE_SIZE; i++) {
 			if (((char*)origin)[i] != ((char*)private)[i]) {
 				copy_page(private, origin);
-				print_record("vcpu=%d, %s, content inconsistent, gfn=0x%llx\n",
-					vcpu->vcpu_id, __func__, gfn);
 			}
 		}
 	}
 */
-	//print_record("vcpu=%d, %s, end of tm_memory_commit\n", vcpu->vcpu_id, __func__);
 }
 #endif
 
@@ -6100,8 +6041,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	struct kvm_private_mem_page *temp;
 	u64 old_spte;
 
-	print_record("vcpu=%d, memory_rollback() %d pages=====================\n",
-		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -6111,11 +6050,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 		/* Widthdraw the write permission */
 		kvm_record_spte_withdraw_wperm(private_page->sptep);
-		//print_record("memory_rollback() spte 0x%llx pfn 0x%llx -> "
-		//	     "spte 0x%llx pfn 0x%llx\n",
-		//	     old_spte, private_page->private_pfn,
-		//	     *(private_page->sptep),
-		//	     private_page->original_pfn);
 
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
@@ -6141,9 +6075,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	gfn_t gfn;
 	void *origin, *private;
 
-	//print_record("vcpu=%d %s private_pages %d holding_pages %d\n",
-	//	     vcpu->vcpu_id, __func__, vcpu->arch.nr_private_pages,
-	//	     vcpu->arch.nr_holding_pages);
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
 				 link) {
@@ -6220,8 +6151,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 			origin = pfn_to_kaddr(private_page->original_pfn);
 			private = pfn_to_kaddr(private_page->private_pfn);
 			if (re_test_bit(gfn, &vcpu->DMA_access_bitmap)) {
-				// print_record("vcpu=%d, %s, DMA access bitmap inconsistent, gfn=0x%llx\n",
-				//	vcpu->vcpu_id, __func__, gfn);
 				copy_page(private, origin);
 			}
 		}
@@ -6234,8 +6163,6 @@ void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu)
 {
 	struct kvm_private_mem_page *private_page;
 	struct kvm_private_mem_page *temp;
-
-	print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
 
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
 			link) {
@@ -6256,8 +6183,6 @@ void kvm_record_clear_rollback_pages(struct kvm_vcpu *vcpu)
 	struct kvm_private_mem_page *private_page;
 	struct kvm_private_mem_page *temp;
 
-	print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
-
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.rollback_pages,
 				 link) {
 		kvm_record_spte_set_pfn(private_page->sptep,
@@ -6277,7 +6202,6 @@ void inline tm_wait_DMA(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 
 	if (atomic_read(&(kvm->tm_dma)) == 1) {
-		print_record("vcpu=%d, %s, Wait for DMA finished\n", vcpu->vcpu_id, __func__);
 		down_interruptible(&(kvm->tm_dma_sem));
 	}
 }
@@ -6298,8 +6222,6 @@ static void tm_check_version(struct kvm_vcpu *vcpu)
 	while (atomic_read(&kvm->tm_put_version) != vcpu->tm_version) {
 		continue;
 	}
-	print_record("vcpu=%d go through the version check\n",
-		     vcpu->vcpu_id);
 	atomic_inc(&kvm->tm_put_version);
 	// wake_up_interruptible(&kvm->tm_version_que);
 }
@@ -6363,8 +6285,6 @@ void tm_copy_rollback_pages(struct kvm_vcpu *vcpu)
 	void *origin, *private;
 	struct kvm_private_mem_page *private_page, *temp;
 
-	print_record("vcpu=%d %s copy %d pages\n", vcpu->vcpu_id, __func__,
-		     vcpu->arch.nr_rollback_pages);
 	list_for_each_entry_safe(private_page, temp,
 				 &vcpu->arch.rollback_pages, link) {
 		origin = pfn_to_kaddr(private_page->original_pfn);
@@ -6417,7 +6337,7 @@ inline void record_real_log(struct kvm_vcpu *vcpu)
 	rip = vmcs_readl(GUEST_RIP);
 	kvm->last_record_vcpu_id = vcpu->vcpu_id;
 	get_random_bytes(&bc, sizeof(unsigned int));
-	print_real_log("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, bc);
+	RR_LOG("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, bc);
 }
 
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
@@ -6438,14 +6358,12 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
 			PROFILE_BEGIN(exclusive_time);
 			/* Now anothter vcpu is in exclusive commit state */
-			print_record("vcpu=%d is going to sleep because of exclusive commit\n", vcpu->vcpu_id);
 			if (wait_event_interruptible(kvm->tm_exclusive_commit_que,
 			    atomic_read(&kvm->tm_normal_commit) == 1)) {
 				printk(KERN_ERR "error: %s wait_event_interruptible() interrupted\n",
 					  __func__);
 				return -1;
 			}
-			print_record("vcpu=%d wake up\n", vcpu->vcpu_id);
 			PROFILE_END(exclusive_time);
 		}
 
@@ -6483,13 +6401,11 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		if (commit) {
 			if (vcpu->exclusive_commit) {
 				/* Exclusive commit state */
-				print_record("vcpu=%d exclusive commit, going to wake up othter vcpus\n", vcpu->vcpu_id);
 				vcpu->exclusive_commit = 0;
 				atomic_set(&kvm->tm_normal_commit, 1);
 				wake_up_interruptible(&kvm->tm_exclusive_commit_que);
 			} else if (atomic_read(&kvm->tm_normal_commit) < 1) {
 				/* Now another vcpu is in exclusive commit state, need to rollback*/
-				print_record("vcpu=%d going to commit but another vcpu is in exclusive commit, so rollback\n", vcpu->vcpu_id);
 				commit = 0;
 				goto rollback;
 			}
@@ -6508,10 +6424,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
 
-			//#ifdef RR_PROFILE
-			//if (vcpu->nr_rollback != 0)
-			//	print_record("PROFILE,vcpu=%d,consecutive_rb,%d\n", vcpu->vcpu_id, vcpu->nr_rollback);
-			//#endif
 			vcpu->nr_rollback = 0;
 #ifdef RR_BEBACKOFF
 			vcpu->nr_commit++;
@@ -6526,19 +6438,14 @@ rollback:
 			/* Rollback here in the lock */
 			// tm_memory_rollback(vcpu);
 			if (!vcpu->exclusive_commit && vcpu->nr_rollback >= RR_CONSEC_RB_TIME) {
-				print_record("vcpu=%d rollback > %d, try to be exclusiv\n",
-					vcpu->vcpu_id, RR_CONSEC_RB_TIME);
 				if (atomic_dec_and_test(&kvm->tm_normal_commit)) {
 					/* Now we can enter exclusive commit state */
-					print_record("vcpu=%d in exclusive commit state\n", vcpu->vcpu_id);
 					vcpu->exclusive_commit = 1;
 				}
 			}
 		}
 		/* Get the tm_version */
 		// vcpu->tm_version = atomic_inc_return(&(kvm->tm_get_version));
-		// print_record("vcpu=%d get version %d\n", vcpu->vcpu_id,
-		// 	     vcpu->tm_version);
 		/* Insert chunk_info to kvm->chunk_list */
 		vcpu->chunk_info.action = commit ? KVM_RR_COMMIT : KVM_RR_ROLLBACK;
 		vcpu->chunk_info.state = RR_CHUNK_BUSY;
@@ -6561,7 +6468,8 @@ rollback:
 		if (atomic_read(&(kvm->tm_dma)) == 0)
 			re_bitmap_clear(&vcpu->DMA_access_bitmap);
 		else
-			print_record("vcpu=%d, %s, error: Why here?\n", vcpu->vcpu_id, __func__);
+			RR_ERR("error: vcpu=%d should not come here\n",
+			       vcpu->vcpu_id);
 		// mutex_unlock(&(kvm->tm_lock));
 		PROFILE_END(clear_dma_bitmap_time);
 		up_read(&(kvm->tm_rwlock));
@@ -6630,7 +6538,6 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	struct gfn_list *gfn_node, *temp;
 	bool is_clean = list_empty(&vcpu->commit_again_gfn_list);
 
-	//print_record("vcpu=%d %s\n", vcpu->vcpu_id, __func__);
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
 	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 
@@ -7959,8 +7866,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
 		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
 		if (re_test_bit(gfn, vcpu->public_cb)) {
-			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
-			print_record("vcpu=%d, early rollback, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
 			vcpu->is_early_rb = 1;
 		}
@@ -7973,17 +7878,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
 		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
 		if (re_test_bit(gfn, vcpu->public_cb)) {
-			//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
-			print_record("vcpu=%d, early check, gfn=0x%llx\n", vcpu->vcpu_id, gfn);
 			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
 			is_early_check = 1;
 		}
 	}
 	#endif
-//print_record("vcpu=%d, %s, exit_reason=%d\n", vcpu->vcpu_id, __func__, exit_reason);
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
-		//print_record("vcpu=%d, exit_reason=%d\n", vcpu->vcpu_id, exit_reason);
 		#ifdef RR_PROFILE
 		rr_profile_chunk_size(vcpu);
 		#endif
@@ -7995,14 +7896,9 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			vcpu->need_memory_commit = 1;
 			vcpu->rr_state = 1;
 			vcpu->need_check_chunk_info = 1;
-			if (is_early_check == 1)
-				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
-			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, COMMIT=========\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
 			vcpu->need_check_chunk_info = 1;
-			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
-			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, ROLLBACK=========\n", vcpu->vcpu_id);
 			return KVM_RR_ROLLBACK;
 		}
 	}
