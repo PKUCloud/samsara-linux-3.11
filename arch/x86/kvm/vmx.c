@@ -31,6 +31,7 @@
 #include <linux/ftrace_event.h>
 #include <linux/slab.h>
 #include <linux/tboot.h>
+#include <linux/record_replay.h>
 #include "kvm_cache_regs.h"
 #include "x86.h"
 
@@ -6595,9 +6596,13 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(tm_commit_memory_again);
 
-// XELATEX
+/* Preemption handler for record and replay */
 static int handle_preemption(struct kvm_vcpu *vcpu)
 {
+	/* We need the preemption to kick the vcpu out periodly, so we need to
+	 * do nothing here but reset the timer value and return 1 to let the
+	 * guest resume.
+	 */
 	return 1;
 }
 
@@ -9520,6 +9525,20 @@ static struct kvm_x86_ops vmx_x86_ops = {
 #endif
 };
 
+/* Record and replay */
+static void vmx_rr_ape_setup(u32 timer_value)
+{
+	/* Setup preemption timer */
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, timer_value);
+	vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL,
+		      PIN_BASED_VMX_PREEMPTION_TIMER);
+	vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
+	RR_DLOG(INIT, "timer_value=%d", timer_value);
+}
+static struct rr_ops vmx_rr_ops = {
+	.ape_vmx_setup = vmx_rr_ape_setup,
+};
+
 static int __init vmx_init(void)
 {
 	int r, i, msr;
@@ -9593,6 +9612,8 @@ static int __init vmx_init(void)
 		     __alignof__(struct vcpu_vmx), THIS_MODULE);
 	if (r)
 		goto out7;
+
+	rr_init(&vmx_rr_ops);
 
 #ifdef CONFIG_KEXEC
 	rcu_assign_pointer(crash_vmclear_loaded_vmcss,

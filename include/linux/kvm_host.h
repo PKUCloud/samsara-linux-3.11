@@ -34,6 +34,8 @@
 
 #include <linux/kvm_types.h>
 
+#include <linux/record_replay.h>
+
 #include <asm/kvm_host.h>
 
 //kvm_vcpu_checkpoint_rollback rsr
@@ -365,6 +367,9 @@ struct kvm_vcpu {
 	//end kvm_vcpu_checkpoint_rollback rsr
 
 	struct vcpu_rr_states rr_states;
+
+	/* Record and replay */
+	struct rr_vcpu_info rr_info;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
@@ -540,6 +545,9 @@ struct kvm {
 	wait_queue_head_t tm_version_que;
 	/* vcpu that just record */
 	int last_record_vcpu_id;
+
+	/* Record and replay */
+	struct rr_kvm_info rr_info;
 };
 
 #define kvm_err(fmt, ...) \
