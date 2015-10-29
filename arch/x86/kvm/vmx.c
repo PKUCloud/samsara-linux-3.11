@@ -5788,10 +5788,6 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	re_bitmap_destroy(&vcpu->dirty_bitmap);
 	re_bitmap_destroy(&vcpu->DMA_access_bitmap);
 
-#ifdef RR_BEBACKOFF
-	vcpu->nr_commit = 0;
-#endif
-
 	kvm_record_clear_ept_mirror(vcpu);
 	kvm_record_clear_holding_pages(vcpu);
 #ifdef RR_ROLLBACK_PAGES
@@ -5853,9 +5849,6 @@ int tm_unsync_init(void *opaque)
 	kvm_mmu_reload(vcpu);
 	//kvm_record_count = KVM_RECORD_COUNT - 1;
 	vcpu->is_recording = true;
-#ifdef RR_BEBACKOFF
-	vcpu->rr_timer_value = rr_ctrl.timer_value;
-#endif
 	return 0;
 }
 
@@ -6302,32 +6295,6 @@ void tm_copy_rollback_pages(struct kvm_vcpu *vcpu)
 EXPORT_SYMBOL_GPL(tm_copy_rollback_pages);
 #endif
 
-#ifdef RR_BEBACKOFF
-static void tm_update_timer_value(struct kvm_vcpu *vcpu)
-{
-	u32 current_timer_val = vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
-	u32 next_timer_val = vcpu->rr_timer_value;
-	u32 ticks = vcpu->rr_timer_value - current_timer_val;
-
-	if (vcpu->nr_rollback == RR_BEBACKOFF_START_RB_TIME) {
-		next_timer_val /= 2;
-		if (next_timer_val > RR_BEBACKOFF_LINE)
-			next_timer_val = RR_BEBACKOFF_LINE;
-	} else if (vcpu->nr_rollback > RR_BEBACKOFF_START_RB_TIME) {
-		/* Need to Binary exponential backoff */
-		next_timer_val = ticks / 2;
-		if (next_timer_val < RR_BEBACKOFF_MINM) {
-			next_timer_val = RR_BEBACKOFF_MINM;
-		}
-	} else {
-		/* Commit */
-		next_timer_val = rr_ctrl.timer_value;
-	}
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, next_timer_val);
-	vcpu->rr_timer_value = next_timer_val;
-}
-#endif
-
 extern void get_random_bytes(void *buf, int nbytes);
 
 inline void record_real_log(struct kvm_vcpu *vcpu)
@@ -6429,15 +6396,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
 
 			vcpu->nr_rollback = 0;
-#ifdef RR_BEBACKOFF
-			vcpu->nr_commit++;
-#endif
 			record_real_log(vcpu);
 		} else {
 rollback:
-#ifdef RR_BEBACKOFF
-			vcpu->nr_commit = 0;
-#endif
 			vcpu->nr_rollback++;
 			/* Rollback here in the lock */
 			// tm_memory_rollback(vcpu);
@@ -6502,11 +6463,7 @@ rollback:
 		goto record_disable;
 	}
 
-#ifdef RR_BEBACKOFF
-	tm_update_timer_value(vcpu);
-#else
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
-#endif
 
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
 		vcpu->mmu_vcpu_valid_gen ++;
@@ -6605,6 +6562,8 @@ static int handle_preemption(struct kvm_vcpu *vcpu)
 	/* We need the preemption to kick the vcpu out periodly, so we need to
 	 * do nothing here but reset the timer value and return 1 to let the
 	 * guest resume.
+	 * We will reset the timer value each time we commit or rollback a
+	 * chunk.
 	 */
 	return 1;
 }

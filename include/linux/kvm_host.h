@@ -357,10 +357,6 @@ struct kvm_vcpu {
 	/* Used to decide if this vcpu can go into guest or not, init to 0 */
 	int tm_version;
 	struct chunk_info chunk_info;
-#ifdef RR_BEBACKOFF
-	u32 rr_timer_value; /* Preemption timer value for this vcpu */
-	int nr_commit;		/* Number of continuous commit */
-#endif
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
 	int check_rollback;
