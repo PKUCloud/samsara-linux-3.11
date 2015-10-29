@@ -5890,7 +5890,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool is_rollback;
 
 restart:
-	if (vcpu->requests) {	// Check if there is any requests which are not handled.
+	/* Check if there is any requests which are not handled. */
+	if (vcpu->requests) {
 		// XELATEX
 		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
 			if (kvm_x86_ops)
@@ -5950,14 +5951,11 @@ restart:
 			vcpu_scan_ioapic(vcpu);
 	}
 
-	/* Enable recording */
-	if (kvm_record && !vcpu->is_recording) {
-		if (kvm_record_type == KVM_RECORD_UNSYNC_PREEMPTION) {
-			if (!kvm_x86_ops->tm_unsync_pre_record(vcpu, 1)) {
-				vcpu->need_chkpt = 1;
-			}
-		}
+	/* Enable record and replay */
+	if (unlikely(rr_ctrl.enabled && !vcpu->rr_info.enabled)) {
+		rr_vcpu_enable(vcpu);
 	}
+
 	// XELATEX
 	if (kvm_record && vcpu->need_chkpt) {		// make checkpoint
 		mutex_lock(&(vcpu->events_list_lock));

@@ -55,6 +55,7 @@
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
+#include <asm/logger.h>
 
 #include "coalesced_mmio.h"
 #include "async_pf.h"
@@ -2796,6 +2797,7 @@ static long kvm_dev_ioctl(struct file *filp,
 			/* Disable recording */
 			rr_ctrl = rr_ctrl_user;
 			printk(KERN_INFO "KVM_RR_CTRL, disabled\n");
+			RR_DLOG(INIT, "KVM_RR_CTRL, disabled");
 			/* For compatibility */
 			kvm_record = false;
 		} else {
@@ -2805,6 +2807,9 @@ static long kvm_dev_ioctl(struct file *filp,
 				printk(KERN_INFO "KVM_RR_CTRL, enabled with "
 				       "ctrl: 0x%x, timer_value: %d\n",
 				       rr_ctrl.ctrl, rr_ctrl.timer_value);
+				RR_DLOG(INIT, "KVM_RR_CTRL, enabled with "
+					"ctrl: 0x%x, timer_value: %d",
+					rr_ctrl.ctrl, rr_ctrl.timer_value);
 
 				/* For compatibility */
 				kvm_record = true;

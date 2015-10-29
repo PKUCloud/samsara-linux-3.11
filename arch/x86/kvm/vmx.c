@@ -5780,6 +5780,7 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	vcpu->exclusive_commit = 0;
 	vcpu->nr_rollback = 0;
 	vcpu->tm_version = 0;
+	vcpu->rr_info.enabled = false;
 
 	re_bitmap_destroy(&vcpu->access_bitmap);
 	re_bitmap_destroy(&vcpu->conflict_bitmap_1);
@@ -5797,9 +5798,11 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	kvm_record_clear_rollback_pages(vcpu);
 #endif
 
+	/*
 	up(&(kvm->tm_enter_sem));
 	for (i=0; i<online_vcpus - 1; i++)
 		up(&(kvm->tm_exit_sem));
+	*/
 
 	switch (kvm_record_type){
 		case KVM_RECORD_PREEMPTION:

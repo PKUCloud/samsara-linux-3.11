@@ -28,6 +28,7 @@ struct rr_vcpu_info {
 	bool enabled;		/* State of record and replay */
 	u32 timer_value;	/* Preemption timer value of this vcpu */
 	unsigned long requests;	/* Requests bitmap */
+	bool is_master;		/* Used for synchronization */
 };
 
 /* Record and replay control info for kvm */
