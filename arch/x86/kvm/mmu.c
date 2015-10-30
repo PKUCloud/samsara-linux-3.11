@@ -2936,11 +2936,9 @@ static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, 
 		/* Check if VMX_EPT_ACCESS_BIT is set, if not there is no need to walk
 		 * its children any more.
 		 */
-		#ifdef RR_AD_BIT_OPT
 		if (!(*sptep & VMX_EPT_ACCESS_BIT)) {
 			continue;
 		}
-		#endif
 
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;
@@ -3178,11 +3176,9 @@ static void __mmu_walk_spt_clean(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
 		/* Check if VMX_EPT_ACCESS_BIT is set, if not, there is no need to
 		 * walk its children any more.
 		 */
-		#ifdef RR_AD_BIT_OPT
 		if (!(*sptep & VMX_EPT_ACCESS_BIT)) {
 			continue;
 		}
-		#endif
 
 		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
 		new_addr = *sptep & PT64_BASE_ADDR_MASK;

@@ -25,8 +25,6 @@
 
 #define RR_CONSEC_RB_TIME 3
 
-// Optimizations
-#define RR_AD_BIT_OPT
 /* Early rollback and early check is exclusive */
 //#define RR_EARLY_ROLLBACK
 #define RR_EARLY_CHECK
