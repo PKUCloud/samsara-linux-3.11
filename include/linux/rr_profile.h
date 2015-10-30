@@ -46,9 +46,6 @@
  */
 #define RR_ROLLBACK_PAGES
 
-/* If defined, print_record will be disabled and print_read_log will be enabled, vice vera */
-#define PRINT_REAL_LOG
-
 struct vmexit_states {
 	uint64_t num;
 	uint64_t time;

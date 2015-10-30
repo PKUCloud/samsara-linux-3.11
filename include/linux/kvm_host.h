@@ -322,7 +322,6 @@ struct kvm_vcpu {
 	bool is_kicked;
 	struct list_head commit_sptep_list;
 	struct list_head commit_again_gfn_list;
-	unsigned long mmu_vcpu_valid_gen;
 	bool is_trapped;
 	unsigned long long nr_vmexit;
 	unsigned long long nr_sync;

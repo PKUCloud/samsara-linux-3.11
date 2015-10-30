@@ -5576,7 +5576,6 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 }
 
 // XELATEX
-extern void kvm_zap_obsolete_pages(struct kvm *kvm);
 extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
 
 #define TM_MMU_INVALID_GEN	10000
@@ -5596,16 +5595,7 @@ int __tm_commit(void *opaque)
 	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
 			kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
 		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-	if (kvm_record_mode == KVM_RECORD_SOFTWARE)
-		kvm->arch.mmu_valid_gen++;
 	(kvm->tm_turn) ++;
-
-	// Zap all mmu pages every TM_MMU_INVALID_GEN turns
-	if (!(kvm->arch.mmu_valid_gen % TM_MMU_INVALID_GEN)) {
-		spin_lock(&kvm->mmu_lock);
-		kvm_zap_obsolete_pages(kvm);
-		spin_unlock(&kvm->mmu_lock);
-	}
 
 	// Reset variants
 	kvm->record_master = false;
@@ -5843,7 +5833,8 @@ int tm_unsync_init(void *opaque)
 {
 	struct kvm_vcpu *vcpu = (struct kvm_vcpu *)opaque;
 
-	vcpu->mmu_vcpu_valid_gen ++;
+	/* Should have some bug here */
+	vcpu->kvm->arch.mmu_valid_gen++;
 	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 	kvm_mmu_unload(vcpu);
 	kvm_mmu_reload(vcpu);
@@ -6464,20 +6455,7 @@ rollback:
 	}
 
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
-
-	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
-		vcpu->mmu_vcpu_valid_gen ++;
-		// Zap all mmu pages every TM_MMU_INVALID_GEN turns
-		if (!(vcpu->mmu_vcpu_valid_gen % TM_MMU_INVALID_GEN)) {
-			spin_lock(&kvm->mmu_lock);
-			kvm_zap_obsolete_pages(kvm);
-			spin_unlock(&kvm->mmu_lock);
-		}
-		kvm_mmu_unload(vcpu);
-	}
-
 	vcpu->nr_sync ++;
-
 out:
 	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 	return commit;

@@ -1936,9 +1936,7 @@ static void clear_sp_write_flooding_count(u64 *spte)
 
 static bool is_obsolete_sp(struct kvm *kvm, struct kvm_mmu_page *sp)
 {
-	// XELATEX
-	return unlikely(sp->mmu_valid_gen != kvm->arch.mmu_valid_gen) 
-		|| unlikely(sp->mmu_vcpu_valid_gen != sp->vcpu->mmu_vcpu_valid_gen);
+	return unlikely(sp->mmu_valid_gen != kvm->arch.mmu_valid_gen);
 }
 
 static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
@@ -2013,8 +2011,6 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 		account_shadowed(vcpu->kvm, gfn);
 	}
 	sp->mmu_valid_gen = vcpu->kvm->arch.mmu_valid_gen;
-	// XELATEX
-	sp->mmu_vcpu_valid_gen = vcpu->mmu_vcpu_valid_gen;
 	init_shadow_page_table(sp);
 	trace_kvm_mmu_get_page(sp, true);
 	return sp;
@@ -2848,22 +2844,10 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	int emulate = 0;
 	gfn_t pseudo_gfn;
 	unsigned pte_access = 0;
-	u64 spte = 0;
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
 			pte_access = ACC_ALL;
-			if (kvm_record && kvm_record_mode == KVM_RECORD_SOFTWARE) {
-				if (write) {
-					pte_access = ACC_ALL;
-					spte = VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT;
-				} else {
-					pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
-					spte = VMX_EPT_ACCESS_BIT;
-				}
-				__mmu_set_AD_bit(vcpu, &spte, gfn<<PAGE_SHIFT, pfn<<PAGE_SHIFT);
-			}
-
 			if (vcpu->is_recording && !write) {
 				/* Read trap
 				 * Do not give the write mask so that vcpu will trap when
@@ -5017,7 +5001,6 @@ restart:
 	 */
 	kvm_mmu_commit_zap_page(kvm, &kvm->arch.zapped_obsolete_pages);
 }
-EXPORT_SYMBOL_GPL(kvm_zap_obsolete_pages);
 
 /*
  * Fast invalidate all shadow pages and use lock-break technique

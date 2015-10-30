@@ -229,9 +229,6 @@ struct kvm_mmu_page {
 	/* The page is obsolete if mmu_valid_gen != kvm->arch.mmu_valid_gen.  */
 	unsigned long mmu_valid_gen;
 
-	// XELATEX
-	unsigned long mmu_vcpu_valid_gen;
-
 	DECLARE_BITMAP(unsync_child_bitmap, 512);
 
 #ifdef CONFIG_X86_32
@@ -245,7 +242,7 @@ struct kvm_mmu_page {
 	/* Number of writes since the last time traversal visited this page.  */
 	int write_flooding_count;
 
-	// XELATEX
+	/* Record and replay */
 	struct kvm_vcpu *vcpu;
 };
 
