@@ -4206,18 +4206,6 @@ static void ept_set_mmio_spte_mask(void)
 // XELATEX
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick);
 
-static void vmx_record_setup(struct vcpu_vmx *vmx)
-{
-	kvm_x86_ops->tm_commit = tm_unsync_commit;
-	if (!(vmx->preemption_begin)) {
-		printk(KERN_ERR "vcpu %d %s KVM_RECORD_PREEMPTION\n", vmx->vcpu.vcpu_id, __func__);
-		vmx->preemption_begin = true;
-		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
-		vmcs_set_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
-		vmcs_set_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
-	}
-}
-
 /*
  * Sets up the vmcs for emulated real mode.
  */
@@ -5514,100 +5502,7 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-// XELATEX
 extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
-
-#define TM_MMU_INVALID_GEN	10000
-
-int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
-		int (*func_master)(void *opaque), void *opaque_master,
-		int (*func_slave)(void *opaque), void *opaque_slave)
-{
-	struct kvm *kvm = vcpu->kvm;
-	int i;
-	struct kvm_vcpu *cur_vcpu;
-	bool master = false;
-	int online_vcpus = atomic_read(&(kvm->online_vcpus));
-	bool ok = false;
-	int ret = 0;
-
-	atomic_dec(&(kvm->tm_trap_count));
-	vcpu->is_trapped = true;
-
-	if (!rr_ctrl.enabled)
-		return -1;
-
-	// The first vcpu enter is treated as master, other as slaves
-	mutex_lock(&(kvm->tm_lock));
-	if (kvm->record_master == false) {
-		master = true;
-		kvm->record_master = true;
-		sema_init(&(kvm->tm_enter_sem), 0);
-		sema_init(&(kvm->tm_exit_sem), 0);
-		atomic_set(&(kvm->finished_slaves), 0);
-	}
-	mutex_unlock(&(kvm->tm_lock));
-
-	if (master) {
-		printk(KERN_INFO "vcpu %d is the master\n", vcpu->vcpu_id);
-		// Kick all other vcpus if "kick" is set
-		while (kick_time-- && !ok){
-			ok = true;
-			for (i=0; i<online_vcpus; i++) {
-				cur_vcpu = kvm->vcpus[i];
-				if (cur_vcpu == vcpu)
-					continue;
-				if (cur_vcpu->is_trapped)
-					continue;
-				//kvm_make_request(KVM_REQ_RECORD, cur_vcpu);
-				printk(KERN_INFO "vcpu %d kicks vcpu %d\n",
-				       vcpu->vcpu_id, cur_vcpu->vcpu_id);
-				kvm_vcpu_kick(cur_vcpu);
-				cur_vcpu->is_kicked = true;
-				ok = false;
-			}
-		}
-		printk(KERN_INFO "vcpu %d master waits for slaves to enter\n", vcpu->vcpu_id);
-		// Master, sync when enter, wait slaves enter
-		if (online_vcpus > 1 && down_interruptible(&(kvm->tm_enter_sem))) {
-			printk(KERN_ERR "XELATEX - vcpu=%d, %s, master,interrupt received waiting kvm->tm_enter_sem\n", 
-				vcpu->vcpu_id, __func__);
-			return -1;
-		}
-		printk(KERN_INFO "vcpu %d going to init\n", vcpu->vcpu_id);
-		if (func_master && func_master(opaque_master))
-			ret = -1;
-		printk(KERN_INFO "vcpu %d finishes init\n", vcpu->vcpu_id);
-		printk(KERN_INFO "vcpu %d let slaves go\n", vcpu->vcpu_id);
-		// Master, sync when exit, let slaves go
-		for (i=0; i<online_vcpus - 1; i++)
-			up(&(kvm->tm_exit_sem));
-	}
-	// Slaves
-	else {
-		printk(KERN_INFO "vcpu %d is a slave\n", vcpu->vcpu_id);
-		// Slave, sync when enter, let master go
-		if (atomic_inc_return(&(kvm->finished_slaves)) == online_vcpus - 1) {
-			printk(KERN_INFO "vcpu %d wakes up master\n", vcpu->vcpu_id);
-			up(&(kvm->tm_enter_sem));
-		}
-
-		printk(KERN_INFO "vcpu %d going to init\n", vcpu->vcpu_id);
-		if (func_slave && func_slave(opaque_slave))
-			ret = -1;
-		printk(KERN_INFO "vcpu %d finishes init and wait for master\n", vcpu->vcpu_id);
-
-		// Slave, sync when exit, wait master's end
-		if (down_interruptible(&(kvm->tm_exit_sem))) {
-			printk(KERN_INFO "error: vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
-				vcpu->vcpu_id);
-			ret = -1;
-		}
-		printk(KERN_INFO "vcpu %d go out\n", vcpu->vcpu_id);
-	}
-	printk(KERN_INFO "vcpu %d %s ret %d\n", vcpu->vcpu_id, __func__, ret);
-	return ret;
-}
 
 extern void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu);
 void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu);
@@ -6316,13 +6211,6 @@ rollback:
 		printk(KERN_ERR "error: vcpu=%d %s when vcpu->is_recording is false\n",
 			  vcpu->vcpu_id, __func__);
 		return -1;
-		/*
-		printk(KERN_ERR "XELATEX - before sync - vcpu=%d\n", vcpu->vcpu_id);
-		if (tm_sync(vcpu, kick_time, tm_unsync_init, (void *)vcpu,
-				tm_unsync_init, (void *)vcpu))
-			goto record_disable;
-		printk(KERN_ERR "XELATEX - after sync - vcpu=%d\n", vcpu->vcpu_id);
-		*/
 	}
 	PROFILE_BEGIN(clear_bitmap_time);
 	// Reset bitmaps
@@ -7736,27 +7624,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	}
 	return KVM_RR_SKIP;
 */
-}
-
-/* Synchronization before enabling record for tm_unsync */
-int vmx_tm_unsync_pre_record(struct kvm_vcpu *vcpu, int kick_time)
-{
-	int ret;
-	if (vcpu->is_recording) {
-		return 0;
-	}
-	printk(KERN_INFO "vcpu %d %s going to sync\n", vcpu->vcpu_id, __func__);
-	ret = tm_sync(vcpu, kick_time, tm_unsync_init, (void *)vcpu,
-				  tm_unsync_init, (void *)vcpu);
-	if (ret) {
-		printk(KERN_ERR "error: vcpu %d %s tm_sync failed\n", vcpu->vcpu_id,
-			   __func__);
-		tm_disable(vcpu);
-		return ret;
-	}
-	printk(KERN_INFO "vcpu %d %s tm_sync done\n", vcpu->vcpu_id, __func__);
-	vmx_record_setup(to_vmx(vcpu));
-	return 0;
 }
 
 static void update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
@@ -9307,8 +9174,6 @@ static struct kvm_x86_ops vmx_x86_ops = {
 
 	.check_intercept = vmx_check_intercept,
 	.handle_external_intr = vmx_handle_external_intr,
-	.tm_commit = NULL,
-	.tm_unsync_pre_record = vmx_tm_unsync_pre_record,
 	.check_rr_commit = vmx_check_rr_commit,
 	.tm_commit_memory_again = tm_commit_memory_again,
 	.tm_memory_commit = tm_memory_commit,

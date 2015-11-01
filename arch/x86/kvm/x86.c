@@ -5888,13 +5888,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 restart:
 	/* Check if there is any requests which are not handled. */
 	if (vcpu->requests) {
-		// XELATEX
-		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
-			if (kvm_x86_ops)
-				kvm_x86_ops->tm_commit(vcpu, 0);
-			else
-				printk(KERN_ERR "XELATEX - error - kvm_x86_ops->tm_commit=NULL\n");
-		}
 		if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu))
 			kvm_mmu_unload(vcpu);
 		if (kvm_check_request(KVM_REQ_MIGRATE_TIMER, vcpu))

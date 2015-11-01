@@ -783,10 +783,6 @@ struct kvm_x86_ops {
 			       struct x86_instruction_info *info,
 			       enum x86_intercept_stage stage);
 	void (*handle_external_intr)(struct kvm_vcpu *vcpu);
-	// XELATEX
-	int (*tm_commit)(struct kvm_vcpu *vcpu, int kick);
-	/* Do synchronizations before enabling record */
-	int (*tm_unsync_pre_record)(struct kvm_vcpu *vcpu, int kick);
 	int (*check_rr_commit)(struct kvm_vcpu *vcpu);
 	int (*tm_commit_memory_again)(struct kvm_vcpu *vcpu);
 	void (*tm_memory_commit)(struct kvm_vcpu *vcpu);
