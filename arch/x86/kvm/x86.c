@@ -4087,7 +4087,6 @@ static int kvm_read_guest_virt_helper(gva_t addr, void *val, unsigned int bytes,
 {
 	void *data = val;
 	int r = X86EMUL_CONTINUE;
-	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d, bytes=%d\n", __func__, __LINE__, bytes);
 
 	while (bytes) {
 		gpa_t gpa = vcpu->arch.walk_mmu->gva_to_gpa(vcpu, addr, access,
@@ -4095,10 +4094,8 @@ static int kvm_read_guest_virt_helper(gva_t addr, void *val, unsigned int bytes,
 		unsigned offset = addr & (PAGE_SIZE-1);
 		unsigned toread = min(bytes, (unsigned)PAGE_SIZE - offset);
 		int ret;
-		//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 
 		if (gpa == UNMAPPED_GVA) {
-			if(kvm_record) printk(KERN_ERR"XELATEX - %s, %d\n", __func__, __LINE__);
 			return X86EMUL_PROPAGATE_FAULT;
 		}
 		ret = kvm_read_guest(vcpu, gpa, data, toread);
@@ -4111,7 +4108,6 @@ static int kvm_read_guest_virt_helper(gva_t addr, void *val, unsigned int bytes,
 		data += toread;
 		addr += toread;
 	}
-	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 out:
 	return r;
 }
@@ -5924,8 +5920,7 @@ restart:
 		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 			r = 0;
-			kvm_record = false;
-			printk("vcpu=%d, error: TRIPLE_FAULT_ERROR! kvm_record = false\n", vcpu->vcpu_id);
+			rr_ctrl.enabled = 0;
 			goto out;
 		}
 
@@ -5957,7 +5952,7 @@ restart:
 	}
 
 	// XELATEX
-	if (kvm_record && vcpu->need_chkpt) {		// make checkpoint
+	if (vcpu->rr_info.enabled && vcpu->need_chkpt) {
 		mutex_lock(&(vcpu->events_list_lock));
 		if (vcpu->guest_fpu_loaded) {
 			/* We need to read back the value from hardware fpu, that is
@@ -6075,7 +6070,7 @@ restart:
 		goto cancel_injection;
 	}
 
-	if (kvm_record && mirror_flag == 1) {
+	if (vcpu->rr_info.enabled && mirror_flag == 1) {
 		mirror_flag = 2;
 		preempt_enable();
 		kvm_record_make_ept_mirror(vcpu);
@@ -6096,9 +6091,6 @@ restart:
 		set_debugreg(vcpu->arch.eff_db[2], 2);
 		set_debugreg(vcpu->arch.eff_db[3], 3);
 	}
-
-	//if (kvm_record)
-	//	printk(KERN_INFO "vcpu %d kvm_x86_ops->run(vcpu)\n", vcpu->vcpu_id);
 
 	trace_kvm_entry(vcpu->vcpu_id);
 	kvm_x86_ops->run(vcpu);
@@ -6136,8 +6128,6 @@ restart:
 
 	preempt_enable();
 
-	//if (kvm_record)
-	//	printk(KERN_INFO "vcpu %d exit\n", vcpu->vcpu_id);
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 	/*
@@ -6181,7 +6171,7 @@ restart:
 		} else if (r == KVM_RR_ROLLBACK) {
 			kvm_x86_ops->tlb_flush(vcpu);
 			vcpu->need_memory_commit = 0;
-			if (kvm_record && mirror_flag == 2) {
+			if (vcpu->rr_info.enabled && mirror_flag == 2) {
 				mirror_flag = 0;
 				kvm_record_check_ept_mirror(vcpu);
 			}
@@ -6210,8 +6200,7 @@ restart:
 	r = kvm_x86_ops->handle_exit(vcpu);
 
 	if (vcpu->run->exit_reason == KVM_EXIT_SHUTDOWN){
-		kvm_record = false;
-		printk("vcpu=%d, kvm_record = false\n", vcpu->vcpu_id);
+		rr_ctrl.enabled = 0;
 	}
 	return r;
 

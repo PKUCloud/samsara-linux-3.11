@@ -1175,9 +1175,6 @@ static inline bool kvm_check_request(int req, struct kvm_vcpu *vcpu)
 
 extern bool kvm_rebooting;
 
-// XELATEX
-extern bool kvm_record;
-
 struct kvm_device_ops;
 
 struct kvm_device {

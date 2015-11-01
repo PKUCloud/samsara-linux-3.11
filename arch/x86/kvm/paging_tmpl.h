@@ -208,23 +208,31 @@ retry_walk:
 			goto error;
 		real_gfn = gpa_to_gfn(real_gfn);
 
-		// XELATEX
-		if (kvm_record && (kaddr = gfn_to_kaddr_ept(vcpu, real_gfn, 0)) != NULL) {
-			memcpy(&pte, kaddr + offset, sizeof(pte));
-		} else {
-			if (kvm_record){
-				printk(KERN_ERR "error: %s get INVALID_PAGE, gfn=0x%llx, kaddr=0x%llx\n",
-						__func__, real_gfn, (u64)kaddr);
+		host_addr = gfn_to_hva(vcpu->kvm, real_gfn);
+		if (unlikely(kvm_is_error_hva(host_addr)))
+			goto error;
+
+		ptep_user = (pt_element_t __user *)((void *)host_addr + offset);
+
+		/* Record and replay.
+		 * FIXME: During recording, we should retrive the content via
+		 * EPT. However we can't get the userspace address of the CoW
+		 * page to fill @ptep_user.
+		 */
+		if (vcpu->rr_info.enabled) {
+			kaddr = gfn_to_kaddr_ept(vcpu, real_gfn, 0);
+			if (kaddr) {
+				memcpy(&pte, kaddr + offset, sizeof(pte));
+			} else {
+				RR_ERR("error: vcpu=%d fail to retrive "
+				       "content of gfn 0x%llx from guest",
+				       vcpu->vcpu_id, real_gfn);
+				goto error;
 			}
-
-			host_addr = gfn_to_hva(vcpu->kvm, real_gfn);
-			if (unlikely(kvm_is_error_hva(host_addr)))
+		} else if (unlikely(__copy_from_user(&pte, ptep_user,
+						     sizeof(pte))))
 				goto error;
 
-			ptep_user = (pt_element_t __user *)((void *)host_addr + offset);
-			if (unlikely(__copy_from_user(&pte, ptep_user, sizeof(pte))))
-				goto error;
-		}
 		walker->ptep_user[walker->level - 1] = ptep_user;
 
 		trace_kvm_mmu_paging_element(pte, walker->level);

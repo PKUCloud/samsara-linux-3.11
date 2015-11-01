@@ -86,10 +86,6 @@ EXPORT_SYMBOL_GPL(kvm_vcpu_cache);
 struct kvm_rr_ctrl rr_ctrl;
 EXPORT_SYMBOL_GPL(rr_ctrl);
 
-// XELATEX
-bool kvm_record;
-EXPORT_SYMBOL_GPL(kvm_record);
-
 static __read_mostly struct preempt_ops kvm_preempt_ops;
 
 struct dentry *kvm_debugfs_dir;
@@ -1536,16 +1532,13 @@ int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 {
 	int r;
 	unsigned long addr;
-	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 
 	addr = gfn_to_hva(kvm, gfn);
 	if (kvm_is_error_hva(addr)) {
-		//if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, is error hva\n", __func__, __LINE__);
 		return -EFAULT;
 	}
 	r = __copy_to_user((void __user *)addr + offset, data, len);
 	if (r) {
-		//if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, copy_to_user fault\n", __func__, __LINE__);
 		return -EFAULT;
 	}
 	mark_page_dirty(kvm, gfn);
@@ -1649,7 +1642,7 @@ int kvm_write_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa, ghc->len);
 
 	// XELATEX
-	if (kvm_record)
+	if (vcpu->rr_info.enabled)
 		return kvm_write_guest(vcpu, ghc->gpa, data, len);
 
 	if (unlikely(!ghc->memslot))
@@ -1680,7 +1673,7 @@ int kvm_read_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa, ghc->len);
 
 	// XELATEX
-	if (kvm_record)
+	if (vcpu->rr_info.enabled)
 		return kvm_read_guest(vcpu, ghc->gpa, data, len);
 
 	if (unlikely(!ghc->memslot))
@@ -2460,7 +2453,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	case KVM_DMA_COMMIT: {
 		struct DMA_AC DMA_access;
 
-		if (!kvm_record && !kvm->tm_dma_holding_sem)
+		if (!rr_ctrl.enabled && !kvm->tm_dma_holding_sem)
 			return 0;
 		r = -EFAULT;
 		if (copy_from_user(&DMA_access, argp, sizeof(struct DMA_AC)))
@@ -2794,8 +2787,6 @@ static long kvm_dev_ioctl(struct file *filp,
 			rr_ctrl = rr_ctrl_user;
 			printk(KERN_INFO "KVM_RR_CTRL, disabled\n");
 			RR_DLOG(INIT, "KVM_RR_CTRL, disabled");
-			/* For compatibility */
-			kvm_record = false;
 		} else {
 			/* Enable recording */
 			if (rr_ctrl.enabled == 0) {
@@ -2806,9 +2797,6 @@ static long kvm_dev_ioctl(struct file *filp,
 				RR_DLOG(INIT, "KVM_RR_CTRL, enabled with "
 					"ctrl: 0x%x, timer_value: %d",
 					rr_ctrl.ctrl, rr_ctrl.timer_value);
-
-				/* For compatibility */
-				kvm_record = true;
 			} else
 				r = -EBUSY;
 		}

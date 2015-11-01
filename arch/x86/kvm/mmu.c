@@ -1977,8 +1977,7 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 		if (sp->unsync && kvm_sync_page_transient(vcpu, sp))
 			break;
 
-		// XELATEX
-		if (kvm_record && sp->vcpu != vcpu)
+		if (vcpu->rr_info.enabled && sp->vcpu != vcpu)
 			continue;
 
 		mmu_page_add_parent_pte(vcpu, sp, parent_pte);
@@ -1998,7 +1997,6 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 		return sp;
 	sp->gfn = gfn;
 	sp->role = role;
-	// XELATEX
 	sp->vcpu = vcpu;
 	hlist_add_head(&sp->hash_link,
 		&vcpu->kvm->arch.mmu_page_hash[kvm_page_table_hashfn(gfn)]);

@@ -4325,12 +4325,6 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 	vmcs_writel(CR0_GUEST_HOST_MASK, ~0UL);
 	set_cr4_guest_host_mask(vmx);
 
-	// XELATEX
-	if (kvm_record) {
-		printk(KERN_ERR "error: %s will I come here?\n", __func__);
-		vmx_record_setup(vmx);
-	}
-
 	return 0;
 }
 
@@ -5540,7 +5534,7 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 	atomic_dec(&(kvm->tm_trap_count));
 	vcpu->is_trapped = true;
 
-	if (!kvm_record)
+	if (!rr_ctrl.enabled)
 		return -1;
 
 	// The first vcpu enter is treated as master, other as slaves
@@ -5669,7 +5663,6 @@ void tm_disable(struct kvm_vcpu *vcpu)
 			vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
 	}
 
-	kvm_record = false;
 	kvm->record_master = false;
 	kvm->tm_last_commit_vcpu = -1;
 	atomic_set(&kvm->tm_normal_commit, 1);
@@ -6338,7 +6331,7 @@ rollback:
 	re_bitmap_clear(vcpu->private_cb);
 	PROFILE_END(clear_bitmap_time);
 
-	if (!kvm_record) {
+	if (!rr_ctrl.enabled) {
 		goto record_disable;
 	}
 
