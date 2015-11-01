@@ -89,8 +89,6 @@ EXPORT_SYMBOL_GPL(rr_ctrl);
 // XELATEX
 bool kvm_record;
 EXPORT_SYMBOL_GPL(kvm_record);
-int kvm_record_type;
-EXPORT_SYMBOL_GPL(kvm_record_type);
 
 static __read_mostly struct preempt_ops kvm_preempt_ops;
 
@@ -2811,7 +2809,6 @@ static long kvm_dev_ioctl(struct file *filp,
 
 				/* For compatibility */
 				kvm_record = true;
-				kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
 			} else
 				r = -EBUSY;
 		}

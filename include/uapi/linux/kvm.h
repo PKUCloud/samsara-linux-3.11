@@ -1106,9 +1106,4 @@ struct kvm_assigned_msix_entry {
 	__u16 padding[3];
 };
 
-// XELATEX
-#define KVM_RECORD_PREEMPTION 0
-#define KVM_RECORD_TIMER 1
-#define KVM_RECORD_UNSYNC_PREEMPTION 2
-
 #endif /* __LINUX_KVM_H */
