@@ -1111,7 +1111,4 @@ struct kvm_assigned_msix_entry {
 #define KVM_RECORD_TIMER 1
 #define KVM_RECORD_UNSYNC_PREEMPTION 2
 
-#define KVM_RECORD_HARDWARE_WALK_MMU 1
-#define KVM_RECORD_HARDWARE_WALK_MEMSLOT 2
-
 #endif /* __LINUX_KVM_H */

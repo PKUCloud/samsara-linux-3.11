@@ -5592,9 +5592,7 @@ int __tm_commit(void *opaque)
 	}
 
 	// Commit pages
-	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
-			kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
-		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+	tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 	(kvm->tm_turn) ++;
 
 	// Reset variants
@@ -6311,9 +6309,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 	if (vcpu->is_recording) {
 		PROFILE_BEGIN(walk_mmu_time);
-		if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
-				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
-			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
 		PROFILE_END(walk_mmu_time);
 

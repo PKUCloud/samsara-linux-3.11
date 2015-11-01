@@ -1178,7 +1178,6 @@ extern bool kvm_rebooting;
 // XELATEX
 extern bool kvm_record;
 extern int kvm_record_type;
-extern int kvm_record_mode;
 
 struct kvm_device_ops;
 

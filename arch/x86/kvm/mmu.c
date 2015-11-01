@@ -2955,11 +2955,9 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 }
 
 // XELATEX
-static int tm_walk_mmu(struct kvm_vcpu *vcpu, int level)
+inline int tm_walk_mmu(struct kvm_vcpu *vcpu, int level)
 {
-	// Choose one between these two
-	if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU)
-		mmu_walk_spt(vcpu);
+	mmu_walk_spt(vcpu);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(tm_walk_mmu);

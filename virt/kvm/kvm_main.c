@@ -91,8 +91,6 @@ bool kvm_record;
 EXPORT_SYMBOL_GPL(kvm_record);
 int kvm_record_type;
 EXPORT_SYMBOL_GPL(kvm_record_type);
-int kvm_record_mode;
-EXPORT_SYMBOL_GPL(kvm_record_mode);
 
 static __read_mostly struct preempt_ops kvm_preempt_ops;
 
@@ -2814,7 +2812,6 @@ static long kvm_dev_ioctl(struct file *filp,
 				/* For compatibility */
 				kvm_record = true;
 				kvm_record_type = KVM_RECORD_UNSYNC_PREEMPTION;
-				kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MMU;
 			} else
 				r = -EBUSY;
 		}
