@@ -6032,7 +6032,6 @@ restart:
 #endif
 	}
 
-	vcpu->rr_state = 0;
 	kvm_x86_ops->tlb_flush(vcpu);
 	preempt_disable();
 
@@ -6140,24 +6139,11 @@ restart:
 	// For now we do this only after we begin recording, that is vcpu->is_recording is true */
 	if (vcpu->rr_info.enabled) {
 		vcpu->need_chkpt = 0;
-		vcpu->rr_state = 0;
 
 		PROFILE_BEGIN(total_commit_time);
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		PROFILE_END(total_commit_time);
-		// Only for test
-		/*
-		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR) {
-			// r = ((++vcpu->nr_test) % 2 == 0);
-			++vcpu->nr_test;
-			if (vcpu->nr_test % 100 == 99) {
-				r = KVM_RR_ROLLBACK;
-			} else r = KVM_RR_COMMIT;
-		}
-		*/
-		// XELATEX TEST
 		if (r == KVM_RR_COMMIT) {
-			++vcpu->nr_test;
 			vcpu->need_chkpt = 1;
 			commit_count++;
 			kvm_x86_ops->tlb_flush(vcpu);
@@ -7099,19 +7085,13 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	kvm_pmu_init(vcpu);
 
 	// XELATEX
-	vcpu->is_kicked = false;
-	INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
 	INIT_LIST_HEAD(&(vcpu->commit_again_gfn_list));
-	vcpu->is_trapped = false;
 	//rsr-debug
 	vcpu->need_chkpt = false;
 	//end rsr-debug
 	vcpu->nr_vmexit = 0;
 	vcpu->nr_sync = 0;
 	vcpu->nr_conflict = 0;
-	vcpu->access_size = 1;
-	vcpu->dirty_size = 1;
-	vcpu->conflict_size = 1;
 	re_bitmap_init(&vcpu->access_bitmap, true);
 	re_bitmap_init(&vcpu->conflict_bitmap_1, false);
 	re_bitmap_init(&vcpu->conflict_bitmap_2, false);
@@ -7121,18 +7101,12 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->public_cb = &vcpu->conflict_bitmap_1;
 	vcpu->private_cb = &vcpu->conflict_bitmap_2;
-	vcpu->nr_test = 0;
 	vcpu->need_dma_check = 0;
 	vcpu->tm_version = 0;
 	vcpu->need_check_chunk_info = 0;
 	vcpu->chunk_info.vcpu_id = vcpu->vcpu_id;
 	vcpu->chunk_info.state = RR_CHUNK_IDLE;
 
-	//kvm_vcpu_checkpoint_rollback rsr
-	vcpu->check_rollback = 0;
-	//end kvm_vcpu_checkpoint_rollback rsr
-
-	/* Tamlok */
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages = 0;
 	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
@@ -7142,7 +7116,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->arch.nr_rollback_pages = 0;
 #endif
 	vcpu->need_memory_commit = 0;
-	vcpu->rr_state = 0;
 	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);
 	vcpu->exclusive_commit = 0;
 	vcpu->nr_rollback = 0;
@@ -7180,15 +7153,9 @@ void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 // XELATEX
 void kvm_arch_init_record(struct kvm *kvm)
 {
-	kvm->record_master = false;
-	kvm->tm_turn = 0;
 	mutex_init(&(kvm->tm_lock));
-	kvm->tm_timer_set = false;
-	kvm->tm_timer_ready = false;
-	spin_lock_init(&(kvm->tm_timer_lock));
 	spin_lock_init(&(kvm->chunk_list_lock));
 	INIT_LIST_HEAD(&(kvm->chunk_list));
-	kvm->timestamp = 0;
 	kvm->tm_last_commit_vcpu = -1;
 	kvm->tm_dma_holding_sem = false;
 	atomic_set(&kvm->tm_normal_commit, 1);

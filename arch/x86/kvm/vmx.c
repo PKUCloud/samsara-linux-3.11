@@ -5558,20 +5558,13 @@ void tm_disable(struct kvm_vcpu *vcpu)
 			vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
 	}
 
-	kvm->record_master = false;
 	kvm->tm_last_commit_vcpu = -1;
 	atomic_set(&kvm->tm_normal_commit, 1);
 	atomic_set(&kvm->tm_get_version, 0);
 	atomic_set(&kvm->tm_put_version, 1);
-	vcpu->is_kicked = false;
-	vcpu->is_trapped = false;
-	kvm->tm_turn = 0;
 	vcpu->nr_vmexit = 0;
 	vcpu->nr_sync = 0;
 	vcpu->nr_conflict = 0;
-	vcpu->access_size = 1;
-	vcpu->dirty_size = 1;
-	vcpu->conflict_size = 1;
 	vcpu->exclusive_commit = 0;
 	vcpu->nr_rollback = 0;
 	vcpu->tm_version = 0;
@@ -5588,13 +5581,6 @@ void tm_disable(struct kvm_vcpu *vcpu)
 #ifdef RR_ROLLBACK_PAGES
 	kvm_record_clear_rollback_pages(vcpu);
 #endif
-
-	/*
-	up(&(kvm->tm_enter_sem));
-	for (i=0; i<online_vcpus - 1; i++)
-		up(&(kvm->tm_exit_sem));
-	*/
-
 	vmx->preemption_begin = false;
 	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
 	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
@@ -6075,7 +6061,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 	if (vcpu->rr_info.enabled) {
 		PROFILE_BEGIN(walk_mmu_time);
 		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-		kvm->timestamp ++;
 		PROFILE_END(walk_mmu_time);
 
 		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
@@ -7577,7 +7562,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 				vcpu->vcpu_id, __func__);
 		} else if (ret == 1) {
 			vcpu->need_memory_commit = 1;
-			vcpu->rr_state = 1;
 			vcpu->need_check_chunk_info = 1;
 			return KVM_RR_COMMIT;
 		} else {
@@ -7600,7 +7584,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			printk(KERN_ERR "error: %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
 		} else if (ret == 1) {
 			vcpu->need_memory_commit = 1;
-			vcpu->rr_state = 1;
 			return KVM_RR_COMMIT;
 		} else {
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);

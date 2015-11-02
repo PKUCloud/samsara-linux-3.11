@@ -317,14 +317,10 @@ struct kvm_vcpu {
 	bool preempted;
 	struct kvm_vcpu_arch arch;
 	// XELATEX
-	bool is_kicked;
-	struct list_head commit_sptep_list;
 	struct list_head commit_again_gfn_list;
-	bool is_trapped;
 	unsigned long long nr_vmexit;
 	unsigned long long nr_sync;
 	unsigned long long nr_conflict;
-	bool is_conflict;
 	struct region_bitmap access_bitmap;
 	struct region_bitmap dirty_bitmap;
 	struct region_bitmap conflict_bitmap_1;	/* Double buffers */
@@ -332,13 +328,9 @@ struct kvm_vcpu {
 	struct region_bitmap DMA_access_bitmap;
 	struct region_bitmap *public_cb;	/* Public conflict bitmap */
 	struct region_bitmap *private_cb;	/* Private conflict bitmap */
-	gfn_t access_size;
-	gfn_t dirty_size;
-	gfn_t conflict_size;
 	struct list_head events_list;
 	struct mutex events_list_lock;
 	int need_chkpt;
-	int nr_test;
 	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
 	int nr_rollback;	/* Number of continuous rollback */
 
@@ -347,16 +339,12 @@ struct kvm_vcpu {
 	 * before we enter guest.
 	 */
 	int need_check_chunk_info;
-	int rr_state;
 	int is_early_rb;
 	int need_dma_check;
 	/* Used to decide if this vcpu can go into guest or not, init to 0 */
 	int tm_version;
 	struct chunk_info chunk_info;
-	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
-	int check_rollback;
-	//end kvm_vcpu_checkpoint_rollback rsr
 
 	struct vcpu_rr_states rr_states;
 
@@ -497,19 +485,9 @@ struct kvm {
 	long tlbs_dirty;
 	struct list_head devices;
 	// XELATEX
-	bool record_master;
 	struct mutex tm_lock;
-	struct spinlock tm_timer_lock;
-	struct semaphore tm_enter_sem;
-	struct semaphore tm_exit_sem;
 	struct semaphore tm_dma_sem;
 	atomic_t tm_dma;
-	atomic_t finished_slaves;
-	struct hrtimer tm_timer;
-	bool tm_timer_set;
-	bool tm_timer_ready;
-	ktime_t tm_record_time;
-	atomic_t tm_trap_count;
 	/* Used to decide if one vcpu can go into guest or not */
 	atomic_t tm_get_version; /* Init to 0 */
 	atomic_t tm_put_version; /* Init to 1 */
@@ -520,10 +498,6 @@ struct kvm {
 	struct list_head chunk_list;
 	spinlock_t chunk_list_lock;
 
-	union {
-		unsigned long long timestamp;
-		unsigned long long tm_turn;
-	};
 	int tm_last_commit_vcpu;
 	/* 1 if we can commit normally, otherwise someone is in exclusive commit status */
 	atomic_t tm_normal_commit;
