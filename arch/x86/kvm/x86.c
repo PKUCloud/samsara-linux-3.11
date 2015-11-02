@@ -6008,7 +6008,7 @@ restart:
 	 * fail at the first try to enter guest and we need to commit memory
 	 * again until it enter guest.
 	 */
-	if (vcpu->is_recording && vcpu->need_memory_commit) {
+	if (vcpu->rr_info.enabled && vcpu->need_memory_commit) {
 		// kvm_record_clean_ept(vcpu);
 		// kvm_x86_ops->tm_memory_commit(vcpu);
 		// kvm_x86_ops->tlb_flush(vcpu);
@@ -6020,7 +6020,7 @@ restart:
 	/* Check if we need to wait other vcpus to finish commit/rollback
 	 * memory before we enter guest.
 	 */
-	if (vcpu->is_recording && vcpu->need_check_chunk_info) {
+	if (vcpu->rr_info.enabled && vcpu->need_check_chunk_info) {
 		is_rollback = vcpu->chunk_info.action == KVM_RR_ROLLBACK;
 		PROFILE_BEGIN(wait_time);
 		kvm_x86_ops->tm_chunk_list_check_and_del(vcpu);
@@ -6138,7 +6138,7 @@ restart:
 		kvm_lapic_sync_from_vapic(vcpu);
 
 	// For now we do this only after we begin recording, that is vcpu->is_recording is true */
-	if (vcpu->is_recording) {
+	if (vcpu->rr_info.enabled) {
 		vcpu->need_chkpt = 0;
 		vcpu->rr_state = 0;
 
@@ -7103,7 +7103,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&(vcpu->commit_sptep_list));
 	INIT_LIST_HEAD(&(vcpu->commit_again_gfn_list));
 	vcpu->is_trapped = false;
-	vcpu->is_recording = false;
 	//rsr-debug
 	vcpu->need_chkpt = false;
 	//end rsr-debug

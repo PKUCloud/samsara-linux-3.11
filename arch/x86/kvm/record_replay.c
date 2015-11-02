@@ -94,8 +94,6 @@ static int __rr_ape_init(struct kvm_vcpu *vcpu)
 
 	rr_ops->ape_vmx_setup(vcpu->rr_info.timer_value);
 
-	vcpu->is_recording = true;
-
 	RR_DLOG(INIT, "vcpu=%d enabled, preemption_timer=%lu, root_hpa=0x%llx",
 		vcpu->vcpu_id, vcpu->rr_info.timer_value,
 		vcpu->arch.mmu.root_hpa);

@@ -5565,7 +5565,6 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	atomic_set(&kvm->tm_put_version, 1);
 	vcpu->is_kicked = false;
 	vcpu->is_trapped = false;
-	vcpu->is_recording = false;
 	kvm->tm_turn = 0;
 	vcpu->nr_vmexit = 0;
 	vcpu->nr_sync = 0;
@@ -5605,20 +5604,6 @@ int tm_detect_conflict(struct region_bitmap *access_bm,
 		       struct region_bitmap *conflict_bm)
 {
 	return re_bitmap_intersects(conflict_bm, access_bm);	/* Notice the order */
-}
-
-int tm_unsync_init(void *opaque)
-{
-	struct kvm_vcpu *vcpu = (struct kvm_vcpu *)opaque;
-
-	/* Should have some bug here */
-	vcpu->kvm->arch.mmu_valid_gen++;
-	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-	kvm_mmu_unload(vcpu);
-	kvm_mmu_reload(vcpu);
-	//kvm_record_count = KVM_RECORD_COUNT - 1;
-	vcpu->is_recording = true;
-	return 0;
 }
 
 extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
@@ -6087,7 +6072,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 	int commit = 1;
 
-	if (vcpu->is_recording) {
+	if (vcpu->rr_info.enabled) {
 		PROFILE_BEGIN(walk_mmu_time);
 		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
@@ -7537,7 +7522,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	vcpu->need_memory_commit = 0;
 	vcpu->need_check_chunk_info = 0;
 	// First time, we do not handle it here.
-	if (!vcpu->is_recording) {
+	if (!vcpu->rr_info.enabled) {
 		printk(KERN_ERR "error: vcpu %d %s when vcpu->is_recording is false\n",
 			   vcpu->vcpu_id, __func__);
 		return KVM_RR_SKIP;

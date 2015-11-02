@@ -325,7 +325,6 @@ struct kvm_vcpu {
 	unsigned long long nr_sync;
 	unsigned long long nr_conflict;
 	bool is_conflict;
-	bool is_recording;
 	struct region_bitmap access_bitmap;
 	struct region_bitmap dirty_bitmap;
 	struct region_bitmap conflict_bitmap_1;	/* Double buffers */

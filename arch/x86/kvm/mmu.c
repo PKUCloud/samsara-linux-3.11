@@ -2846,7 +2846,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
 			pte_access = ACC_ALL;
-			if (vcpu->is_recording && !write) {
+			if (vcpu->rr_info.enabled && !write) {
 				/* Read trap
 				 * Do not give the write mask so that vcpu will trap when
 				 * it writes to this page next time.
@@ -2867,7 +2867,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			//direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
 
-			if (vcpu->is_recording &&
+			if (vcpu->rr_info.enabled &&
 				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
 				if (!write) {
 				} else {
