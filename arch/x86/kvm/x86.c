@@ -5942,7 +5942,7 @@ restart:
 	}
 
 	// XELATEX
-	if (vcpu->rr_info.enabled && vcpu->need_chkpt) {
+	if (rr_check_request(RR_REQ_CHECKPOINT, &vcpu->rr_info)) {
 		mutex_lock(&(vcpu->events_list_lock));
 		if (vcpu->guest_fpu_loaded) {
 			/* We need to read back the value from hardware fpu, that is
@@ -6124,10 +6124,10 @@ restart:
 
 	// For now we do this only after we begin recording, that is vcpu->is_recording is true */
 	if (vcpu->rr_info.enabled) {
-		vcpu->need_chkpt = 0;
+		rr_clear_all_request(&vcpu->rr_info);
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		if (r == KVM_RR_COMMIT) {
-			vcpu->need_chkpt = 1;
+			rr_make_request(RR_REQ_CHECKPOINT, &vcpu->rr_info);
 			commit_count++;
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
@@ -7065,9 +7065,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 
 	// XELATEX
 	INIT_LIST_HEAD(&(vcpu->commit_again_gfn_list));
-	//rsr-debug
-	vcpu->need_chkpt = false;
-	//end rsr-debug
 	vcpu->nr_vmexit = 0;
 	vcpu->nr_sync = 0;
 	vcpu->nr_conflict = 0;

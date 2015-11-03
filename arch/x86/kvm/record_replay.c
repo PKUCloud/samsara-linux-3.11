@@ -134,7 +134,7 @@ int rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	RR_DLOG(INIT, "vcpu=%d start", vcpu->vcpu_id);
 	ret = __rr_vcpu_sync(vcpu, __rr_ape_init, __rr_ape_init);
 	if (!ret)
-		vcpu->need_chkpt = 1;
+		rr_make_request(RR_REQ_CHECKPOINT, &vcpu->rr_info);
 	else
 		RR_ERR("error: vcpu=%d fail to __rr_vcpu_sync()",
 		       vcpu->vcpu_id);

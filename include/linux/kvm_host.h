@@ -330,7 +330,6 @@ struct kvm_vcpu {
 	struct region_bitmap *private_cb;	/* Private conflict bitmap */
 	struct list_head events_list;
 	struct mutex events_list_lock;
-	int need_chkpt;
 	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
 	int nr_rollback;	/* Number of continuous rollback */
 
