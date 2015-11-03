@@ -1,24 +1,6 @@
 #ifndef __RR_PROFILE_H
 #define __RR_PROFILE_H
 
-
-// Profile Switch
-#define RR_PROFILE
-//#define RR_PROFILE_CONFLICT
-
-#ifdef RR_PROFILE
-#define PROFILE_BEGIN(v)   {uint64_t v##_val = rr_rdtsc();
-#define PROFILE_END(v)     vcpu->rr_states.profile_##v += calculate_tsc(v##_val);}
-#define PROFILE_CALCULATE(v) kvm->vcpus[0]->rr_states.profile_##v += \
-                             kvm->vcpus[i]->rr_states.profile_##v;
-#define PROFILE_PRINT(v)     printk(KERN_ERR "PROFILE - "#v"=%llu\n", vcpu->rr_states.profile_##v);
-#else
-#define PROFILE_BEGIN(v) {}
-#define PROFILE_END(v) {}
-#define PROFILE_CALCULATE(v) {}
-#define PROFILE_PRINT(v) {}
-#endif
-
 // 2G mem is 2G/4K=512K
 // 500M mem is 128K
 #define TM_BITMAP_SIZE 1024*1024
@@ -45,39 +27,5 @@
  * commit adding kvm.chunk_list.
  */
 #define RR_ROLLBACK_PAGES
-
-struct vmexit_states {
-	uint64_t num;
-	uint64_t time;
-};
-
-struct vcpu_rr_states {
-	uint64_t profile_total_commit_time;
-	uint64_t profile_tm_lock_time, profile_tm_rwlock_time, profile_wait_time, profile_exclusive_time;
-	uint64_t profile_detect_conflict_time, profile_set_dirty_time, profile_memory_time;
-	uint64_t profile_clear_bitmap_time, profile_clear_dma_bitmap_time;
-	uint64_t profile_walk_mmu_time;
-	uint64_t profile_total_chunk_size, profile_chunk_num;
-	int exit_reason;
-};
-
-static inline uint64_t rr_rdtsc(void)
-{
-	unsigned int low, high;
-
-	asm volatile("rdtsc" : "=a" (low), "=d" (high));
-
-	return low | ((unsigned long long)high) << 32;
-}
-
-static inline uint64_t calculate_tsc(uint64_t val)
-{
-       uint64_t tsc = rr_rdtsc();
-       if (tsc < val) {
-               return 0xffffffffffffffffUL - val + tsc;
-       }
-       else
-               return tsc - val;
-}
 
 #endif

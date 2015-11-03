@@ -346,8 +346,6 @@ struct kvm_vcpu {
 	struct chunk_info chunk_info;
 	struct CPUX86State vcpu_checkpoint;
 
-	struct vcpu_rr_states rr_states;
-
 	/* Record and replay */
 	struct rr_vcpu_info rr_info;
 };

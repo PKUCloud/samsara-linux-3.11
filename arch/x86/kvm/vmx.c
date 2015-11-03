@@ -5513,49 +5513,10 @@ void tm_disable(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct kvm *kvm = vcpu->kvm;
-	int i;
-	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 
 	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu,"
 			"nr_vmexit=%llu, nr_conflict=%llu\n",
 			vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
-	if (vcpu->vcpu_id == 0) {
-		for (i=1; i<online_vcpus; i++) {
-			PROFILE_CALCULATE(total_commit_time);
-			PROFILE_CALCULATE(tm_lock_time);
-			PROFILE_CALCULATE(tm_rwlock_time);
-			PROFILE_CALCULATE(wait_time);
-			PROFILE_CALCULATE(exclusive_time);
-			PROFILE_CALCULATE(detect_conflict_time);
-			PROFILE_CALCULATE(set_dirty_time);
-			PROFILE_CALCULATE(memory_time);
-			PROFILE_CALCULATE(clear_bitmap_time);
-			PROFILE_CALCULATE(clear_dma_bitmap_time);
-			PROFILE_CALCULATE(walk_mmu_time);
-			PROFILE_CALCULATE(total_chunk_size);
-			PROFILE_CALCULATE(chunk_num);
-			vcpu->nr_sync += kvm->vcpus[i]->nr_sync;
-			vcpu->nr_vmexit += kvm->vcpus[i]->nr_vmexit;
-			vcpu->nr_conflict += kvm->vcpus[i]->nr_conflict;
-		}
-		PROFILE_PRINT(total_commit_time);
-		PROFILE_PRINT(tm_lock_time);
-		PROFILE_PRINT(tm_rwlock_time);
-		PROFILE_PRINT(wait_time);
-		PROFILE_PRINT(exclusive_time);
-		PROFILE_PRINT(detect_conflict_time);
-		PROFILE_PRINT(set_dirty_time);
-		PROFILE_PRINT(memory_time);
-		PROFILE_PRINT(clear_bitmap_time);
-		PROFILE_PRINT(clear_dma_bitmap_time);
-		PROFILE_PRINT(walk_mmu_time);
-		PROFILE_PRINT(total_chunk_size);
-		PROFILE_PRINT(chunk_num);
-		printk(KERN_ERR "PROFILE - AVG chunk size=%llu\n",
-			vcpu->rr_states.profile_total_chunk_size/vcpu->rr_states.profile_chunk_num);
-		printk(KERN_ERR "PROFILE - nr_sync=%llu, nr_vmexit=%llu, nr_conflict=%llu\n",
-			vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
-	}
 
 	kvm->tm_last_commit_vcpu = -1;
 	atomic_set(&kvm->tm_normal_commit, 1);
@@ -6055,12 +6016,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 	int commit = 1;
 
 	if (vcpu->rr_info.enabled) {
-		PROFILE_BEGIN(walk_mmu_time);
 		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-		PROFILE_END(walk_mmu_time);
 
 		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
-			PROFILE_BEGIN(exclusive_time);
 			/* Now anothter vcpu is in exclusive commit state */
 			if (wait_event_interruptible(kvm->tm_exclusive_commit_que,
 			    atomic_read(&kvm->tm_normal_commit) == 1)) {
@@ -6068,38 +6026,25 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 					  __func__);
 				return -1;
 			}
-			PROFILE_END(exclusive_time);
 		}
 
-		PROFILE_BEGIN(tm_rwlock_time);
 		down_read(&(kvm->tm_rwlock));
-		PROFILE_END(tm_rwlock_time);
-		PROFILE_BEGIN(tm_lock_time);
 		mutex_lock(&(kvm->tm_lock));
-		PROFILE_END(tm_lock_time);
 
 		// Wait for DMA finished
 		//tm_wait_DMA(vcpu);
 
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
-			PROFILE_BEGIN(detect_conflict_time);
 			// Detect conflict
-			#ifdef RR_PROFILE_CONFLICT
-			if (vcpu->is_early_rb ||
-					tm_detect_and_print_conflict(vcpu, &vcpu->access_bitmap, 
-						vcpu->public_cb, TM_BITMAP_SIZE)) {
-			#else
 			if (vcpu->is_early_rb ||
 			    tm_detect_conflict(&vcpu->access_bitmap,
 					       vcpu->public_cb) ||
 			    tm_detect_conflict(&vcpu->access_bitmap,
 					       &vcpu->DMA_access_bitmap)) {
-			#endif
 				commit = 0;
 				vcpu->nr_conflict++;
 				vcpu->is_early_rb = 0;
 			}
-			PROFILE_END(detect_conflict_time);
 		}
 
 		if (commit) {
@@ -6113,7 +6058,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				commit = 0;
 				goto rollback;
 			}
-			PROFILE_BEGIN(set_dirty_time);
 			// Set dirty bit
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
@@ -6121,7 +6065,6 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				re_bitmap_or(kvm->vcpus[i]->public_cb,
 					     &vcpu->dirty_bitmap);
 			}
-			PROFILE_END(set_dirty_time);
 
 			/* Commit here in the lock */
 			// tm_memory_commit(vcpu);
@@ -6152,16 +6095,13 @@ rollback:
 		swap(vcpu->public_cb, vcpu->private_cb);
 		mutex_unlock(&(kvm->tm_lock));
 
-		PROFILE_BEGIN(memory_time);
 		if (commit) {
 			tm_memory_commit(vcpu);
 		} else tm_memory_rollback(vcpu);
-		PROFILE_END(memory_time);
 
 		// tm_check_version(vcpu);
 		tm_chunk_list_set_state(vcpu, RR_CHUNK_FINISHED);
 
-		PROFILE_BEGIN(clear_dma_bitmap_time);
 		// Clear DMA bitmap
 		if (atomic_read(&(kvm->tm_dma)) == 0)
 			re_bitmap_clear(&vcpu->DMA_access_bitmap);
@@ -6169,7 +6109,6 @@ rollback:
 			RR_ERR("error: vcpu=%d should not come here\n",
 			       vcpu->vcpu_id);
 		// mutex_unlock(&(kvm->tm_lock));
-		PROFILE_END(clear_dma_bitmap_time);
 		up_read(&(kvm->tm_rwlock));
 
 	} else {
@@ -6178,12 +6117,10 @@ rollback:
 			  vcpu->vcpu_id, __func__);
 		return -1;
 	}
-	PROFILE_BEGIN(clear_bitmap_time);
 	// Reset bitmaps
 	re_bitmap_clear(&vcpu->access_bitmap);
 	re_bitmap_clear(&vcpu->dirty_bitmap);
 	re_bitmap_clear(vcpu->private_cb);
-	PROFILE_END(clear_bitmap_time);
 
 	if (!rr_ctrl.enabled) {
 		goto record_disable;
@@ -6232,9 +6169,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 		return 0;
 	}
 
-	PROFILE_BEGIN(tm_lock_time);
 	mutex_lock(&kvm->tm_lock);
-	PROFILE_END(tm_lock_time);
 	/* Spread the dirty_bitmap to other vcpus's conflict_bitmap */
 	for (i = 0; i < online_vcpus; ++i) {
 		if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
@@ -6246,10 +6181,8 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	//	    TM_BITMAP_SIZE);
 	swap(vcpu->private_cb, vcpu->public_cb);
 
-	PROFILE_BEGIN(memory_time);
 	/* Commit memory here */
 	tm_memory_commit(vcpu);
-	PROFILE_END(memory_time);
 
 	//bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 	mutex_unlock(&kvm->tm_lock);
@@ -7481,12 +7414,6 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static inline void rr_profile_chunk_size(struct kvm_vcpu *vcpu)
-{
-	vcpu->rr_states.profile_chunk_num ++;
-	vcpu->rr_states.profile_total_chunk_size += rr_ctrl.timer_value - vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
-}
-
 static int vmx_tm_commit(struct kvm_vcpu *vcpu)
 {
 	return tm_unsync_commit(vcpu, 1);
@@ -7549,9 +7476,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	#endif
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
-		#ifdef RR_PROFILE
-		rr_profile_chunk_size(vcpu);
-		#endif
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
