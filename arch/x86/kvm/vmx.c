@@ -5504,7 +5504,6 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 
 extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
 
-extern void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu);
 void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu);
 #ifdef RR_ROLLBACK_PAGES
 void kvm_record_clear_rollback_pages(struct kvm_vcpu *vcpu);
@@ -5576,7 +5575,6 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	re_bitmap_destroy(&vcpu->dirty_bitmap);
 	re_bitmap_destroy(&vcpu->DMA_access_bitmap);
 
-	kvm_record_clear_ept_mirror(vcpu);
 	kvm_record_clear_holding_pages(vcpu);
 #ifdef RR_ROLLBACK_PAGES
 	kvm_record_clear_rollback_pages(vcpu);
@@ -5764,8 +5762,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 */
 }
 #endif
-
-extern void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete);
 
 #ifndef RR_HOLDING_PAGES
 /* Tamlok

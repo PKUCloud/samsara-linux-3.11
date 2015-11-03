@@ -5869,8 +5869,6 @@ static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 extern int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map);
-extern void kvm_record_make_ept_mirror(struct kvm_vcpu *vcpu);
-extern void kvm_record_check_ept_mirror(struct kvm_vcpu *vcpu);
 extern void kvm_record_clean_ept(struct kvm_vcpu *vcpu);
 
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
@@ -5882,7 +5880,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	struct rr_event *e;
 	struct rr_event *tmp;
 	static u64 commit_count;
-	static int mirror_flag;
 	bool is_rollback;
 
 restart:
@@ -6062,13 +6059,6 @@ restart:
 		goto cancel_injection;
 	}
 
-	if (vcpu->rr_info.enabled && mirror_flag == 1) {
-		mirror_flag = 2;
-		preempt_enable();
-		kvm_record_make_ept_mirror(vcpu);
-		preempt_disable();
-	}
-
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx); // RCU is a synchronization mechanism added to linux kernel during 2.5
 
 	if (req_immediate_exit)
@@ -6150,10 +6140,6 @@ restart:
 		} else if (r == KVM_RR_ROLLBACK) {
 			kvm_x86_ops->tlb_flush(vcpu);
 			vcpu->need_memory_commit = 0;
-			if (vcpu->rr_info.enabled && mirror_flag == 2) {
-				mirror_flag = 0;
-				kvm_record_check_ept_mirror(vcpu);
-			}
 			if (vcpu->guest_fpu_loaded) {
 				/* Unload fpu from the hardware before we rollback fpu,
 				 * or kvm may override the value we rollback.
@@ -7116,7 +7102,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->arch.nr_rollback_pages = 0;
 #endif
 	vcpu->need_memory_commit = 0;
-	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);
 	vcpu->exclusive_commit = 0;
 	vcpu->nr_rollback = 0;
 

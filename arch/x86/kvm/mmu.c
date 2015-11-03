@@ -2749,50 +2749,6 @@ void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn)
 EXPORT_SYMBOL_GPL(kvm_record_spte_check_pfn);
 
 /* Tamlok
- * Just add write trap page to vcpu->arch.private_pages, not replacing it
- * with private page yet.
- * Used for test.
- */
-void kvm_record_add_private_memory_stub(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn)
-{
-	struct kvm_private_mem_page *private_mem_page;
-
-	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_KERNEL);
-	private_mem_page->original_pfn = pfn;
-	private_mem_page->private_pfn = 0;
-	private_mem_page->sptep = sptep;
-
-	/* Add to the list */
-	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
-	vcpu->arch.nr_private_pages++;
-}
-
-/* Tamlok
- * Show the elements of vcpu->arch.private_pages and delete all the entries
- * if @delete is 1.
- * Used for test.
- */
-void kvm_record_show_private_memory_stub(struct kvm_vcpu *vcpu, int delete)
-{
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
-
-	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages
-		, link) {
-		if (delete) {
-			list_del(&private_page->link);
-			kfree(private_page);
-			vcpu->arch.nr_private_pages--;
-		}
-	}
-	if (delete) {
-		INIT_LIST_HEAD(&vcpu->arch.private_pages);
-	}
-}
-EXPORT_SYMBOL_GPL(kvm_record_show_private_memory_stub);
-
-
-/* Tamlok
  * Separate memory with copy-on-write
  * Alloc a new page to replace the original page and update the spte, then add
  * an item to vcpu->arch.private_pages list.
@@ -2931,8 +2887,6 @@ static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, 
 	}
 }
 
-void kvm_record_check_ept_ad(struct kvm_vcpu *vcpu);
-
 static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 {
 	int level = vcpu->arch.mmu.shadow_root_level;
@@ -2946,7 +2900,6 @@ static void mmu_walk_spt(struct kvm_vcpu *vcpu)
 			!vcpu->arch.mmu.direct_map)
 		--level;
 
-	//kvm_record_check_ept_ad(vcpu);
 	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
 }
 
@@ -2957,184 +2910,6 @@ inline int tm_walk_mmu(struct kvm_vcpu *vcpu, int level)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(tm_walk_mmu);
-
-void kvm_record_clear_ept_mirror(struct kvm_vcpu *vcpu)
-{
-	struct kvm_pte_page *pp;
-	struct kvm_pte_page *temp;
-	int count = 0;
-
-	if (list_empty(&vcpu->arch.ept_mirror))
-		return;
-	list_for_each_entry_safe(pp, temp, &vcpu->arch.ept_mirror,
-		link) {
-		if (!pp || !(pp->page)) {
-			printk(KERN_ERR "error: %s pp or pp->page is NULL\n", __func__);
-			return;
-		}
-		list_del(&pp->link);
-		kfree(pp->page);
-		kfree(pp);
-		count++;
-	}
-	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);
-}
-EXPORT_SYMBOL_GPL(kvm_record_clear_ept_mirror);
-
-static void kvm_record_ept_mirror_insert(struct kvm_vcpu *vcpu, gpa_t gpa,
-	u64 spte, hpa_t page_addr)
-{
-	struct kvm_pte_page *pte_page;
-	void *page;
-
-	pte_page = kmalloc(sizeof(*pte_page), GFP_KERNEL);
-	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!pte_page || !page) {
-		printk(KERN_ERR "error: %s fail to kmalloc for page or pte_page\n",
-			   __func__);
-		if (pte_page) {
-			kfree(pte_page);
-		}
-		return;
-	}
-	pte_page->gpa = gpa;
-	pte_page->spte = spte;
-	copy_page(page, __va(page_addr));
-	pte_page->page = page;
-	list_add_tail(&pte_page->link, &vcpu->arch.ept_mirror);
-}
-
-static void __mmu_walk_spt_mirror(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
-	int level, gpa_t gpa)
-{
-	u64 index;
-	gpa_t new_gpa;
-	hpa_t new_addr;
-	u64 *sptep;
-
-	if (level < PT_PAGE_TABLE_LEVEL)
-		return;
-	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
-		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (!is_shadow_present_pte(*sptep))
-			continue;
-		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
-		new_addr = *sptep & PT64_BASE_ADDR_MASK;
-		if (is_last_spte(*sptep, level)) {
-			kvm_record_ept_mirror_insert(vcpu, new_gpa, *sptep, new_addr);
-		} else
-			__mmu_walk_spt_mirror(vcpu , new_addr, level - 1, new_gpa);
-	}
-}
-
-/* Make an mirror of ept and contents of the page */
-void kvm_record_make_ept_mirror(struct kvm_vcpu *vcpu)
-{
-	int level = vcpu->arch.mmu.shadow_root_level;
-	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-
-	if (shadow_addr == INVALID_PAGE) {
-		printk(KERN_ERR "error: %s mmu.root_hpa==INVALID_PAGE\n", __func__);
-		return;
-	}
-	kvm_record_clear_ept_mirror(vcpu);
-	__mmu_walk_spt_mirror(vcpu, shadow_addr, level, 0);
-}
-EXPORT_SYMBOL_GPL(kvm_record_make_ept_mirror);
-
-static bool __compare_page(void *page_a, void *page_b)
-{
-	int i;
-	char *a = page_a;
-	char *b = page_b;
-
-	for (i = 0; i < PAGE_SIZE; ++i) {
-		if (a[i] != b[i]) {
-			return false;
-		}
-	}
-	return true;
-}
-
-/* Must call this function with gpa in ascending order */
-static void kvm_record_ept_mirror_check_one(struct kvm_vcpu *vcpu, gpa_t gpa,
-	u64 spte, hpa_t page_addr)
-{
-	struct kvm_pte_page *pte_page;
-	struct kvm_pte_page *temp;
-	void *page;
-
-	if (list_empty(&vcpu->arch.ept_mirror)) {
-		RR_ERR("error: vcpu=%d mirror has no item with gpa 0x%llx "
-			"spte 0x%llx", vcpu->vcpu_id,
-			gpa, spte);
-		return;
-	}
-
-	list_for_each_entry_safe(pte_page, temp, &vcpu->arch.ept_mirror, link) {
-		if (pte_page->gpa == gpa) {
-			list_del(&pte_page->link);
-			if (pte_page->spte != spte) {
-				RR_ERR("error: gpa 0x%llx mapped spte 0x%llx in mirror but "
-					"0x%llx now", gpa, pte_page->spte, spte);
-			} else {
-				page = __va(page_addr);
-				if (!__compare_page(pte_page->page, page)) {
-					RR_ERR("error: content of the page mismatch gpa "
-						"0x%llx spte 0x%llx", gpa, spte);
-				}
-			}
-
-			/* Free memory */
-			kfree(pte_page->page);
-			kfree(pte_page);
-			return;
-		} else if (pte_page->gpa < gpa) {
-			list_del(&pte_page->link);
-			RR_ERR("error: mismatch item in mirror gpa 0x%llx spte "
-				"0x%llx", pte_page->gpa, pte_page->spte);
-			kfree(pte_page->page);
-			kfree(pte_page);
-		} else {
-			RR_ERR("error: mirror has no item with gpa 0x%llx "
-						 "spte 0x%llx", gpa, spte);
-			return;
-		}
-	}
-}
-
-static void __mmu_walk_spt_check(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
-	int level, gpa_t gpa)
-{
-	u64 index;
-	gpa_t new_gpa;
-	hpa_t new_addr;
-	u64 *sptep;
-
-	if (level < PT_PAGE_TABLE_LEVEL)
-		return;
-	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
-		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (!is_shadow_present_pte(*sptep))
-			continue;
-		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
-		new_addr = *sptep & PT64_BASE_ADDR_MASK;
-		if (is_last_spte(*sptep, level)) {
-			kvm_record_ept_mirror_check_one(vcpu, new_gpa, *sptep, new_addr);
-		} else
-			__mmu_walk_spt_check(vcpu , new_addr, level - 1, new_gpa);
-	}
-}
-
-/* Check if the ept is identical to the mirror made before */
-void kvm_record_check_ept_mirror(struct kvm_vcpu *vcpu)
-{
-	int level = vcpu->arch.mmu.shadow_root_level;
-	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-
-	__mmu_walk_spt_check(vcpu, shadow_addr, level, 0);
-}
-EXPORT_SYMBOL_GPL(kvm_record_check_ept_mirror);
 
 static void __mmu_walk_spt_clean(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
 	int level, gpa_t gpa)
@@ -3182,46 +2957,6 @@ void kvm_record_clean_ept(struct kvm_vcpu *vcpu)
 	__mmu_walk_spt_clean(vcpu, shadow_addr, level, 0);
 }
 EXPORT_SYMBOL_GPL(kvm_record_clean_ept);
-
-static void __mmu_walk_spt_check_ad(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
-									int level, gpa_t gpa, int accessed)
-{
-	u64 index;
-	gpa_t new_gpa;
-	hpa_t new_addr;
-	u64 *sptep;
-
-	if (level < PT_PAGE_TABLE_LEVEL)
-		return;
-
-	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
-		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (!is_shadow_present_pte(*sptep))
-			continue;
-		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
-		new_addr = *sptep & PT64_BASE_ADDR_MASK;
-
-		if ((*sptep & VMX_EPT_ACCESS_BIT) && (accessed == 0)) {
-			printk(KERN_ERR "error: vcpu %d mismatch ad bit spte 0x%llx gpa 0x%llx level %d\n",
-				  vcpu->vcpu_id, *sptep, new_gpa, level);
-		}
-
-		if (!is_last_spte(*sptep, level)) {
-			__mmu_walk_spt_check_ad(vcpu, new_addr, level - 1, new_gpa,
-									 accessed && (*sptep & VMX_EPT_ACCESS_BIT));
-		}
-	}
-}
-
-/* Check the if the Access-bits are consistent through all the 4 levels ept */
-void kvm_record_check_ept_ad(struct kvm_vcpu *vcpu)
-{
-	int level = vcpu->arch.mmu.shadow_root_level;
-	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-	__mmu_walk_spt_check_ad(vcpu, shadow_addr, level, 0, 1);
-}
-EXPORT_SYMBOL_GPL(kvm_record_check_ept_ad);
-
 
 static void kvm_send_hwpoison_signal(unsigned long address, struct task_struct *tsk)
 {
