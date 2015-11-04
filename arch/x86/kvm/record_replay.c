@@ -3,6 +3,7 @@
 #include <linux/delay.h>
 #include <asm/logger.h>
 #include <asm/vmx.h>
+#include <asm/checkpoint_rollback.h>
 
 #include "mmu.h"
 
@@ -115,6 +116,8 @@ void rr_vcpu_info_init(struct rr_vcpu_info *rr_info)
 	rr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
 	rr_info->requests = 0;
 	rr_info->is_master = false;
+	INIT_LIST_HEAD(&rr_info->events_list);
+	mutex_init(&rr_info->events_list_lock);
 	RR_DLOG(INIT, "rr_vcpu_info initialized");
 }
 EXPORT_SYMBOL_GPL(rr_vcpu_info_init);
@@ -143,3 +146,43 @@ int rr_vcpu_enable(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(rr_vcpu_enable);
 
+/* Should be called within events_list_lock */
+static void __rr_vcpu_clean_events(struct kvm_vcpu *vcpu)
+{
+	struct rr_vcpu_info *rr_info = &vcpu->rr_info;
+	struct rr_event *e, *tmp;
+
+	list_for_each_entry_safe(e, tmp, &rr_info->events_list, link) {
+		RR_LOG("2 %d %d %d %d 0x%llx, %d, 0x%llx\n",
+		       e->delivery_mode, e->vector, e->level,
+		       e->trig_mode, vcpu->arch.regs[VCPU_REGS_RIP],
+		       0, vcpu->arch.regs[VCPU_REGS_RCX]);
+		list_del(&e->link);
+		kfree(e);
+	}
+}
+
+void rr_vcpu_checkpoint(struct kvm_vcpu *vcpu)
+{
+	int ret;
+
+	mutex_lock(&vcpu->rr_info.events_list_lock);
+	ret = rr_do_vcpu_checkpoint(vcpu);
+	if (ret < 0) {
+		RR_ERR("error: vcpu=%d fail to checkpoint", vcpu->vcpu_id);
+	}
+	__rr_vcpu_clean_events(vcpu);
+	mutex_unlock(&vcpu->rr_info.events_list_lock);
+}
+EXPORT_SYMBOL_GPL(rr_vcpu_checkpoint);
+
+void rr_vcpu_rollback(struct kvm_vcpu *vcpu)
+{
+	int ret;
+
+	ret = rr_do_vcpu_rollback(vcpu);
+	if (ret < 0) {
+		RR_ERR("error: vcpu=%d fail to rollback", vcpu->vcpu_id);
+	}
+}
+EXPORT_SYMBOL_GPL(rr_vcpu_rollback);

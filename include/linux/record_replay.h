@@ -23,12 +23,23 @@ struct kvm_vcpu;
 #define RR_REQ_COMMIT_MEMORY		1
 #define RR_REQ_POST_CHECK		2
 
+struct rr_event {
+	struct list_head link;
+	int delivery_mode;
+	int vector;
+	int level;
+	int trig_mode;
+	unsigned long *dest_map;
+};
+
 /* Record and replay control info for a particular vcpu */
 struct rr_vcpu_info {
 	bool enabled;		/* State of record and replay */
 	u32 timer_value;	/* Preemption timer value of this vcpu */
 	unsigned long requests;	/* Requests bitmap */
 	bool is_master;		/* Used for synchronization */
+	struct list_head events_list;
+	struct mutex events_list_lock;
 };
 
 /* Record and replay control info for kvm */
@@ -45,6 +56,8 @@ void rr_init(struct rr_ops *rr_ops);
 void rr_vcpu_info_init(struct rr_vcpu_info *rr_info);
 void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info);
 int rr_vcpu_enable(struct kvm_vcpu *vcpu);
+void rr_vcpu_checkpoint(struct kvm_vcpu *vcpu);
+void rr_vcpu_rollback(struct kvm_vcpu *vcpu);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

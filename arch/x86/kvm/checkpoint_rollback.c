@@ -1,11 +1,8 @@
-// Author:RSR Date:25/11/13
-
 #include <linux/kvm_host.h>
 #include <linux/kvm.h>
 #include <linux/slab.h>
-//#include <linux/gfp.h>
 
-#include <asm/kvm_checkpoint_rollback.h>
+#include <asm/checkpoint_rollback.h>
 #include <asm/processor.h>
 #include <asm/kvm_para.h>
 #include <asm/msr-index.h>
@@ -620,32 +617,14 @@ void print_vcpu_status_info_for_debugging(CPUX86State *env)
 	
 }
 
-int vcpu_checkpoint(struct kvm_vcpu *vcpu)
+int rr_do_vcpu_checkpoint(struct kvm_vcpu *vcpu)
 {
-	int ret = kvm_arch_getset_registers(vcpu, 0);
-
-	//printk( "Make checkpoint\n" );
-
-	if ( ret < 0 ){
-		printk( "Some Error Occured During Macking Checkpoint!\n" );
-		return ret;
-	}
-	//print_vcpu_status_info_for_debugging(&vcpu->vcpu_checkpoint);
-	return 0;
+	return kvm_arch_getset_registers(vcpu, 0);
 }
-EXPORT_SYMBOL_GPL(vcpu_checkpoint);
+EXPORT_SYMBOL_GPL(rr_do_vcpu_checkpoint);
 
-int vcpu_rollback(struct kvm_vcpu *vcpu)
+int rr_do_vcpu_rollback(struct kvm_vcpu *vcpu)
 {
-	int ret = kvm_arch_getset_registers(vcpu, 1);
-
-	//printk( "Roll back\n" );
-
-	if ( ret < 0 ){
-		printk( "Some Error Occured During Rolling Back!\n" );
-		return ret;
-	}
-
-	return 0;
+	return kvm_arch_getset_registers(vcpu, 1);
 }
-EXPORT_SYMBOL_GPL(vcpu_rollback);
+EXPORT_SYMBOL_GPL(rr_do_vcpu_rollback);

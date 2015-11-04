@@ -773,15 +773,15 @@ int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 
 	// XELATEX
 	if (vcpu->rr_info.enabled) {
-		mutex_lock(&(vcpu->events_list_lock));
+		mutex_lock(&(vcpu->rr_info.events_list_lock));
 		rr_event = kmalloc(sizeof(struct rr_event), GFP_KERNEL);
 		rr_event->delivery_mode = delivery_mode;
 		rr_event->vector = vector;
 		rr_event->level = level;
 		rr_event->trig_mode = trig_mode;
 		rr_event->dest_map = dest_map;
-		list_add(&(rr_event->link), &(vcpu->events_list));
-		mutex_unlock(&(vcpu->events_list_lock));
+		list_add(&(rr_event->link), &(vcpu->rr_info.events_list));
+		mutex_unlock(&(vcpu->rr_info.events_list_lock));
 	}
 
 	return __rr_apic_accept_irq(apic, delivery_mode, vector, level, trig_mode, dest_map);

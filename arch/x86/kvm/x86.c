@@ -65,10 +65,6 @@
 #include <asm/div64.h>
 #include <asm/logger.h>
 
-//kvm_vcpu_checkpoint_rollback rsr
-#include <asm/kvm_checkpoint_rollback.h>
-//end kvm_vcpu_checkpoint_rollback rsr
-
 #define MAX_IO_MSRS 256
 #define KVM_MAX_MCE_BANKS 32
 #define KVM_MCE_CAP_SUPPORTED (MCG_CTL_P | MCG_SER_P)
@@ -5943,7 +5939,6 @@ restart:
 
 	// XELATEX
 	if (rr_check_request(RR_REQ_CHECKPOINT, &vcpu->rr_info)) {
-		mutex_lock(&(vcpu->events_list_lock));
 		if (vcpu->guest_fpu_loaded) {
 			/* We need to read back the value from hardware fpu, that is
 			 * unload the fpu.
@@ -5952,17 +5947,7 @@ restart:
 			fpu_save_init(&vcpu->arch.guest_fpu);
 			__kernel_fpu_end();
 		}
-		vcpu_checkpoint(vcpu);
-
-		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
-			RR_LOG("2 %d %d %d %d 0x%llx, %d, 0x%llx\n",
-			       e->delivery_mode, e->vector, e->level,
-			       e->trig_mode, vcpu->arch.regs[VCPU_REGS_RIP],
-			       0, vcpu->arch.regs[VCPU_REGS_RCX]);
-			list_del(&(e->link));
-			kfree(e);
-		}
-		mutex_unlock(&(vcpu->events_list_lock));
+		rr_vcpu_checkpoint(vcpu);
 	}
 
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
@@ -6141,16 +6126,16 @@ restart:
 				fpu_save_init(&vcpu->arch.guest_fpu);
 				__kernel_fpu_end();
 			}
-			vcpu_rollback(vcpu);
+			rr_vcpu_rollback(vcpu);
 
 			//rsr-debug
-			mutex_lock(&(vcpu->events_list_lock));
+			mutex_lock(&(vcpu->rr_info.events_list_lock));
 			//end rsr-debug
-			list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
+			list_for_each_entry_safe(e, tmp, &(vcpu->rr_info.events_list), link) {
 				r = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
 						e->vector, e->level, e->trig_mode, e->dest_map);
 			}
-			mutex_unlock(&(vcpu->events_list_lock));
+			mutex_unlock(&(vcpu->rr_info.events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 			goto restart;
 		}
@@ -7073,8 +7058,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	re_bitmap_init(&vcpu->conflict_bitmap_2, false);
 	re_bitmap_init(&vcpu->dirty_bitmap, true);
 	re_bitmap_init(&vcpu->DMA_access_bitmap, false);
-	INIT_LIST_HEAD(&(vcpu->events_list));
-	mutex_init(&(vcpu->events_list_lock));
 	vcpu->public_cb = &vcpu->conflict_bitmap_1;
 	vcpu->private_cb = &vcpu->conflict_bitmap_2;
 	vcpu->need_dma_check = 0;

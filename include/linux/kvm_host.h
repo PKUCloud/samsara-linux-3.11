@@ -38,9 +38,7 @@
 
 #include <asm/kvm_host.h>
 
-//kvm_vcpu_checkpoint_rollback rsr
-#include <asm/kvm_checkpoint_rollback.h>
-//end kvm_vcpu_checkpoint_rollback rsr
+#include <asm/checkpoint_rollback.h>
 
 
 #ifndef KVM_MMIO_SIZE
@@ -230,20 +228,6 @@ struct kvm_tm_page {
 	int write;
 };
 
-// XELATEX
-struct rr_event {
-	struct list_head link;
-	int delivery_mode;
-	int vector;
-	int level;
-	int trig_mode;
-	unsigned long *dest_map;
-	//rsr--debug
-	//bool is_committed;	//this event has already been committed, so can be deleted before next vmentry
-	//end rsr--debug
-	
-};
-
 struct gfn_list {
 	struct list_head link;
 	gfn_t gfn;
@@ -328,8 +312,6 @@ struct kvm_vcpu {
 	struct region_bitmap DMA_access_bitmap;
 	struct region_bitmap *public_cb;	/* Public conflict bitmap */
 	struct region_bitmap *private_cb;	/* Private conflict bitmap */
-	struct list_head events_list;
-	struct mutex events_list_lock;
 	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
 	int nr_rollback;	/* Number of continuous rollback */
 
