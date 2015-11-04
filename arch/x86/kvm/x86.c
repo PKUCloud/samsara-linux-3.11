@@ -5763,7 +5763,7 @@ static void update_cr8_intercept(struct kvm_vcpu *vcpu)
 	kvm_x86_ops->update_cr8_intercept(vcpu, tpr, max_irr);
 }
 
-static int inject_pending_event(struct kvm_vcpu *vcpu)
+static void inject_pending_event(struct kvm_vcpu *vcpu)
 {
 	/* try to reinject previous events if any */
 	if (vcpu->arch.exception.pending) {
@@ -5774,17 +5774,17 @@ static int inject_pending_event(struct kvm_vcpu *vcpu)
 					  vcpu->arch.exception.has_error_code,
 					  vcpu->arch.exception.error_code,
 					  vcpu->arch.exception.reinject);
-		return 1;
+		return;
 	}
 
 	if (vcpu->arch.nmi_injected) {
 		kvm_x86_ops->set_nmi(vcpu);
-		return 2;
+		return;
 	}
 
 	if (vcpu->arch.interrupt.pending) {
 		kvm_x86_ops->set_irq(vcpu);
-		return 3;
+		return;
 	}
 
 	/* try to inject new event if pending */
@@ -5793,17 +5793,14 @@ static int inject_pending_event(struct kvm_vcpu *vcpu)
 			--vcpu->arch.nmi_pending;
 			vcpu->arch.nmi_injected = true;
 			kvm_x86_ops->set_nmi(vcpu);
-			return 4;
 		}
 	} else if (kvm_cpu_has_injectable_intr(vcpu)) {
 		if (kvm_x86_ops->interrupt_allowed(vcpu)) {
 			kvm_queue_interrupt(vcpu, kvm_cpu_get_interrupt(vcpu),
 					    false);
 			kvm_x86_ops->set_irq(vcpu);
-			return 5;
 		}
 	}
-	return 0;
 }
 
 static void process_nmi(struct kvm_vcpu *vcpu)
@@ -5865,7 +5862,6 @@ static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 extern int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map);
-extern void kvm_record_clean_ept(struct kvm_vcpu *vcpu);
 
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
@@ -5875,7 +5871,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_immediate_exit = false;
 	struct rr_event *e;
 	struct rr_event *tmp;
-	static u64 commit_count;
 	bool is_rollback;
 
 restart:
@@ -5937,11 +5932,10 @@ restart:
 		rr_vcpu_enable(vcpu);
 	}
 
-	// XELATEX
 	if (rr_check_request(RR_REQ_CHECKPOINT, &vcpu->rr_info)) {
 		if (vcpu->guest_fpu_loaded) {
-			/* We need to read back the value from hardware fpu, that is
-			 * unload the fpu.
+			/* We need to read back the value from hardware fpu
+			 * (unload the fpu).
 			 */
 			vcpu->guest_fpu_loaded = 0;
 			fpu_save_init(&vcpu->arch.guest_fpu);
@@ -5957,7 +5951,7 @@ restart:
 			goto out;
 		}
 
-		r = inject_pending_event(vcpu);
+		inject_pending_event(vcpu);
 
 		/* enable NMI/IRQ window open exits if needed */
 		if (vcpu->arch.nmi_pending)
@@ -5980,7 +5974,7 @@ restart:
 		}
 	}
 
-	r = kvm_mmu_reload(vcpu);	// Load VM memory page table
+	r = kvm_mmu_reload(vcpu);
 	if (unlikely(r)) {
 		goto cancel_injection;
 	}
@@ -5991,10 +5985,7 @@ restart:
 	 * again until it enter guest.
 	 */
 	if (vcpu->rr_info.enabled && vcpu->need_memory_commit) {
-		// kvm_record_clean_ept(vcpu);
-		// kvm_x86_ops->tm_memory_commit(vcpu);
-		// kvm_x86_ops->tlb_flush(vcpu);
-		kvm_x86_ops->tm_commit_memory_again(vcpu);
+		rr_commit_again(vcpu);
 	}
 
 	/* Check if we need to wait other vcpus to finish commit/rollback
@@ -6113,7 +6104,6 @@ restart:
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		if (r == KVM_RR_COMMIT) {
 			rr_make_request(RR_REQ_CHECKPOINT, &vcpu->rr_info);
-			commit_count++;
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
 			kvm_x86_ops->tlb_flush(vcpu);

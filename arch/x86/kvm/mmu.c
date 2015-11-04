@@ -2715,39 +2715,6 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 	// *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
 }
 
-/* Withdrwo write permission of the spte */
-void kvm_record_spte_withdraw_wperm(u64 *sptep) {
-	*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
-}
-EXPORT_SYMBOL_GPL(kvm_record_spte_withdraw_wperm);
-
-/* Tamlok
- * Modified the spte's pfn fields
- * Must flush tlb after this function call
- */
-void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn)
-{
-	u64 spte;
-
-	spte = *sptep;
-	spte &= ~PT64_BASE_ADDR_MASK;
-	spte |= (u64)pfn << PAGE_SHIFT;
-	*sptep = spte;
-}
-EXPORT_SYMBOL_GPL(kvm_record_spte_set_pfn);
-
-void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn)
-{
-	u64 spte;
-
-	spte = *sptep;
-	if (unlikely(pfn != ((spte & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT))) {
-		printk(KERN_ERR "error: %s pfn in spte has been changed\n",
-		       __func__);
-	}
-}
-EXPORT_SYMBOL_GPL(kvm_record_spte_check_pfn);
-
 /* Tamlok
  * Separate memory with copy-on-write
  * Alloc a new page to replace the original page and update the spte, then add
@@ -2780,7 +2747,7 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 	private_mem_page->sptep = sptep;
 	copy_page(new_page, pfn_to_kaddr(pfn));
 	old_spte = *sptep;
-	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
+	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
 
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
@@ -2910,53 +2877,6 @@ inline int tm_walk_mmu(struct kvm_vcpu *vcpu, int level)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(tm_walk_mmu);
-
-static void __mmu_walk_spt_clean(struct kvm_vcpu *vcpu, hpa_t shadow_addr,
-	int level, gpa_t gpa)
-{
-	u64 index;
-	gpa_t new_gpa;
-	hpa_t new_addr;
-	u64 *sptep;
-
-	if (level < PT_PAGE_TABLE_LEVEL)
-		return;
-	for (index = 0; index < PT64_NR_PT_ENTRY; index++) {
-		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (!is_shadow_present_pte(*sptep))
-			continue;
-		
-		/* Check if VMX_EPT_ACCESS_BIT is set, if not, there is no need to
-		 * walk its children any more.
-		 */
-		if (!(*sptep & VMX_EPT_ACCESS_BIT)) {
-			continue;
-		}
-
-		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
-		new_addr = *sptep & PT64_BASE_ADDR_MASK;
-		if (is_last_spte(*sptep, level)) {
-			*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
-			/* For now, we don't withdraw the write permission here.
-			 * Instead, we do this when we commit or rollback
-			 * private pages.
-			 */
-			// *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
-		} else {
- 			__mmu_walk_spt_clean(vcpu , new_addr, level - 1, new_gpa);
-			*sptep &= ~VMX_EPT_ACCESS_BIT;
-		}
-	}
-}
-
-void kvm_record_clean_ept(struct kvm_vcpu *vcpu)
-{
-	int level = vcpu->arch.mmu.shadow_root_level;
-	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-
-	__mmu_walk_spt_clean(vcpu, shadow_addr, level, 0);
-}
-EXPORT_SYMBOL_GPL(kvm_record_clean_ept);
 
 static void kvm_send_hwpoison_signal(unsigned long address, struct task_struct *tsk)
 {

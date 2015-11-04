@@ -774,9 +774,6 @@ struct kvm_x86_ops {
 			       enum x86_intercept_stage stage);
 	void (*handle_external_intr)(struct kvm_vcpu *vcpu);
 	int (*check_rr_commit)(struct kvm_vcpu *vcpu);
-	int (*tm_commit_memory_again)(struct kvm_vcpu *vcpu);
-	void (*tm_memory_commit)(struct kvm_vcpu *vcpu);
-	void (*tm_memory_rollback)(struct kvm_vcpu *vcpu);
 	int (*rr_apic_accept_irq)(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map);

@@ -50,6 +50,7 @@ struct rr_kvm_info {
 
 struct rr_ops {
 	void (*ape_vmx_setup)(u32 timer_value);
+	void (*tlb_flush)(struct kvm_vcpu *vcpu);
 };
 
 void rr_init(struct rr_ops *rr_ops);
@@ -58,6 +59,12 @@ void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info);
 int rr_vcpu_enable(struct kvm_vcpu *vcpu);
 void rr_vcpu_checkpoint(struct kvm_vcpu *vcpu);
 void rr_vcpu_rollback(struct kvm_vcpu *vcpu);
+void rr_spte_set_pfn(u64 *sptep, pfn_t pfn);
+void rr_spte_withdraw_wperm(u64 *sptep);
+int rr_spte_check_pfn(u64 spte, pfn_t pfn);
+void rr_commit_memory(struct kvm_vcpu *vcpu);
+void rr_rollback_memory(struct kvm_vcpu *vcpu);
+void rr_commit_again(struct kvm_vcpu *vcpu);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {
