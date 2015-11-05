@@ -5980,11 +5980,11 @@ restart:
 	}
 
 	/* Need to commit memory here.
-	 * Note: we should NOT clear need_memory_commit here because it may
+	 * Note: we should NOT clear RR_REQ_COMMIT_AGAIN here because it may
 	 * fail at the first try to enter guest and we need to commit memory
-	 * again until it enter guest.
+	 * again until it enters guest.
 	 */
-	if (vcpu->rr_info.enabled && vcpu->need_memory_commit) {
+	if (rr_check_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info)) {
 		rr_commit_again(vcpu);
 	}
 
@@ -6107,7 +6107,6 @@ restart:
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == KVM_RR_ROLLBACK) {
 			kvm_x86_ops->tlb_flush(vcpu);
-			vcpu->need_memory_commit = 0;
 			if (vcpu->guest_fpu_loaded) {
 				/* Unload fpu from the hardware before we rollback fpu,
 				 * or kvm may override the value we rollback.
@@ -7064,7 +7063,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&vcpu->arch.rollback_pages);
 	vcpu->arch.nr_rollback_pages = 0;
 #endif
-	vcpu->need_memory_commit = 0;
 	vcpu->exclusive_commit = 0;
 	vcpu->nr_rollback = 0;
 

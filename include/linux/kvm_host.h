@@ -315,7 +315,6 @@ struct kvm_vcpu {
 	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
 	int nr_rollback;	/* Number of continuous rollback */
 
-	int need_memory_commit;
 	/* Need to check kvm.chunk_list to if there are some unfinished chunks
 	 * before we enter guest.
 	 */

@@ -20,7 +20,7 @@ struct kvm_vcpu;
 #define RR_CHUNK_SKIP			2
 
 #define RR_REQ_CHECKPOINT		0
-#define RR_REQ_COMMIT_MEMORY		1
+#define RR_REQ_COMMIT_AGAIN		1
 #define RR_REQ_POST_CHECK		2
 
 struct rr_event {

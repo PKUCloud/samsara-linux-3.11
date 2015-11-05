@@ -3738,7 +3738,7 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 
 	// Generate commit again gfn list
-	if (vcpu->need_memory_commit) {
+	if (rr_check_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info)) {
 		if (write) {
 			struct gfn_list *gfn_node = kmalloc(sizeof(struct gfn_list), GFP_ATOMIC);
 			gfn_node->gfn = gfn;

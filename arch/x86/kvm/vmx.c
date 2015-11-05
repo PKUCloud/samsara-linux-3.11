@@ -7060,7 +7060,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	int ret;
 	int is_early_check;
 
-	vcpu->need_memory_commit = 0;
 	vcpu->need_check_chunk_info = 0;
 	// First time, we do not handle it here.
 	if (!vcpu->rr_info.enabled) {
@@ -7114,7 +7113,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
 				vcpu->vcpu_id, __func__);
 		} else if (ret == 1) {
-			vcpu->need_memory_commit = 1;
+			rr_make_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info);
 			vcpu->need_check_chunk_info = 1;
 			return KVM_RR_COMMIT;
 		} else {
