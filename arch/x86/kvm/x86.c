@@ -5871,7 +5871,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_immediate_exit = false;
 	struct rr_event *e;
 	struct rr_event *tmp;
-	bool is_rollback;
 
 restart:
 	/* Check if there is any requests which are not handled. */
@@ -5991,14 +5990,8 @@ restart:
 	/* Check if we need to wait other vcpus to finish commit/rollback
 	 * memory before we enter guest.
 	 */
-	if (vcpu->rr_info.enabled && vcpu->need_check_chunk_info) {
-		is_rollback = vcpu->chunk_info.action == KVM_RR_ROLLBACK;
-		kvm_x86_ops->tm_chunk_list_check_and_del(vcpu);
-		vcpu->need_check_chunk_info = 0;
-#ifdef RR_ROLLBACK_PAGES
-		if (is_rollback)
-			kvm_x86_ops->tm_copy_rollback_pages(vcpu);
-#endif
+	if (rr_check_request(RR_REQ_POST_CHECK, &vcpu->rr_info)) {
+		rr_post_check(vcpu);
 	}
 
 	kvm_x86_ops->tlb_flush(vcpu);
@@ -7051,7 +7044,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->private_cb = &vcpu->conflict_bitmap_2;
 	vcpu->need_dma_check = 0;
 	vcpu->tm_version = 0;
-	vcpu->need_check_chunk_info = 0;
 	vcpu->chunk_info.vcpu_id = vcpu->vcpu_id;
 	vcpu->chunk_info.state = RR_CHUNK_IDLE;
 

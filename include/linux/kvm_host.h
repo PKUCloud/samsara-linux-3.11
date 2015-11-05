@@ -314,11 +314,6 @@ struct kvm_vcpu {
 	struct region_bitmap *private_cb;	/* Private conflict bitmap */
 	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
 	int nr_rollback;	/* Number of continuous rollback */
-
-	/* Need to check kvm.chunk_list to if there are some unfinished chunks
-	 * before we enter guest.
-	 */
-	int need_check_chunk_info;
 	int is_early_rb;
 	int need_dma_check;
 	/* Used to decide if this vcpu can go into guest or not, init to 0 */

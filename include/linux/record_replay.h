@@ -65,6 +65,9 @@ int rr_spte_check_pfn(u64 spte, pfn_t pfn);
 void rr_commit_memory(struct kvm_vcpu *vcpu);
 void rr_rollback_memory(struct kvm_vcpu *vcpu);
 void rr_commit_again(struct kvm_vcpu *vcpu);
+void rr_vcpu_insert_chunk_list(struct kvm_vcpu *vcpu);
+void rr_vcpu_set_chunk_state(struct kvm_vcpu *vcpu, int state);
+void rr_post_check(struct kvm_vcpu *vcpu);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

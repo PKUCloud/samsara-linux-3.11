@@ -5618,78 +5618,6 @@ static void tm_check_version(struct kvm_vcpu *vcpu)
 	// wake_up_interruptible(&kvm->tm_version_que);
 }
 
-static inline void tm_chunk_list_insert(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = vcpu->kvm;
-
-	spin_lock(&kvm->chunk_list_lock);
-	list_add_tail(&vcpu->chunk_info.link, &kvm->chunk_list);
-	spin_unlock(&kvm->chunk_list_lock);
-}
-
-static inline void tm_chunk_list_set_state(struct kvm_vcpu *vcpu, int state)
-{
-	struct kvm *kvm = vcpu->kvm;
-
-	spin_lock(&kvm->chunk_list_lock);
-	vcpu->chunk_info.state = state;
-	spin_unlock(&kvm->chunk_list_lock);
-}
-
-void tm_chunk_list_check_and_del(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = vcpu->kvm;
-	struct list_head *head = &kvm->chunk_list;
-	struct chunk_info *chunk, *temp;
-	bool can_leave = true;
-retry:
-	can_leave = true;
-	spin_lock(&kvm->chunk_list_lock);
-	list_for_each_entry_safe(chunk, temp, head, link) {
-		if (chunk->vcpu_id == vcpu->vcpu_id) {
-			/* We reach our own chunk node, which means that we
-			 * can delete this node and enter guest.
-			 */
-			list_del(&chunk->link);
-			chunk->state = RR_CHUNK_IDLE;
-			break;
-		}
-		if (chunk->action == KVM_RR_COMMIT &&
-		    chunk->state != RR_CHUNK_FINISHED) {
-			/* There is one vcpu before us and it is going to
-			 * commit, so we need to wait for it.
-			 */
-			can_leave = false;
-			break;
-		}
-	}
-	spin_unlock(&kvm->chunk_list_lock);
-	if (!can_leave) {
-		yield();
-		goto retry;
-	}
-}
-EXPORT_SYMBOL_GPL(tm_chunk_list_check_and_del);
-
-#ifdef RR_ROLLBACK_PAGES
-void tm_copy_rollback_pages(struct kvm_vcpu *vcpu)
-{
-	void *origin, *private;
-	struct kvm_private_mem_page *private_page, *temp;
-
-	list_for_each_entry_safe(private_page, temp,
-				 &vcpu->arch.rollback_pages, link) {
-		origin = pfn_to_kaddr(private_page->original_pfn);
-		private = pfn_to_kaddr(private_page->private_pfn);
-		copy_page(private, origin);
-		list_move_tail(&private_page->link, &vcpu->arch.holding_pages);
-		vcpu->arch.nr_rollback_pages--;
-		vcpu->arch.nr_holding_pages++;
-	}
-}
-EXPORT_SYMBOL_GPL(tm_copy_rollback_pages);
-#endif
-
 extern void get_random_bytes(void *buf, int nbytes);
 
 inline void record_real_log(struct kvm_vcpu *vcpu)
@@ -5788,7 +5716,7 @@ rollback:
 		/* Insert chunk_info to kvm->chunk_list */
 		vcpu->chunk_info.action = commit ? KVM_RR_COMMIT : KVM_RR_ROLLBACK;
 		vcpu->chunk_info.state = RR_CHUNK_BUSY;
-		tm_chunk_list_insert(vcpu);
+		rr_vcpu_insert_chunk_list(vcpu);
 
 		swap(vcpu->public_cb, vcpu->private_cb);
 		mutex_unlock(&(kvm->tm_lock));
@@ -5798,7 +5726,7 @@ rollback:
 		} else rr_rollback_memory(vcpu);
 
 		// tm_check_version(vcpu);
-		tm_chunk_list_set_state(vcpu, RR_CHUNK_FINISHED);
+		rr_vcpu_set_chunk_state(vcpu, RR_CHUNK_FINISHED);
 
 		// Clear DMA bitmap
 		if (atomic_read(&(kvm->tm_dma)) == 0)
@@ -7060,7 +6988,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	int ret;
 	int is_early_check;
 
-	vcpu->need_check_chunk_info = 0;
 	// First time, we do not handle it here.
 	if (!vcpu->rr_info.enabled) {
 		printk(KERN_ERR "error: vcpu %d %s when vcpu->is_recording is false\n",
@@ -7114,10 +7041,10 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 				vcpu->vcpu_id, __func__);
 		} else if (ret == 1) {
 			rr_make_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info);
-			vcpu->need_check_chunk_info = 1;
+			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
 			return KVM_RR_COMMIT;
 		} else {
-			vcpu->need_check_chunk_info = 1;
+			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
 			return KVM_RR_ROLLBACK;
 		}
 	}
@@ -8696,10 +8623,6 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.handle_external_intr = vmx_handle_external_intr,
 	.check_rr_commit = vmx_check_rr_commit,
  	.rr_apic_accept_irq = __rr_apic_accept_irq,
-	.tm_chunk_list_check_and_del = tm_chunk_list_check_and_del,
-#ifdef RR_ROLLBACK_PAGES
-	.tm_copy_rollback_pages = tm_copy_rollback_pages,
-#endif
 };
 
 /* Record and replay */

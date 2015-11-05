@@ -581,3 +581,88 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(rr_commit_again);
 
+void rr_vcpu_insert_chunk_list(struct kvm_vcpu *vcpu)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	spin_lock(&kvm->chunk_list_lock);
+	list_add_tail(&vcpu->chunk_info.link, &kvm->chunk_list);
+	spin_unlock(&kvm->chunk_list_lock);
+}
+EXPORT_SYMBOL_GPL(rr_vcpu_insert_chunk_list);
+
+void rr_vcpu_set_chunk_state(struct kvm_vcpu *vcpu, int state)
+{
+	struct kvm *kvm = vcpu->kvm;
+
+	spin_lock(&kvm->chunk_list_lock);
+	vcpu->chunk_info.state = state;
+	spin_unlock(&kvm->chunk_list_lock);
+}
+EXPORT_SYMBOL_GPL(rr_vcpu_set_chunk_state);
+
+static void rr_vcpu_chunk_list_check_and_del(struct kvm_vcpu *vcpu)
+{
+	struct kvm *kvm = vcpu->kvm;
+	struct list_head *head = &kvm->chunk_list;
+	struct chunk_info *chunk, *temp;
+	bool can_leave = true;
+retry:
+	can_leave = true;
+	spin_lock(&kvm->chunk_list_lock);
+	list_for_each_entry_safe(chunk, temp, head, link) {
+		if (chunk->vcpu_id == vcpu->vcpu_id) {
+			/* We reach our own chunk node, which means that we
+			 * can delete this node and enter guest.
+			 */
+			list_del(&chunk->link);
+			chunk->state = RR_CHUNK_IDLE;
+			break;
+		}
+		if (chunk->action == KVM_RR_COMMIT &&
+		    chunk->state != RR_CHUNK_FINISHED) {
+			/* There is one vcpu before us and it is going to
+			 * commit, so we need to wait for it.
+			 */
+			can_leave = false;
+			break;
+		}
+	}
+	spin_unlock(&kvm->chunk_list_lock);
+	if (!can_leave) {
+		yield();
+		goto retry;
+	}
+}
+
+#ifdef RR_ROLLBACK_PAGES
+static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
+{
+	void *origin, *private;
+	struct kvm_private_mem_page *private_page, *temp;
+
+	list_for_each_entry_safe(private_page, temp,
+				 &vcpu->arch.rollback_pages, link) {
+		origin = pfn_to_kaddr(private_page->original_pfn);
+		private = pfn_to_kaddr(private_page->private_pfn);
+		copy_page(private, origin);
+		list_move_tail(&private_page->link, &vcpu->arch.holding_pages);
+		vcpu->arch.nr_rollback_pages--;
+		vcpu->arch.nr_holding_pages++;
+	}
+}
+#endif
+
+void rr_post_check(struct kvm_vcpu *vcpu)
+{
+	bool is_rollback = (vcpu->chunk_info.action == KVM_RR_ROLLBACK);
+
+	rr_vcpu_chunk_list_check_and_del(vcpu);
+	rr_clear_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
+#ifdef RR_ROLLBACK_PAGES
+	if (is_rollback)
+		rr_copy_rollback_pages(vcpu);
+#endif
+}
+EXPORT_SYMBOL_GPL(rr_post_check);
+
