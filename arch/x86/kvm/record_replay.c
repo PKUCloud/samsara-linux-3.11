@@ -6,6 +6,7 @@
 #include <asm/checkpoint_rollback.h>
 
 #include "mmu.h"
+#include "lapic.h"
 
 struct rr_ops *rr_ops;
 
@@ -665,4 +666,47 @@ void rr_post_check(struct kvm_vcpu *vcpu)
 #endif
 }
 EXPORT_SYMBOL_GPL(rr_post_check);
+
+int apic_accept_irq_without_record(struct kvm_lapic *apic, int delivery_mode,
+				   int vector, int level, int trig_mode,
+				   unsigned long *dest_map);
+
+int rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
+		       int vector, int level, int trig_mode,
+		       unsigned long *dest_map)
+{
+	struct kvm_vcpu *vcpu = apic->vcpu;
+	struct rr_event *rr_event;
+
+	if (vcpu->rr_info.enabled) {
+		mutex_lock(&(vcpu->rr_info.events_list_lock));
+		rr_event = kmalloc(sizeof(struct rr_event), GFP_KERNEL);
+		rr_event->delivery_mode = delivery_mode;
+		rr_event->vector = vector;
+		rr_event->level = level;
+		rr_event->trig_mode = trig_mode;
+		rr_event->dest_map = dest_map;
+		list_add(&(rr_event->link), &(vcpu->rr_info.events_list));
+		mutex_unlock(&(vcpu->rr_info.events_list_lock));
+	}
+
+	return apic_accept_irq_without_record(apic, delivery_mode, vector,
+					      level, trig_mode, dest_map);
+}
+EXPORT_SYMBOL_GPL(rr_apic_accept_irq);
+
+void rr_apic_reinsert_irq(struct kvm_vcpu *vcpu)
+{
+	struct rr_event *e, *tmp;
+
+	mutex_lock(&(vcpu->rr_info.events_list_lock));
+	list_for_each_entry_safe(e, tmp, &(vcpu->rr_info.events_list), link) {
+		apic_accept_irq_without_record(vcpu->arch.apic,
+					       e->delivery_mode,
+					       e->vector, e->level,
+					       e->trig_mode, e->dest_map);
+	}
+	mutex_unlock(&(vcpu->rr_info.events_list_lock));
+}
+EXPORT_SYMBOL_GPL(rr_apic_reinsert_irq);
 

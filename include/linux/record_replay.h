@@ -9,6 +9,7 @@
 
 struct kvm;
 struct kvm_vcpu;
+struct kvm_lapic;
 
 #define RR_ASYNC_PREEMPTION_EPT	(KVM_RR_CTRL_MEM_EPT | KVM_RR_CTRL_MODE_ASYNC |\
 				 KVM_RR_CTRL_KICK_PREEMPTION)
@@ -68,6 +69,10 @@ void rr_commit_again(struct kvm_vcpu *vcpu);
 void rr_vcpu_insert_chunk_list(struct kvm_vcpu *vcpu);
 void rr_vcpu_set_chunk_state(struct kvm_vcpu *vcpu, int state);
 void rr_post_check(struct kvm_vcpu *vcpu);
+int rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
+		       int vector, int level, int trig_mode,
+		       unsigned long *dest_map);
+void rr_apic_reinsert_irq(struct kvm_vcpu *vcpu);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

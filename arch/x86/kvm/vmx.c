@@ -8518,10 +8518,6 @@ static int vmx_check_intercept(struct kvm_vcpu *vcpu,
 	return X86EMUL_CONTINUE;
 }
 
-extern int __rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
-			     int vector, int level, int trig_mode,
-			     unsigned long *dest_map);
-
 static struct kvm_x86_ops vmx_x86_ops = {
 	.cpu_has_kvm_support = cpu_has_kvm_support,
 	.disabled_by_bios = vmx_disabled_by_bios,
@@ -8622,7 +8618,6 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.check_intercept = vmx_check_intercept,
 	.handle_external_intr = vmx_handle_external_intr,
 	.check_rr_commit = vmx_check_rr_commit,
- 	.rr_apic_accept_irq = __rr_apic_accept_irq,
 };
 
 /* Record and replay */

@@ -5869,8 +5869,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_int_win = !irqchip_in_kernel(vcpu->kvm) &&
 		vcpu->run->request_interrupt_window;
 	bool req_immediate_exit = false;
-	struct rr_event *e;
-	struct rr_event *tmp;
 
 restart:
 	/* Check if there is any requests which are not handled. */
@@ -5900,7 +5898,6 @@ restart:
 		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 			r = 0;
-			rr_ctrl.enabled = 0;
 			goto out;
 		}
 
@@ -6002,7 +5999,7 @@ restart:
 
 	if (vcpu->fpu_active)
 		kvm_load_guest_fpu(vcpu);
-	kvm_load_guest_xcr0(vcpu);	// Check CR4.OSXSAVE feature.
+	kvm_load_guest_xcr0(vcpu);
 
 	vcpu->mode = IN_GUEST_MODE;
 
@@ -6020,16 +6017,15 @@ restart:
 		local_irq_enable();
 		preempt_enable();
 		r = 1;
-
 		goto cancel_injection;
 	}
 
-	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx); // RCU is a synchronization mechanism added to linux kernel during 2.5
+	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
 
 	if (req_immediate_exit)
 		smp_send_reschedule(vcpu->cpu);
 
-	kvm_guest_enter(); // Guess: this is RCU and scheduling related.
+	kvm_guest_enter();
 
 	if (unlikely(vcpu->arch.switch_db_regs)) {
 		set_debugreg(0, 7);
@@ -6091,7 +6087,6 @@ restart:
 	if (vcpu->arch.apic_attention)
 		kvm_lapic_sync_from_vapic(vcpu);
 
-	// For now we do this only after we begin recording, that is vcpu->is_recording is true */
 	if (vcpu->rr_info.enabled) {
 		rr_clear_all_request(&vcpu->rr_info);
 		r = kvm_x86_ops->check_rr_commit(vcpu);
@@ -6109,24 +6104,12 @@ restart:
 				__kernel_fpu_end();
 			}
 			rr_vcpu_rollback(vcpu);
-
-			//rsr-debug
-			mutex_lock(&(vcpu->rr_info.events_list_lock));
-			//end rsr-debug
-			list_for_each_entry_safe(e, tmp, &(vcpu->rr_info.events_list), link) {
-				r = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
-						e->vector, e->level, e->trig_mode, e->dest_map);
-			}
-			mutex_unlock(&(vcpu->rr_info.events_list_lock));
+			rr_apic_reinsert_irq(vcpu);
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 			goto restart;
 		}
 	}
 	r = kvm_x86_ops->handle_exit(vcpu);
-
-	if (vcpu->run->exit_reason == KVM_EXIT_SHUTDOWN){
-		rr_ctrl.enabled = 0;
-	}
 	return r;
 
 cancel_injection:
@@ -6181,9 +6164,9 @@ static int __vcpu_run(struct kvm_vcpu *vcpu)
 			break;
 
 		clear_bit(KVM_REQ_PENDING_TIMER, &vcpu->requests);
-		if (kvm_cpu_has_pending_timer(vcpu)){
+		if (kvm_cpu_has_pending_timer(vcpu))
 			kvm_inject_pending_timer_irqs(vcpu);
-		}
+
 		if (dm_request_for_irq_injection(vcpu)) {
 			r = -EINTR;
 			vcpu->run->exit_reason = KVM_EXIT_INTR;
@@ -6225,6 +6208,7 @@ static inline int complete_emulated_io(struct kvm_vcpu *vcpu)
 static int complete_emulated_pio(struct kvm_vcpu *vcpu)
 {
 	BUG_ON(!vcpu->arch.pio.count);
+
 	return complete_emulated_io(vcpu);
 }
 

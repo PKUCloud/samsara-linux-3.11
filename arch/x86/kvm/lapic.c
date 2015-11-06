@@ -405,17 +405,13 @@ int kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu)
 	return highest_irr;
 }
 
-static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
-			     int vector, int level, int trig_mode,
-			     unsigned long *dest_map);
-
 int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq,
 		unsigned long *dest_map)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
 
-	return __apic_accept_irq(apic, irq->delivery_mode, irq->vector,
-			irq->level, irq->trig_mode, dest_map);
+	return rr_apic_accept_irq(apic, irq->delivery_mode, irq->vector,
+				  irq->level, irq->trig_mode, dest_map);
 }
 
 static int pv_eoi_put_user(struct kvm_vcpu *vcpu, u8 val)
@@ -472,9 +468,8 @@ static inline int apic_find_highest_isr(struct kvm_lapic *apic)
 	/* Note that isr_count is always 1 with vid enabled */
 	if (!apic->isr_count)
 		return -1;
-	if (likely(apic->highest_isr_cache != -1)){
+	if (likely(apic->highest_isr_cache != -1))
 		return apic->highest_isr_cache;
-	}
 
 	result = find_highest_vector(apic->regs + APIC_ISR);
 	ASSERT(result == -1 || result >= 16);
@@ -500,7 +495,7 @@ static void apic_update_ppr(struct kvm_lapic *apic)
 	tpr = kvm_apic_get_reg(apic, APIC_TASKPRI);
 	isr = apic_find_highest_isr(apic);
 	isrv = (isr != -1) ? isr : 0;
-	
+
 	if ((tpr & 0xf0) >= (isrv & 0xf0))
 		ppr = tpr & 0xff;
 	else
@@ -606,7 +601,7 @@ bool kvm_irq_delivery_to_apic_fast(struct kvm *kvm, struct kvm_lapic *src,
 	bool ret = false;
 
 	*r = -1;
-	
+
 	if (irq->shorthand == APIC_DEST_SELF) {
 		*r = kvm_apic_set_irq(src->vcpu, irq, dest_map);
 		return true;
@@ -666,9 +661,9 @@ out:
  * Add a pending IRQ into lapic.
  * Return 1 if successfully added and 0 if discarded.
  */
-int __rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
-			     int vector, int level, int trig_mode,
-			     unsigned long *dest_map)
+int apic_accept_irq_without_record(struct kvm_lapic *apic, int delivery_mode,
+				   int vector, int level, int trig_mode,
+				   unsigned long *dest_map)
 {
 	int result = 0;
 	struct kvm_vcpu *vcpu = apic->vcpu;
@@ -762,30 +757,7 @@ out:
 	}
 	return result;
 }
-EXPORT_SYMBOL_GPL(__rr_apic_accept_irq);
-
-int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
-			     int vector, int level, int trig_mode,
-			     unsigned long *dest_map)
-{
-	struct kvm_vcpu *vcpu = apic->vcpu;
-	struct rr_event *rr_event;
-
-	// XELATEX
-	if (vcpu->rr_info.enabled) {
-		mutex_lock(&(vcpu->rr_info.events_list_lock));
-		rr_event = kmalloc(sizeof(struct rr_event), GFP_KERNEL);
-		rr_event->delivery_mode = delivery_mode;
-		rr_event->vector = vector;
-		rr_event->level = level;
-		rr_event->trig_mode = trig_mode;
-		rr_event->dest_map = dest_map;
-		list_add(&(rr_event->link), &(vcpu->rr_info.events_list));
-		mutex_unlock(&(vcpu->rr_info.events_list_lock));
-	}
-
-	return __rr_apic_accept_irq(apic, delivery_mode, vector, level, trig_mode, dest_map);
-}
+EXPORT_SYMBOL_GPL(apic_accept_irq_without_record);
 
 int kvm_apic_compare_prio(struct kvm_vcpu *vcpu1, struct kvm_vcpu *vcpu2)
 {
@@ -1503,8 +1475,8 @@ int kvm_apic_local_deliver(struct kvm_lapic *apic, int lvt_type)
 		vector = reg & APIC_VECTOR_MASK;
 		mode = reg & APIC_MODE_MASK;
 		trig_mode = reg & APIC_LVT_LEVEL_TRIGGER;
-		return __apic_accept_irq(apic, mode, vector, 1, trig_mode,
-					NULL);
+		return rr_apic_accept_irq(apic, mode, vector, 1, trig_mode,
+					  NULL);
 	}
 	return 0;
 }
@@ -1606,9 +1578,8 @@ int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 	apic_update_ppr(apic);
 	highest_irr = apic_find_highest_irr(apic);
 	if ((highest_irr == -1) ||
-	    ((highest_irr & 0xF0) <= kvm_apic_get_reg(apic, APIC_PROCPRI))) {
+	    ((highest_irr & 0xF0) <= kvm_apic_get_reg(apic, APIC_PROCPRI)))
 		return -1;
-	}
 	return highest_irr;
 }
 
@@ -1664,9 +1635,8 @@ void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu,
 	/* call kvm_apic_set_id() to put apic into apic_map */
 	kvm_apic_set_id(apic, kvm_apic_id(apic));
 	kvm_apic_set_version(vcpu);
-	
-	apic_update_ppr(apic);
 
+	apic_update_ppr(apic);
 	hrtimer_cancel(&apic->lapic_timer.timer);
 	update_divide_count(apic);
 	start_apic_timer(apic);
@@ -1903,7 +1873,7 @@ void kvm_apic_accept_events(struct kvm_vcpu *vcpu)
 			vcpu->arch.mp_state = KVM_MP_STATE_INIT_RECEIVED;
 	}
 	if (test_bit(KVM_APIC_SIPI, &pe) &&
-	    vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {	// SIPI : Startup IPI
+	    vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
 		/* evaluate pending_events before reading the vector */
 		smp_rmb();
 		sipi_vector = apic->sipi_vector;
