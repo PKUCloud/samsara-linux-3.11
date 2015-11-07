@@ -34,9 +34,9 @@ static int kvm_getset_regs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	if (!set) {
 		memset(kvm_regs, 0, sizeof(struct kvm_regs));
 	}
-	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_REGS:KVM_GET_REGS, 
-												 kvm_regs);
-	
+	ret = rr_vcpu_make_checkpoint(vcpu, set ? KVM_SET_REGS : KVM_GET_REGS,
+				      kvm_regs);
+
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
 	print_record("cpu_regs:\n");
@@ -74,11 +74,12 @@ static int kvm_getset_fpu(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	struct i387_fxsave_struct *fxsave =	&vcpu->arch.guest_fpu.state->fxsave;
 	int i;
 #endif
-	
+
 	if (!set){
 		memset(fpu, 0, sizeof(struct kvm_fpu));
 	}
-	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_FPU:KVM_GET_FPU, fpu);
+	ret = rr_vcpu_make_checkpoint(vcpu, set ? KVM_SET_FPU : KVM_GET_FPU,
+				      fpu);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\ncpu_fpu\n");
@@ -123,8 +124,8 @@ static int kvm_getset_xsave(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	if (!set) {
 		memset(xsave, 0, sizeof(struct kvm_xsave));
 	}
-	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_XSAVE:KVM_GET_XSAVE,
-												 xsave);
+	ret = rr_vcpu_make_checkpoint(vcpu, set ? KVM_SET_XSAVE : KVM_GET_XSAVE,
+				      xsave);
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\ncpu_xsave\n");
 	print_record("cwd=0x%x\n",fxsave->cwd);
@@ -161,7 +162,7 @@ static int kvm_getset_xcrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	if (!set) {
 		memset(xcrs, 0, sizeof(struct kvm_xcrs));
 	}
-	kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_XCRS:KVM_GET_XCRS, xcrs);
+	rr_vcpu_make_checkpoint(vcpu, set ? KVM_SET_XCRS : KVM_GET_XCRS, xcrs);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\nvcpu_xcr:\nvcpu->arch.xcr0=0x%llx\n", vcpu->arch.xcr0);
@@ -177,8 +178,9 @@ static int kvm_getset_mp_state(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	if (!set) {
 		memset(mp_state, 0, sizeof(struct kvm_mp_state));
 	}
-    ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_MP_STATE:KVM_GET_MP_STATE,
-												 mp_state);
+    ret = rr_vcpu_make_checkpoint(vcpu,
+				  set ? KVM_SET_MP_STATE : KVM_GET_MP_STATE,
+				  mp_state);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\nvcpu_mp_state:\nmp_state=%lx\n", vcpu->arch.mp_state);
@@ -216,8 +218,9 @@ static int kvm_getset_apic(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		memset(lapic, 0, sizeof(struct rsr_lapic));
 	}
     if (irqchip_in_kernel(vcpu->kvm)) {
-		ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_LAPIC:KVM_GET_LAPIC,
-													  lapic);
+		ret = rr_vcpu_make_checkpoint(vcpu,
+					      set ? KVM_SET_LAPIC : KVM_GET_LAPIC,
+					      lapic);
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 		print_record("\ncpu_apic:\nISR:");
 		for (i=0; i<8; i++){
@@ -266,8 +269,9 @@ static int kvm_getset_debugregs(struct kvm_vcpu *vcpu, CPUX86State *env, int set
 	if (!set) {
 		memset(dbgregs, 0, sizeof(struct kvm_debugregs));
 	}
-    ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_DEBUGREGS:KVM_GET_DEBUGREGS,
-												 dbgregs);
+    ret = rr_vcpu_make_checkpoint(vcpu,
+				  set ? KVM_SET_DEBUGREGS : KVM_GET_DEBUGREGS,
+				  dbgregs);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\ndebug_regs:\nswitch_db_regs=%d \n", vcpu->arch.switch_db_regs);
@@ -298,8 +302,9 @@ static int kvm_getset_vcpu_events(struct kvm_vcpu *vcpu, CPUX86State *env, int s
 	if (!set) {
 		memset(events, 0, sizeof(struct kvm_vcpu_events));
 	}
-    ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_VCPU_EVENTS:KVM_GET_VCPU_EVENTS,
-												 events);
+    ret = rr_vcpu_make_checkpoint(vcpu,
+				  set ? KVM_SET_VCPU_EVENTS : KVM_GET_VCPU_EVENTS,
+				  events);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	print_record("\nvcpu_events:\nexception->pending=%d\n", vcpu->arch.exception.pending);
@@ -338,10 +343,11 @@ static int kvm_getset_sregs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	if (!set) {
 		memset(sregs, 0, sizeof(struct kvm_sregs));
 	}
-	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_SREGS:KVM_GET_SREGS, sregs);
+	ret = rr_vcpu_make_checkpoint(vcpu, set ? KVM_SET_SREGS:KVM_GET_SREGS,
+				      sregs);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, KVM_GET_SREGS, &sergs_debug);
+	rr_vcpu_make_checkpoint(vcpu, KVM_GET_SREGS, &sergs_debug);
 
 	print_record("\nvcpu_sregs:\n");
 	seg = &(sergs_debug.cs);
@@ -481,7 +487,8 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		//end rsr-debug
 	}
 
-	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_MSRS:KVM_GET_MSRS, msr_data);
+	ret = rr_vcpu_make_checkpoint(vcpu, set ? KVM_SET_MSRS : KVM_GET_MSRS,
+				      msr_data);
 
 /*
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
@@ -490,8 +497,8 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	for (i = 0; i < ret; i++)
 		msr_data_debug.entries[i].index = msrs[i].index;
 	msr_data_debug.info.nmsrs = ret;
-	
-	kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, KVM_GET_MSRS, &msr_data_debug);
+
+	rr_vcpu_make_checkpoint(vcpu, KVM_GET_MSRS, &msr_data_debug);
 	for (i = 0; i < ret; i++)
 		print_record("msr[%d].index=%u, data=0x%llx\n"
 					, i, msr_data_debug.entries[i].index, msr_data_debug.entries[i].data);

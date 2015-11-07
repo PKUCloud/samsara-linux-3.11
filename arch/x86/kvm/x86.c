@@ -2768,18 +2768,6 @@ static int kvm_vcpu_ioctl_get_lapic(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-//rsr-debug
-static int kvm_vcpu_make_checkpoint_get_lapic(struct kvm_vcpu *vcpu,
-				    struct rsr_lapic *s)
-{
-	kvm_x86_ops->sync_pir_to_irr(vcpu);
-	memcpy(s->regs, vcpu->arch.apic->regs, sizeof(s->regs) );
-	s->highest_isr_cache = vcpu->arch.apic->highest_isr_cache;
-	
-	return 0;
-}
-//end rsr-debug
-
 static int kvm_vcpu_ioctl_set_lapic(struct kvm_vcpu *vcpu,
 				    struct kvm_lapic_state *s)
 {
@@ -2788,20 +2776,6 @@ static int kvm_vcpu_ioctl_set_lapic(struct kvm_vcpu *vcpu,
 
 	return 0;
 }
-
-//rsr-debug
-static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
-				    struct rsr_lapic *s)
-{
-	struct kvm_lapic_state *lapic = (struct kvm_lapic_state *)(s->regs);
-	//vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
-	kvm_apic_post_state_restore(vcpu, lapic);
-	update_cr8_intercept(vcpu);
-
-	return 0;
-}
-//end rsr-debug
-
 
 static int kvm_vcpu_ioctl_interrupt(struct kvm_vcpu *vcpu,
 				    struct kvm_interrupt *irq)
@@ -2923,10 +2897,12 @@ static void kvm_vcpu_ioctl_x86_get_vcpu_events(struct kvm_vcpu *vcpu,
 	events->interrupt.shadow =
 		kvm_x86_ops->get_interrupt_shadow(vcpu,
 			KVM_X86_SHADOW_INT_MOV_SS | KVM_X86_SHADOW_INT_STI);
+
 	events->nmi.injected = vcpu->arch.nmi_injected;
 	events->nmi.pending = vcpu->arch.nmi_pending != 0;
 	events->nmi.masked = kvm_x86_ops->get_nmi_mask(vcpu);
 	events->nmi.pad = 0;
+
 	events->sipi_vector = 0; /* never valid when reporting to user space */
 
 	events->flags = (KVM_VCPUEVENT_VALID_NMI_PENDING
@@ -3347,13 +3323,29 @@ out:
 	return r;
 }
 
-//kvm_vcpu_checkpoint_rollback rsr
-int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
-					 int type, void *arg)
+static int rr_vcpu_checkpoint_get_lapic(struct kvm_vcpu *vcpu,
+					struct rsr_lapic *s)
+{
+	kvm_x86_ops->sync_pir_to_irr(vcpu);
+	memcpy(s->regs, vcpu->arch.apic->regs, sizeof(s->regs));
+	s->highest_isr_cache = vcpu->arch.apic->highest_isr_cache;
+	return 0;
+}
+
+static int rr_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
+				      struct rsr_lapic *s)
+{
+	struct kvm_lapic_state *lapic = (struct kvm_lapic_state *)(s->regs);
+	kvm_apic_post_state_restore(vcpu, lapic);
+	update_cr8_intercept(vcpu);
+	return 0;
+}
+
+int rr_vcpu_make_checkpoint(struct kvm_vcpu *vcpu, int type, void *arg)
 {
 	int ret;
 	ret = 0;
-	
+
 	switch (type){
 	case KVM_GET_REGS: {
 		ret = kvm_arch_vcpu_ioctl_get_regs(vcpu, arg);
@@ -3364,7 +3356,7 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		break;
 	}
 	case KVM_GET_XSAVE: {
-		kvm_vcpu_ioctl_x86_get_xsave(vcpu, arg);	//void
+		kvm_vcpu_ioctl_x86_get_xsave(vcpu, arg);
 		break;
 	}
 	case KVM_GET_SREGS: {
@@ -3372,11 +3364,11 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		break;
 	}
 	case KVM_GET_XCRS: {
-		kvm_vcpu_ioctl_x86_get_xcrs(vcpu, arg);		//void
+		kvm_vcpu_ioctl_x86_get_xcrs(vcpu, arg);
 		break;
 	}
 	case KVM_GET_MSRS: {
-		//4 All parameters are kernel addresses, so use __msr_io
+		/* All parameters are kernel addresses, so use __msr_io */
 		struct kvm_msrs *msrs = arg;
 		struct kvm_msr_entry *entries = msrs->entries;
 		ret = __msr_io(vcpu, arg, entries, kvm_get_msr);
@@ -3387,7 +3379,7 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		break;
 	}
 	case KVM_GET_LAPIC: {
-		ret = kvm_vcpu_make_checkpoint_get_lapic(vcpu, arg);
+		ret = rr_vcpu_checkpoint_get_lapic(vcpu, arg);
 		break;
 	}
 	case KVM_GET_VCPU_EVENTS: {
@@ -3399,7 +3391,7 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		break;
 	}
 
-	//set vcpu status
+	/* Set vcpu status */
 	case KVM_SET_REGS: {
 		ret = kvm_arch_vcpu_ioctl_set_regs(vcpu, arg);
 		break;
@@ -3421,12 +3413,10 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		break;
 	}
 	case KVM_SET_MSRS:{
-		//All parameters are kernel addresses, so use __msr_io
+		/* All parameters are kernel addresses, so use __msr_io */
 		struct kvm_msrs *msrs = arg;
 		struct kvm_msr_entry *entries = msrs->entries;
-		//rsr-debug
 		ret = __msr_io(vcpu, arg, entries, do_set_msr);
-		//end rsr-debug
 		break;
 	}
 	case KVM_SET_MP_STATE:{
@@ -3434,7 +3424,7 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		break;
 	}
 	case KVM_SET_LAPIC: {
-		ret = kvm_vcpu_rollback_set_lapic(vcpu, arg);
+		ret = rr_vcpu_rollback_set_lapic(vcpu, arg);
 		break;
 	}
 	case KVM_SET_VCPU_EVENTS: {
@@ -3445,13 +3435,12 @@ int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
 		kvm_vcpu_ioctl_x86_set_debugregs(vcpu, arg);
 		break;
 	}
-	
+
 	default:
 		ret = -EINVAL;
 	}
 	return ret;
 }
-//end kvm_vcpu_checkpoint_rollback rsr
 
 int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf)
 {
@@ -4091,9 +4080,8 @@ static int kvm_read_guest_virt_helper(gva_t addr, void *val, unsigned int bytes,
 		unsigned toread = min(bytes, (unsigned)PAGE_SIZE - offset);
 		int ret;
 
-		if (gpa == UNMAPPED_GVA) {
+		if (gpa == UNMAPPED_GVA)
 			return X86EMUL_PROPAGATE_FAULT;
-		}
 		ret = kvm_read_guest(vcpu, gpa, data, toread);
 		if (ret < 0) {
 			r = X86EMUL_IO_NEEDED;
@@ -5859,10 +5847,6 @@ static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 	kvm_apic_update_tmr(vcpu, tmr);
 }
 
-extern int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
-			     int vector, int level, int trig_mode,
-			     unsigned long *dest_map);
-
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
 	int r;
@@ -5871,7 +5855,6 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_immediate_exit = false;
 
 restart:
-	/* Check if there is any requests which are not handled. */
 	if (vcpu->requests) {
 		if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu))
 			kvm_mmu_unload(vcpu);
@@ -5900,7 +5883,6 @@ restart:
 			r = 0;
 			goto out;
 		}
-
 		if (kvm_check_request(KVM_REQ_DEACTIVATE_FPU, vcpu)) {
 			vcpu->fpu_active = 0;
 			kvm_x86_ops->fpu_deactivate(vcpu);
@@ -5995,8 +5977,6 @@ restart:
 	preempt_disable();
 
 	kvm_x86_ops->prepare_guest_switch(vcpu);
-
-
 	if (vcpu->fpu_active)
 		kvm_load_guest_fpu(vcpu);
 	kvm_load_guest_xcr0(vcpu);
@@ -6096,8 +6076,9 @@ restart:
 		} else if (r == KVM_RR_ROLLBACK) {
 			kvm_x86_ops->tlb_flush(vcpu);
 			if (vcpu->guest_fpu_loaded) {
-				/* Unload fpu from the hardware before we rollback fpu,
-				 * or kvm may override the value we rollback.
+				/* Unload fpu from the hardware before we
+				 * rollback fpu, or kvm may override the value
+				 * we just rollback.
 				 */
 				vcpu->guest_fpu_loaded = 0;
 				fpu_save_init(&vcpu->arch.guest_fpu);

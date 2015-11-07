@@ -678,12 +678,9 @@ long kvm_arch_dev_ioctl(struct file *filp,
 long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg);
 
-//kvm_vcpu_checkpoint_rollback rsr
-int kvm_arch_vcpu_ioctl_to_make_checkpoint(struct kvm_vcpu *vcpu,
-					 int type, void *arg);
-//end kvm_vcpu_checkpoint_rollback rsr
+/* Record and replay */
+int rr_vcpu_make_checkpoint(struct kvm_vcpu *vcpu, int type, void *arg);
 
-// XELATEX
 void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
 
 int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf);
