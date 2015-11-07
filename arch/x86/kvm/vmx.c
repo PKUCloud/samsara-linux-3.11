@@ -471,9 +471,6 @@ struct vcpu_vmx {
 
 	/* Support for a guest hypervisor (nested VMX) */
 	struct nested_vmx nested;
-
-	/* XELATEX */
-	bool preemption_begin;
 };
 
 enum segment_cache_field {
@@ -2714,8 +2711,9 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf)
 #endif
 	if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_SECONDARY_CONTROLS) {
 		min2 = 0;
-		// XELATEX
-		//opt2 = SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
+		/* Record and replay.
+		 * opt2 = SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
+		 */
 		opt2 = SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |
 			SECONDARY_EXEC_WBINVD_EXITING |
 			SECONDARY_EXEC_ENABLE_VPID |
@@ -3343,8 +3341,6 @@ static void vmx_set_cr3(struct kvm_vcpu *vcpu, unsigned long cr3)
 		guest_cr3 = is_paging(vcpu) ? kvm_read_cr3(vcpu) :
 			vcpu->kvm->arch.ept_identity_map_addr;
 		ept_load_pdptrs(vcpu);
-		// XELATEX
-		//printk(KERN_ERR "XELATEX - vcpu=%d, cr3=0x%lx\n", vcpu->vcpu_id, cr3);
 	}
 
 	vmx_flush_tlb(vcpu);
@@ -3765,7 +3761,7 @@ static int init_rmode_tss(struct kvm *kvm)
 		goto out;
 	data = TSS_BASE_SIZE + TSS_REDIRECTION_SIZE;
 	r = kvm_write_guest_page_kvm(kvm, fn++, &data,
-			TSS_IOPB_BASE_OFFSET, sizeof(u16));
+				     TSS_IOPB_BASE_OFFSET, sizeof(u16));
 	if (r < 0)
 		goto out;
 	r = kvm_clear_guest_page(kvm, fn++, 0, PAGE_SIZE);
@@ -3776,8 +3772,8 @@ static int init_rmode_tss(struct kvm *kvm)
 		goto out;
 	data = ~0;
 	r = kvm_write_guest_page_kvm(kvm, fn, &data,
-				 RMODE_TSS_SIZE - 2 * PAGE_SIZE - 1,
-				 sizeof(u8));
+				     RMODE_TSS_SIZE - 2 * PAGE_SIZE - 1,
+				     sizeof(u8));
 	if (r < 0)
 		goto out;
 
@@ -3812,8 +3808,8 @@ static int init_rmode_identity_map(struct kvm *kvm)
 	for (i = 0; i < PT32_ENT_PER_PAGE; i++) {
 		tmp = (i << 22) + (_PAGE_PRESENT | _PAGE_RW | _PAGE_USER |
 			_PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_PSE);
-		r = kvm_write_guest_page_kvm(kvm, identity_map_pfn,
-				&tmp, i * sizeof(tmp), sizeof(tmp));
+		r = kvm_write_guest_page_kvm(kvm, identity_map_pfn, &tmp,
+					     i * sizeof(tmp), sizeof(tmp));
 		if (r < 0)
 			goto out;
 	}
@@ -4046,7 +4042,7 @@ static void vmx_deliver_posted_interrupt(struct kvm_vcpu *vcpu, int vector)
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	int r;
 
-	if (pi_test_and_set_pir(vector, &vmx->pi_desc))		// Set a bit and return its old value:  @vector: Bit to set   @vmx->pi_desc: Address to count from
+	if (pi_test_and_set_pir(vector, &vmx->pi_desc))
 		return;
 
 	r = pi_test_and_set_on(&vmx->pi_desc);
@@ -4064,9 +4060,8 @@ static void vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 
-	if (!pi_test_and_clear_on(&vmx->pi_desc)){
+	if (!pi_test_and_clear_on(&vmx->pi_desc))
 		return;
-	}
 
 	kvm_apic_update_irr(vcpu, vmx->pi_desc.pir);
 }
@@ -4588,6 +4583,7 @@ static int vmx_interrupt_allowed(struct kvm_vcpu *vcpu)
 			 */
 		}
 	}
+
 	return (vmcs_readl(GUEST_RFLAGS) & X86_EFLAGS_IF) &&
 		!(vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) &
 			(GUEST_INTR_STATE_STI | GUEST_INTR_STATE_MOV_SS));
@@ -4805,7 +4801,6 @@ static int handle_external_interrupt(struct kvm_vcpu *vcpu)
 static int handle_triple_fault(struct kvm_vcpu *vcpu)
 {
 	vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
-	//printk("handle_triple_fault\n");
 	return 0;
 }
 
@@ -5394,7 +5389,7 @@ static int handle_ept_misconfig(struct kvm_vcpu *vcpu)
 	ret = handle_mmio_page_fault_common(vcpu, gpa, true);
 	if (likely(ret == RET_MMIO_PF_EMULATE))
 		return x86_emulate_instruction(vcpu, gpa, 0, NULL, 0) ==
-				      	EMULATE_DONE;
+					      EMULATE_DONE;
 
 	if (unlikely(ret == RET_MMIO_PF_INVALID))
 		return kvm_mmu_page_fault(vcpu, gpa, 0, NULL, 0);
@@ -5499,15 +5494,6 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-void inline tm_wait_DMA(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = vcpu->kvm;
-
-	if (atomic_read(&(kvm->tm_dma)) == 1) {
-		down_interruptible(&(kvm->tm_dma_sem));
-	}
-}
-
 static void tm_check_version(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -5527,8 +5513,6 @@ static void tm_check_version(struct kvm_vcpu *vcpu)
 	atomic_inc(&kvm->tm_put_version);
 	// wake_up_interruptible(&kvm->tm_version_que);
 }
-
-extern void get_random_bytes(void *buf, int nbytes);
 
 /* Preemption handler for record and replay */
 static int handle_preemption(struct kvm_vcpu *vcpu)
@@ -5687,23 +5671,6 @@ static int handle_vmon(struct kvm_vcpu *vcpu)
 	skip_emulated_instruction(vcpu);
 	return 1;
 }
-
-static int handle_monitor_trap(struct kvm_vcpu *vcpu)
-{
-//	unsigned long rip = vmcs_readl(GUEST_RIP);
-//	if (rip == vcpu->monitor_rip) {
-//		printk(KERN_ERR "XELATEX - rip == vcpu->monitor_rip\n");
-//		return 1;
-//	}
-//	if (vcpu->monitor_sptep && (*(vcpu->sptep) & (1ull << 11))) {
-//		printk(KERN_ERR "XELATEX - handle_monitor_trap, rip=0x%lx\n", rip);
-		vmcs_clear_bits(CPU_BASED_VM_EXEC_CONTROL, CPU_BASED_MONITOR_TRAP_FLAG);
-//		*(vcpu->sptep) &= ~0x7ull;
-//		vcpu->monitor_sptep = false;
-//	}
-	return 1;
-}
-
 
 /*
  * Intel's VMX Instruction Reference specifies a common set of prerequisites
@@ -6353,7 +6320,6 @@ static int (*const kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_VMWRITE]                 = handle_vmwrite,
 	[EXIT_REASON_VMOFF]                   = handle_vmoff,
 	[EXIT_REASON_VMON]                    = handle_vmon,
-	[EXIT_REASON_MONITOR_TRAP_FLAG]       = handle_monitor_trap,
 	[EXIT_REASON_TPR_BELOW_THRESHOLD]     = handle_tpr_below_threshold,
 	[EXIT_REASON_APIC_ACCESS]             = handle_apic_access,
 	[EXIT_REASON_APIC_WRITE]              = handle_apic_write,
@@ -7262,8 +7228,6 @@ static struct kvm_vcpu *vmx_create_vcpu(struct kvm *kvm, unsigned int id)
 	cpu = get_cpu();
 	vmx_vcpu_load(&vmx->vcpu, cpu);
 	vmx->vcpu.cpu = cpu;
-	/* XELATEX */
-	vmx->preemption_begin = false;
 	err = vmx_vcpu_setup(vmx);
 	vmx_vcpu_put(&vmx->vcpu);
 	put_cpu();
