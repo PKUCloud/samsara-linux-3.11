@@ -42,6 +42,15 @@ static void vmcs_write32(unsigned long field, u32 value)
 	vmcs_writel(field, value);
 }
 
+static __always_inline u64 vmcs_read64(unsigned long field)
+{
+#ifdef CONFIG_X86_64
+	return vmcs_readl(field);
+#else
+	return vmcs_readl(field) | ((u64)vmcs_readl(field+1) << 32);
+#endif
+}
+
 /* Synchronize all vcpus before enabling record and replay.
  * Master will do things before slaves. After calling this function,
  * @nr_sync_vcpus and @nr_fin_vcpus will be set to 0.
@@ -876,7 +885,7 @@ static void rr_log_chunk(struct kvm_vcpu *vcpu)
 
 static void rr_vcpu_disable(struct kvm_vcpu *vcpu);
 
-int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
+static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
 	int i;
@@ -1003,7 +1012,52 @@ record_disable:
 	rr_vcpu_disable(vcpu);
 	goto out;
 }
-EXPORT_SYMBOL_GPL(rr_ape_check_chunk);
+
+int rr_check_chunk(struct kvm_vcpu *vcpu)
+{
+	u32 exit_reason = rr_ops->get_vmx_exit_reason(vcpu);
+	int ret;
+	int is_early_check;
+
+	#ifdef RR_EARLY_ROLLBACK
+	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
+		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
+		if (re_test_bit(gfn, vcpu->public_cb)) {
+			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
+			vcpu->is_early_rb = 1;
+		}
+	}
+	#endif
+
+	#ifdef RR_EARLY_CHECK
+	is_early_check = 0;
+	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
+		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
+		if (re_test_bit(gfn, vcpu->public_cb)) {
+			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
+			is_early_check = 1;
+		}
+	}
+	#endif
+	if (exit_reason != EXIT_REASON_EPT_VIOLATION
+	    && exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
+		ret = rr_ape_check_chunk(vcpu);
+		if (ret == -1) {
+			RR_ERR("error: vcpu=%d rr_ape_check_chunk() returns -1",
+			       vcpu->vcpu_id);
+		} else if (ret == 1) {
+			rr_make_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info);
+			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
+			return KVM_RR_COMMIT;
+		} else {
+			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
+			return KVM_RR_ROLLBACK;
+		}
+	}
+
+	return KVM_RR_SKIP;
+}
+EXPORT_SYMBOL_GPL(rr_check_chunk);
 
 void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 {

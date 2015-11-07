@@ -773,7 +773,6 @@ struct kvm_x86_ops {
 			       struct x86_instruction_info *info,
 			       enum x86_intercept_stage stage);
 	void (*handle_external_intr)(struct kvm_vcpu *vcpu);
-	int (*check_rr_commit)(struct kvm_vcpu *vcpu);
 };
 
 struct kvm_arch_async_pf {

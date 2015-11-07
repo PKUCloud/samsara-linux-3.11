@@ -6069,7 +6069,7 @@ restart:
 
 	if (vcpu->rr_info.enabled) {
 		rr_clear_all_request(&vcpu->rr_info);
-		r = kvm_x86_ops->check_rr_commit(vcpu);
+		r = rr_check_chunk(vcpu);
 		if (r == KVM_RR_COMMIT) {
 			rr_make_request(RR_REQ_CHECKPOINT, &vcpu->rr_info);
 			kvm_x86_ops->tlb_flush(vcpu);

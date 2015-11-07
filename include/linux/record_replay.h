@@ -53,6 +53,7 @@ struct rr_ops {
 	void (*ape_vmx_setup)(u32 timer_value);
 	void (*tlb_flush)(struct kvm_vcpu *vcpu);
 	void (*ape_vmx_clear)(void);
+	u32 (*get_vmx_exit_reason)(struct kvm_vcpu *vcpu);
 };
 
 void rr_init(struct rr_ops *rr_ops);
@@ -76,7 +77,7 @@ int rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 void rr_apic_reinsert_irq(struct kvm_vcpu *vcpu);
 void rr_gen_bitmap_from_spt(struct kvm_vcpu *vcpu);
 void rr_set_mmio_spte_mask(u64 mmio_mask);
-int rr_ape_check_chunk(struct kvm_vcpu *vcpu);
+int rr_check_chunk(struct kvm_vcpu *vcpu);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

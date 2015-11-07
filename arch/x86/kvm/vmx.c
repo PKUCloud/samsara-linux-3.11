@@ -6742,98 +6742,6 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
-{
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
-	u32 exit_reason = vmx->exit_reason;
-	int ret;
-	int is_early_check;
-
-	// First time, we do not handle it here.
-	if (!vcpu->rr_info.enabled) {
-		printk(KERN_ERR "error: vcpu %d %s when vcpu->is_recording is false\n",
-			   vcpu->vcpu_id, __func__);
-		return KVM_RR_SKIP;
-		/*
-		ret = vmx_tm_commit(vcpu);
-		if (ret == -1) {
-			printk(KERN_ERR "vcpu=%d, error: - %s, %d, vmx_tm_commit returns -1\n",
-				vcpu->vcpu_id, __func__, __LINE__);
-		}
-		vcpu->need_memory_commit = 1;
-		return KVM_RR_COMMIT;
-		*/
-	}
-
-/*
-	if (exit_reason == EXIT_REASON_IO_INSTRUCTION) {
-		print_record("vcpu=%d, EXIT_REASON_IO_INSTRUCTION\n", vcpu->vcpu_id);
-	} else if (exit_reason == EXIT_REASON_EPT_MISCONFIG) {
-		print_record("vcpu=%d, EXIT_REASON_EPT_MISCONFIG\n", vcpu->vcpu_id);
-	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
-*/
-	// OPT: early rollback
-	#ifdef RR_EARLY_ROLLBACK
-	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
-		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
-		if (re_test_bit(gfn, vcpu->public_cb)) {
-			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
-			vcpu->is_early_rb = 1;
-		}
-	}
-	#endif
-
-	// OPT: early check
-	#ifdef RR_EARLY_CHECK
-	is_early_check = 0;
-	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
-		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
-		if (re_test_bit(gfn, vcpu->public_cb)) {
-			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
-			is_early_check = 1;
-		}
-	}
-	#endif
-	if (exit_reason != EXIT_REASON_EPT_VIOLATION
-		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
-		ret = rr_ape_check_chunk(vcpu);
-		if (ret == -1) {
-			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
-				vcpu->vcpu_id, __func__);
-		} else if (ret == 1) {
-			rr_make_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info);
-			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
-			return KVM_RR_COMMIT;
-		} else {
-			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
-			return KVM_RR_ROLLBACK;
-		}
-	}
-
-	return KVM_RR_SKIP;
-/*
-	switch (exit_reason) {
-	// IO
-	case EXIT_REASON_IO_INSTRUCTION:
-	// MMIO
-	case EXIT_REASON_EPT_MISCONFIG:
-	// PREEMPTION 
-	case EXIT_REASON_PREEMPTION_TIMER:
-		ret = vmx_tm_commit(vcpu);
-		if (ret == -1) {
-			printk(KERN_ERR "error: %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
-		} else if (ret == 1) {
-			vcpu->need_memory_commit = 1;
-			return KVM_RR_COMMIT;
-		} else {
-			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
-			return KVM_RR_ROLLBACK;
-		}
-	}
-	return KVM_RR_SKIP;
-*/
-}
-
 static void update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 {
 	if (irr == -1 || tpr < irr) {
@@ -8378,7 +8286,6 @@ static struct kvm_x86_ops vmx_x86_ops = {
 
 	.check_intercept = vmx_check_intercept,
 	.handle_external_intr = vmx_handle_external_intr,
-	.check_rr_commit = vmx_check_rr_commit,
 };
 
 /* Record and replay */
@@ -8399,10 +8306,16 @@ static void vmx_rr_ape_clear(void)
 	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
 }
 
+static u32 vmx_rr_get_exit_reason(struct kvm_vcpu *vcpu)
+{
+	return to_vmx(vcpu)->exit_reason;
+}
+
 static struct rr_ops vmx_rr_ops = {
 	.ape_vmx_setup = vmx_rr_ape_setup,
 	.tlb_flush = vmx_flush_tlb,
 	.ape_vmx_clear = vmx_rr_ape_clear,
+	.get_vmx_exit_reason = vmx_rr_get_exit_reason,
 };
 
 static int __init vmx_init(void)
