@@ -196,6 +196,7 @@ static void mmu_free_roots(struct kvm_vcpu *vcpu);
 void kvm_mmu_set_mmio_spte_mask(u64 mmio_mask)
 {
 	shadow_mmio_mask = mmio_mask;
+	rr_set_mmio_spte_mask(mmio_mask);
 }
 EXPORT_SYMBOL_GPL(kvm_mmu_set_mmio_spte_mask);
 
@@ -2693,28 +2694,6 @@ static void direct_pte_prefetch(struct kvm_vcpu *vcpu, u64 *sptep)
 	__direct_pte_prefetch(vcpu, sp, sptep);
 }
 
-// Set access and dirty bitmap
-static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t addr)
-{
-	if (*sptep & VMX_EPT_DIRTY_BIT || *sptep & VMX_EPT_ACCESS_BIT) {
-		re_set_bit(gpa >> PAGE_SHIFT, &vcpu->access_bitmap);
-		if (*sptep & VMX_EPT_DIRTY_BIT) {
-			re_set_bit(gpa >> PAGE_SHIFT, &vcpu->dirty_bitmap);
-		}
-	}
-	*sptep &= ~(VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
-
-	/* Tamlok
-	 * Move the write mask
-	 * *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
-	 * Need to mark the page clean?
-	 * mmu_spte_update()?
-	 * For now, we don't withdraw the write permission here. Instead, we
-	 * do this when we commit or rollback private pages.
-	 */
-	// *sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
-}
-
 /* Tamlok
  * Separate memory with copy-on-write
  * Alloc a new page to replace the original page and update the spte, then add
@@ -2820,63 +2799,6 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 #define PT64_NR_PT_ENTRY	512
 #define SHADOW_PT_ADDR(address, index, level) \
 	(address + (index << PT64_LEVEL_SHIFT(level)))
-
-static void __mmu_walk_spt(struct kvm_vcpu *vcpu, hpa_t shadow_addr, int level, gpa_t gpa)
-{
-	u64 index;
-	gpa_t new_gpa;
-	hpa_t new_addr;
-	u64 *sptep;
-
-	if (level < PT_PAGE_TABLE_LEVEL)
-		return;
-
-	for (index = 0; index < PT64_NR_PT_ENTRY; index ++) {
-		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (!is_shadow_present_pte(*sptep))
-			continue;
-
-		/* Check if VMX_EPT_ACCESS_BIT is set, if not there is no need to walk
-		 * its children any more.
-		 */
-		if (!(*sptep & VMX_EPT_ACCESS_BIT)) {
-			continue;
-		}
-
-		new_gpa = SHADOW_PT_ADDR(gpa, index, level);
-		new_addr = *sptep & PT64_BASE_ADDR_MASK;
-		if (is_last_spte(*sptep, level)) {
-			__mmu_set_AD_bit(vcpu, sptep, new_gpa, new_addr);
-		} else {
- 			__mmu_walk_spt(vcpu, new_addr, level - 1, new_gpa);
-			*sptep &= ~VMX_EPT_ACCESS_BIT;
-		}
-	}
-}
-
-static void mmu_walk_spt(struct kvm_vcpu *vcpu)
-{
-	int level = vcpu->arch.mmu.shadow_root_level;
-	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-
-	if (level != PT64_ROOT_LEVEL) {
-		printk(KERN_ERR "error - NO PT64_ROOT_LEVEL support\n");
-		return;
-	}
-	if (vcpu->arch.mmu.root_level < PT64_ROOT_LEVEL &&
-			!vcpu->arch.mmu.direct_map)
-		--level;
-
-	__mmu_walk_spt(vcpu, shadow_addr, level, 0);
-}
-
-// XELATEX
-inline int tm_walk_mmu(struct kvm_vcpu *vcpu, int level)
-{
-	mmu_walk_spt(vcpu);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(tm_walk_mmu);
 
 static void kvm_send_hwpoison_signal(unsigned long address, struct task_struct *tsk)
 {

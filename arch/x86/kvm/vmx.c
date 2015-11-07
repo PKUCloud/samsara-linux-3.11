@@ -4203,9 +4203,6 @@ static void ept_set_mmio_spte_mask(void)
 	kvm_mmu_set_mmio_spte_mask((0x3ull << 62) | 0x6ull);
 }
 
-// XELATEX
-int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick);
-
 /*
  * Sets up the vmcs for emulated real mode.
  */
@@ -5502,93 +5499,6 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-extern int tm_walk_mmu(struct kvm_vcpu *vcpu, int level);
-
-void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu);
-#ifdef RR_ROLLBACK_PAGES
-void kvm_record_clear_rollback_pages(struct kvm_vcpu *vcpu);
-#endif
-
-void tm_disable(struct kvm_vcpu *vcpu)
-{
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
-	struct kvm *kvm = vcpu->kvm;
-
-	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu,"
-			"nr_vmexit=%llu, nr_conflict=%llu\n",
-			vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
-
-	kvm->tm_last_commit_vcpu = -1;
-	atomic_set(&kvm->tm_normal_commit, 1);
-	atomic_set(&kvm->tm_get_version, 0);
-	atomic_set(&kvm->tm_put_version, 1);
-	vcpu->nr_vmexit = 0;
-	vcpu->nr_sync = 0;
-	vcpu->nr_conflict = 0;
-	vcpu->exclusive_commit = 0;
-	vcpu->nr_rollback = 0;
-	vcpu->tm_version = 0;
-	vcpu->rr_info.enabled = false;
-
-	re_bitmap_destroy(&vcpu->access_bitmap);
-	re_bitmap_destroy(&vcpu->conflict_bitmap_1);
-	re_bitmap_destroy(&vcpu->conflict_bitmap_2);
-	re_bitmap_destroy(&vcpu->dirty_bitmap);
-	re_bitmap_destroy(&vcpu->DMA_access_bitmap);
-
-	kvm_record_clear_holding_pages(vcpu);
-#ifdef RR_ROLLBACK_PAGES
-	kvm_record_clear_rollback_pages(vcpu);
-#endif
-	vmx->preemption_begin = false;
-	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL, PIN_BASED_VMX_PREEMPTION_TIMER);
-	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
-}
-
-int tm_detect_conflict(struct region_bitmap *access_bm,
-		       struct region_bitmap *conflict_bm)
-{
-	return re_bitmap_intersects(conflict_bm, access_bm);	/* Notice the order */
-}
-
-void kvm_record_clear_holding_pages(struct kvm_vcpu *vcpu)
-{
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
-
-	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
-			link) {
-		rr_spte_set_pfn(private_page->sptep,
-				private_page->original_pfn);
-		rr_spte_withdraw_wperm(private_page->sptep);
-		kfree(pfn_to_kaddr(private_page->private_pfn));
-		list_del(&private_page->link);
-		kfree(private_page);
-		vcpu->arch.nr_holding_pages--;
-	}
-	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
-}
-
-#ifdef RR_ROLLBACK_PAGES
-void kvm_record_clear_rollback_pages(struct kvm_vcpu *vcpu)
-{
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
-
-	list_for_each_entry_safe(private_page, temp, &vcpu->arch.rollback_pages,
-				 link) {
-		rr_spte_set_pfn(private_page->sptep,
-				private_page->original_pfn);
-		rr_spte_withdraw_wperm(private_page->sptep);
-		kfree(pfn_to_kaddr(private_page->private_pfn));
-		list_del(&private_page->link);
-		kfree(private_page);
-		vcpu->arch.nr_rollback_pages--;
-	}
-	INIT_LIST_HEAD(&vcpu->arch.rollback_pages);
-}
-#endif
-
 void inline tm_wait_DMA(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -5619,149 +5529,6 @@ static void tm_check_version(struct kvm_vcpu *vcpu)
 }
 
 extern void get_random_bytes(void *buf, int nbytes);
-
-inline void record_real_log(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = vcpu->kvm;
-	unsigned long rcx, rip;
-	unsigned int bc;
-	if (vcpu->vcpu_id == kvm->last_record_vcpu_id)
-		return;
-	rcx = kvm_register_read(vcpu, VCPU_REGS_RCX);
-	rip = vmcs_readl(GUEST_RIP);
-	kvm->last_record_vcpu_id = vcpu->vcpu_id;
-	get_random_bytes(&bc, sizeof(unsigned int));
-	RR_LOG("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, bc);
-}
-
-int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
-{
-	struct kvm *kvm = vcpu->kvm;
-	int i;
-	int online_vcpus = atomic_read(&(kvm->online_vcpus));
-	int commit = 1;
-
-	if (vcpu->rr_info.enabled) {
-		tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-
-		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
-			/* Now anothter vcpu is in exclusive commit state */
-			if (wait_event_interruptible(kvm->tm_exclusive_commit_que,
-			    atomic_read(&kvm->tm_normal_commit) == 1)) {
-				printk(KERN_ERR "error: %s wait_event_interruptible() interrupted\n",
-					  __func__);
-				return -1;
-			}
-		}
-
-		down_read(&(kvm->tm_rwlock));
-		mutex_lock(&(kvm->tm_lock));
-
-		// Wait for DMA finished
-		//tm_wait_DMA(vcpu);
-
-		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
-			// Detect conflict
-			if (vcpu->is_early_rb ||
-			    tm_detect_conflict(&vcpu->access_bitmap,
-					       vcpu->public_cb) ||
-			    tm_detect_conflict(&vcpu->access_bitmap,
-					       &vcpu->DMA_access_bitmap)) {
-				commit = 0;
-				vcpu->nr_conflict++;
-				vcpu->is_early_rb = 0;
-			}
-		}
-
-		if (commit) {
-			if (vcpu->exclusive_commit) {
-				/* Exclusive commit state */
-				vcpu->exclusive_commit = 0;
-				atomic_set(&kvm->tm_normal_commit, 1);
-				wake_up_interruptible(&kvm->tm_exclusive_commit_que);
-			} else if (atomic_read(&kvm->tm_normal_commit) < 1) {
-				/* Now another vcpu is in exclusive commit state, need to rollback*/
-				commit = 0;
-				goto rollback;
-			}
-			// Set dirty bit
-			for (i=0; i<online_vcpus; i++) {
-				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
-					continue;
-				re_bitmap_or(kvm->vcpus[i]->public_cb,
-					     &vcpu->dirty_bitmap);
-			}
-
-			/* Commit here in the lock */
-			// tm_memory_commit(vcpu);
-			// Set last commit vcpu
-			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
-
-			vcpu->nr_rollback = 0;
-			record_real_log(vcpu);
-		} else {
-rollback:
-			vcpu->nr_rollback++;
-			/* Rollback here in the lock */
-			// tm_memory_rollback(vcpu);
-			if (!vcpu->exclusive_commit && vcpu->nr_rollback >= RR_CONSEC_RB_TIME) {
-				if (atomic_dec_and_test(&kvm->tm_normal_commit)) {
-					/* Now we can enter exclusive commit state */
-					vcpu->exclusive_commit = 1;
-				}
-			}
-		}
-		/* Get the tm_version */
-		// vcpu->tm_version = atomic_inc_return(&(kvm->tm_get_version));
-		/* Insert chunk_info to kvm->chunk_list */
-		vcpu->chunk_info.action = commit ? KVM_RR_COMMIT : KVM_RR_ROLLBACK;
-		vcpu->chunk_info.state = RR_CHUNK_BUSY;
-		rr_vcpu_insert_chunk_list(vcpu);
-
-		swap(vcpu->public_cb, vcpu->private_cb);
-		mutex_unlock(&(kvm->tm_lock));
-
-		if (commit) {
-			rr_commit_memory(vcpu);
-		} else rr_rollback_memory(vcpu);
-
-		// tm_check_version(vcpu);
-		rr_vcpu_set_chunk_state(vcpu, RR_CHUNK_FINISHED);
-
-		// Clear DMA bitmap
-		if (atomic_read(&(kvm->tm_dma)) == 0)
-			re_bitmap_clear(&vcpu->DMA_access_bitmap);
-		else
-			RR_ERR("error: vcpu=%d should not come here\n",
-			       vcpu->vcpu_id);
-		// mutex_unlock(&(kvm->tm_lock));
-		up_read(&(kvm->tm_rwlock));
-
-	} else {
-		/* Error to come here when vcpu->is_recording is false */
-		printk(KERN_ERR "error: vcpu=%d %s when vcpu->is_recording is false\n",
-			  vcpu->vcpu_id, __func__);
-		return -1;
-	}
-	// Reset bitmaps
-	re_bitmap_clear(&vcpu->access_bitmap);
-	re_bitmap_clear(&vcpu->dirty_bitmap);
-	re_bitmap_clear(vcpu->private_cb);
-
-	if (!rr_ctrl.enabled) {
-		goto record_disable;
-	}
-
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
-	vcpu->nr_sync ++;
-out:
-	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-	return commit;
-record_disable:
-	tm_disable(vcpu);
-	goto out;
-}
-EXPORT_SYMBOL_GPL(tm_unsync_commit);
 
 /* Preemption handler for record and replay */
 static int handle_preemption(struct kvm_vcpu *vcpu)
@@ -6975,12 +6742,6 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static int vmx_tm_commit(struct kvm_vcpu *vcpu)
-{
-	return tm_unsync_commit(vcpu, 1);
-}
-
-// XELATEX
 static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -7035,7 +6796,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	#endif
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 		&& exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
-		ret = vmx_tm_commit(vcpu);
+		ret = rr_ape_check_chunk(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
 				vcpu->vcpu_id, __func__);
@@ -8631,9 +8392,17 @@ static void vmx_rr_ape_setup(u32 timer_value)
 	RR_DLOG(INIT, "timer_value=%d", timer_value);
 }
 
+static void vmx_rr_ape_clear(void)
+{
+	vmcs_clear_bits(PIN_BASED_VM_EXEC_CONTROL,
+			PIN_BASED_VMX_PREEMPTION_TIMER);
+	vmcs_clear_bits(VM_EXIT_CONTROLS, VM_EXIT_SAVE_VMX_PREEMPTION_TIMER);
+}
+
 static struct rr_ops vmx_rr_ops = {
 	.ape_vmx_setup = vmx_rr_ape_setup,
 	.tlb_flush = vmx_flush_tlb,
+	.ape_vmx_clear = vmx_rr_ape_clear,
 };
 
 static int __init vmx_init(void)
