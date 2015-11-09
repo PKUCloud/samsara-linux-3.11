@@ -40,7 +40,6 @@
 
 #include <asm/checkpoint_rollback.h>
 
-
 #ifndef KVM_MMIO_SIZE
 #define KVM_MMIO_SIZE 8
 #endif

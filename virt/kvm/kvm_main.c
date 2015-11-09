@@ -1528,6 +1528,8 @@ int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 	int r;
 	unsigned long addr;
 
+	/* We assume that this function will not be called when recording */
+	RR_ASSERT(rr_ctrl.enabled == 0);
 	addr = gfn_to_hva(kvm, gfn);
 	if (kvm_is_error_hva(addr))
 		return -EFAULT;
@@ -1638,7 +1640,6 @@ int kvm_write_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 	if (slots->generation != ghc->generation)
 		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa, ghc->len);
 
-	// XELATEX
 	if (vcpu->rr_info.enabled)
 		return kvm_write_guest(vcpu, ghc->gpa, data, len);
 
@@ -1669,7 +1670,6 @@ int kvm_read_guest_cached(struct kvm_vcpu *vcpu, struct gfn_to_hva_cache *ghc,
 	if (slots->generation != ghc->generation)
 		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa, ghc->len);
 
-	// XELATEX
 	if (vcpu->rr_info.enabled)
 		return kvm_read_guest(vcpu, ghc->gpa, data, len);
 
@@ -1689,24 +1689,26 @@ EXPORT_SYMBOL_GPL(kvm_read_guest_cached);
 
 int kvm_clear_guest_page(struct kvm *kvm, gfn_t gfn, int offset, int len)
 {
-	// XELATEX
 	int i;
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 	int ret;
+	int res = 0;
 
-	if (kvm->vcpus[0] == NULL)
-		return kvm_write_guest_page_kvm(kvm, gfn, (const void *) empty_zero_page,
-				    offset, len);
-
-	for (i=0; i<online_vcpus; i++) {
-		ret = kvm_write_guest_page(kvm->vcpus[i], gfn, (const void *) empty_zero_page,
-				    offset, len);
-		if (ret)
-			return ret;
+	/* We assume that this function will not be called when recording */
+	RR_ASSERT(rr_ctrl.enabled == 0);
+	if (kvm->vcpus[0] == NULL || !(kvm->vcpus[0]->rr_info.enabled))
+		return kvm_write_guest_page_kvm(kvm, gfn,
+						(const void *) empty_zero_page,
+						offset, len);
+	for (i=0; i < online_vcpus; i++) {
+		ret = kvm_write_guest_page(kvm->vcpus[i], gfn,
+					   (const void *) empty_zero_page,
+					   offset, len);
+		if (ret) {
+			res = ret;
+		}
 	}
-	return 0;
-	//return kvm_write_guest_page(kvm, gfn, (const void *) empty_zero_page,
-	//			    offset, len);
+	return res;
 }
 EXPORT_SYMBOL_GPL(kvm_clear_guest_page);
 

@@ -128,7 +128,7 @@ static void __rtc_irq_eoi_tracking_restore_one(struct kvm_vcpu *vcpu)
 void kvm_rtc_eoi_tracking_restore_one(struct kvm_vcpu *vcpu)
 {
 	struct kvm_ioapic *ioapic = vcpu->kvm->arch.vioapic;
-	
+
 	spin_lock(&ioapic->lock);
 	__rtc_irq_eoi_tracking_restore_one(vcpu);
 	spin_unlock(&ioapic->lock);
@@ -334,6 +334,7 @@ int kvm_ioapic_set_irq(struct kvm_ioapic *ioapic, int irq, int irq_source_id,
 		ret = 1;
 	} else {
 		int edge = (entry.fields.trig_mode == IOAPIC_EDGE_TRIG);
+
 		if (irq == RTC_GSI && line_status &&
 			rtc_irq_check_coalesced(ioapic)) {
 			ret = 0; /* coalesced */
@@ -348,7 +349,7 @@ int kvm_ioapic_set_irq(struct kvm_ioapic *ioapic, int irq, int irq_source_id,
 	}
 out:
 	trace_kvm_ioapic_set_irq(entry.bits, irq, ret == 0);
-	spin_unlock(&ioapic->lock);	
+	spin_unlock(&ioapic->lock);
 	return ret;
 }
 
@@ -383,7 +384,7 @@ static void __kvm_ioapic_update_eoi(struct kvm_vcpu *vcpu,
 		 * is dropped it will be put into irr and will be delivered
 		 * after ack notifier returns.
 		 */
-		spin_unlock(&ioapic->lock);		
+		spin_unlock(&ioapic->lock);
 		kvm_notify_acked_irq(ioapic->kvm, KVM_IRQCHIP_IOAPIC, i);
 		spin_lock(&ioapic->lock);
 
@@ -437,7 +438,6 @@ static int ioapic_mmio_read(struct kvm_io_device *this, gpa_t addr, int len,
 
 	addr &= 0xff;
 	spin_lock(&ioapic->lock);
-	
 	switch (addr) {
 	case IOAPIC_REG_SELECT:
 		result = ioapic->ioregsel;
@@ -498,7 +498,6 @@ static int ioapic_mmio_write(struct kvm_io_device *this, gpa_t addr, int len,
 
 	addr &= 0xff;
 	spin_lock(&ioapic->lock);
-	
 	switch (addr) {
 	case IOAPIC_REG_SELECT:
 		ioapic->ioregsel = data & 0xFF; /* 8-bit register */
@@ -517,7 +516,6 @@ static int ioapic_mmio_write(struct kvm_io_device *this, gpa_t addr, int len,
 		break;
 	}
 	spin_unlock(&ioapic->lock);
-	
 	return 0;
 }
 
@@ -548,7 +546,7 @@ int kvm_ioapic_init(struct kvm *kvm)
 	ioapic = kzalloc(sizeof(struct kvm_ioapic), GFP_KERNEL);
 	if (!ioapic)
 		return -ENOMEM;
-	spin_lock_init(&ioapic->lock);	
+	spin_lock_init(&ioapic->lock);
 	kvm->arch.vioapic = ioapic;
 	kvm_ioapic_reset(ioapic);
 	kvm_iodevice_init(&ioapic->dev, &ioapic_mmio_ops);
@@ -585,7 +583,6 @@ int kvm_get_ioapic(struct kvm *kvm, struct kvm_ioapic_state *state)
 	spin_lock(&ioapic->lock);
 	memcpy(state, ioapic, sizeof(struct kvm_ioapic_state));
 	spin_unlock(&ioapic->lock);
-	
 	return 0;
 }
 
@@ -596,12 +593,10 @@ int kvm_set_ioapic(struct kvm *kvm, struct kvm_ioapic_state *state)
 		return -EINVAL;
 
 	spin_lock(&ioapic->lock);
-	
 	memcpy(ioapic, state, sizeof(struct kvm_ioapic_state));
 	update_handled_vectors(ioapic);
 	kvm_vcpu_request_scan_ioapic(kvm);
 	kvm_rtc_eoi_tracking_restore_all(ioapic);
 	spin_unlock(&ioapic->lock);
-
 	return 0;
 }

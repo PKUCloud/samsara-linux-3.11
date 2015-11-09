@@ -5289,7 +5289,6 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	gpa_t gpa;
 	u32 error_code;
 	int gla_validity;
-	//int ret;
 
 	exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
 
