@@ -1,3 +1,4 @@
+CONFIG_MODULE_SIG=n
 
 ccflags-y += -Ivirt/kvm -Iarch/x86/kvm
 

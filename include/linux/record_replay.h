@@ -78,6 +78,8 @@ void rr_apic_reinsert_irq(struct kvm_vcpu *vcpu);
 void rr_gen_bitmap_from_spt(struct kvm_vcpu *vcpu);
 void rr_set_mmio_spte_mask(u64 mmio_mask);
 int rr_check_chunk(struct kvm_vcpu *vcpu);
+void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn);
+void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

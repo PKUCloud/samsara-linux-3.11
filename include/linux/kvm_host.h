@@ -228,11 +228,6 @@ struct kvm_tm_page {
 	int write;
 };
 
-struct gfn_list {
-	struct list_head link;
-	gfn_t gfn;
-};
-
 /* Macros for chunk_info.state */
 #define RR_CHUNK_IDLE		0
 #define RR_CHUNK_BUSY		1
@@ -680,8 +675,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 
 /* Record and replay */
 int rr_vcpu_make_checkpoint(struct kvm_vcpu *vcpu, int type, void *arg);
-
-void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
 
 int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf);
 

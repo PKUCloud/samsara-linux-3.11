@@ -26,7 +26,7 @@ static int rr_dbflags = RR_DBBIT(GEN) | RR_DBBIT(INIT) | RR_DBBIT(MMU);
 	if (unlikely(!(x))) { \
 		pr_err("error: rr assertion failed! %s, %s, %s #%d\n", \
 		       #x, __FILE__, __func__, __LINE__); \
-		BUG(); } \
+		dump_stack(); } \
 	} while (0)
 
 #else

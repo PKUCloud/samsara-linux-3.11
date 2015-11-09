@@ -140,9 +140,6 @@ static int FNAME(update_accessed_dirty_bits)(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-// XELATEX
-void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
-
 /*
  * Fetch a guest pte for a guest virtual address
  */
@@ -220,7 +217,7 @@ retry_walk:
 		 * page to fill @ptep_user.
 		 */
 		if (vcpu->rr_info.enabled) {
-			kaddr = gfn_to_kaddr_ept(vcpu, real_gfn, 0);
+			kaddr = rr_ept_gfn_to_kaddr(vcpu, real_gfn, 0);
 			if (kaddr) {
 				memcpy(&pte, kaddr + offset, sizeof(pte));
 			} else {

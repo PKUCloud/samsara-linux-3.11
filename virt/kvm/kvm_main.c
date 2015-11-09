@@ -1458,30 +1458,25 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 	unsigned long addr;
 	void *kaddr;
 
+	addr = gfn_to_hva_read(kvm, gfn);
+	if (kvm_is_error_hva(addr))
+		return -EFAULT;
+
 	if (vcpu->rr_info.enabled) {
-		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 0);
+		kaddr = rr_ept_gfn_to_kaddr(vcpu, gfn, 0);
 		if (kaddr == NULL) {
-			addr = gfn_to_hva_read(kvm, gfn);
-			if (!kvm_is_error_hva(addr))
-				printk(KERN_ERR "error: %s get INVALID_PAGE of non-error hva: "
-					   "gfn=0x%llx, offset=0x%x\n", __func__, gfn, offset);
+			RR_ERR("error: vcpu=%d fail to get addr via ept for "
+			       "gfn 0x%llx, offset 0x%x", vcpu->vcpu_id,
+			       gfn, offset);
 			return -EFAULT;
 		}
 		memcpy(data, kaddr + offset, len);
 		return 0;
 	}
 
-	addr = gfn_to_hva_read(kvm, gfn);
-	if (kvm_is_error_hva(addr)) {
-		//printk(KERN_ERR "XELATEX - %s normal fault, is error hva.\n", __func__);
-		return -EFAULT;
-	}
 	r = kvm_read_hva(data, (void __user *)addr + offset, len);
-	if (r) {
-		//printk(KERN_ERR "error: %s normal fault, kvm_read_hva fail.\n",
-		//	   __func__);
+	if (r)
 		return -EFAULT;
-	}
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_read_guest_page);
@@ -1526,7 +1521,7 @@ int kvm_read_guest_atomic(struct kvm *kvm, gpa_t gpa, void *data,
 }
 EXPORT_SYMBOL(kvm_read_guest_atomic);
 
-// XELATEX
+/* Record and replay */
 int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 			 int offset, int len)
 {
@@ -1534,41 +1529,43 @@ int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 	unsigned long addr;
 
 	addr = gfn_to_hva(kvm, gfn);
-	if (kvm_is_error_hva(addr)) {
+	if (kvm_is_error_hva(addr))
 		return -EFAULT;
-	}
 	r = __copy_to_user((void __user *)addr + offset, data, len);
-	if (r) {
+	if (r)
 		return -EFAULT;
-	}
 	mark_page_dirty(kvm, gfn);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_write_guest_page_kvm);
 
-// XELATEX
 int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 			 int offset, int len)
 {
+	int r;
 	struct kvm *kvm = vcpu->kvm;
 	void *kaddr;
 	unsigned long addr;
 
+	addr = gfn_to_hva(kvm, gfn);
+	if (kvm_is_error_hva(addr))
+		return -EFAULT;
 	if (vcpu->rr_info.enabled) {
-		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
+		kaddr = rr_ept_gfn_to_kaddr(vcpu, gfn, 1);
 		if (kaddr == NULL) {
-			addr = gfn_to_hva(kvm, gfn);
-			if (!kvm_is_error_hva(addr)) {
-				printk(KERN_ERR "vcpu=%d, error: %s get INVALID_PAGE of non-error hva: "
-					   "gfn=0x%llx, offset=0x%x\n", vcpu->vcpu_id, __func__, gfn, offset);
-			}
+			RR_ERR("error: vcpu=%d fail to get addr via ept for "
+			       "gfn 0x%llx, offset 0x%x", vcpu->vcpu_id,
+			       gfn, offset);
 			return -EFAULT;
 		}
 		memcpy(kaddr + offset, data, len);
 		return 0;
 	}
-
-	return kvm_write_guest_page_kvm(kvm, gfn, data, offset, len);
+	r = __copy_to_user((void __user *)addr + offset, data, len);
+	if (r)
+		return -EFAULT;
+	mark_page_dirty(kvm, gfn);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_write_guest_page);
 

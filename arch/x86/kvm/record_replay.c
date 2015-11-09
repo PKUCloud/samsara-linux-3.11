@@ -244,6 +244,11 @@ EXPORT_SYMBOL_GPL(rr_vcpu_rollback);
 #define SHADOW_PT_ADDR(address, index, level) \
 	(address + (index << PT64_LEVEL_SHIFT(level)))
 
+#define PT64_INDEX(address, level)\
+	(((address) >> PT64_LEVEL_SHIFT(level)) & ((1 << PT64_LEVEL_BITS) - 1))
+
+#define SHADOW_PT_INDEX(addr, level) PT64_INDEX(addr, level)
+
 static u64 __read_mostly shadow_mmio_mask;
 
 static inline bool is_mmio_spte(u64 spte)
@@ -301,6 +306,145 @@ int rr_spte_check_pfn(u64 spte, pfn_t pfn)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rr_spte_check_pfn);
+
+/* Separate memory with copy-on-write
+ * Alloc a new page to replace the original page and update the spte, then add
+ * an item to vcpu->arch.private_pages list.
+ */
+void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
+{
+	void *new_page;
+	struct kvm_private_mem_page *private_mem_page;
+
+	/* Use GFP_ATOMIC here as it will be called while holding spinlock */
+	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
+	if (!private_mem_page) {
+		RR_ERR("error: vcpu=%d failed to kmalloc() for "
+		       "private_mem_page", vcpu->vcpu_id);
+		return;
+	}
+	new_page = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+	if (!new_page) {
+		RR_ERR("error: vcpu=%d failed to kmalloc() for "
+		       "new_page", vcpu->vcpu_id);
+		kfree(private_mem_page);
+		return;
+	}
+	private_mem_page->gfn = gfn;
+	private_mem_page->original_pfn = pfn;
+	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
+	private_mem_page->sptep = sptep;
+	copy_page(new_page, pfn_to_kaddr(pfn));
+	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
+
+	/* Add it to the list */
+	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
+	vcpu->arch.nr_private_pages++;
+}
+EXPORT_SYMBOL_GPL(rr_memory_cow);
+
+static int rr_clear_AD_bit_by_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t addr = (u64)gfn << PAGE_SHIFT;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+	unsigned index;
+	u64 *sptep;
+
+	RR_ASSERT(level == PT64_ROOT_LEVEL);
+	RR_ASSERT(shadow_addr != INVALID_PAGE);
+
+	for (; level >= PT_PAGE_TABLE_LEVEL; --level) {
+		index = SHADOW_PT_INDEX(addr, level);
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (unlikely(!is_shadow_present_pte(*sptep))) {
+			return -1;
+		}
+		*sptep &= ~(VMX_EPT_ACCESS_BIT);
+		if (is_last_spte(*sptep, level)) {
+			*sptep &= ~(VMX_EPT_DIRTY_BIT);
+			return 0;
+		}
+		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
+	}
+	return 0;
+}
+
+void *__rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
+{
+	int level = vcpu->arch.mmu.shadow_root_level;
+	hpa_t addr = (u64)gfn << PAGE_SHIFT;
+	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
+	unsigned index;
+	u64 *sptep;
+
+	RR_ASSERT(level == PT64_ROOT_LEVEL);
+	RR_ASSERT(shadow_addr != INVALID_PAGE);
+
+	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
+		index = SHADOW_PT_INDEX(addr, level);
+		sptep = ((u64 *)__va(shadow_addr)) + index;
+		if (!is_shadow_present_pte(*sptep)) {
+			return NULL;
+		}
+		*sptep |= VMX_EPT_ACCESS_BIT;
+		if (is_last_spte(*sptep, level)) {
+			if (write) {
+				if (!(*sptep & PT_WRITABLE_MASK)) {
+					return NULL;
+				}
+				*sptep |= VMX_EPT_DIRTY_BIT;
+			}
+			return (u64 *)__va(*sptep & PT64_BASE_ADDR_MASK);
+		}
+		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
+	}
+	return NULL;
+}
+
+int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
+		   bool prefault);
+
+struct gfn_list {
+	struct list_head link;
+	gfn_t gfn;
+};
+
+void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
+{
+	void *kaddr;
+	int r;
+	u32 error_code = 0;
+
+	kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
+	if (kaddr == NULL) {
+		if (write)
+			error_code |= PFERR_WRITE_MASK;
+		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
+		if (r < 0) {
+			return NULL;
+		}
+		kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
+		if (kaddr == NULL) {
+			return NULL;
+		}
+	}
+
+	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+	/* Generate commit again gfn list */
+	if (rr_check_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info)) {
+		if (write) {
+			struct gfn_list *gfn_node = kmalloc(sizeof(*gfn_node),
+							    GFP_ATOMIC);
+			gfn_node->gfn = gfn;
+			list_add(&gfn_node->link,
+				 &(vcpu->commit_again_gfn_list));
+		}
+		rr_clear_AD_bit_by_gfn(vcpu, gfn);
+	}
+	return kaddr;
+}
+EXPORT_SYMBOL_GPL(rr_ept_gfn_to_kaddr);
 
 #ifndef RR_HOLDING_PAGES
 /* Commit the private pages to the original ones. Called when a quantum is

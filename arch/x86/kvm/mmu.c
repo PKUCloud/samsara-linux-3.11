@@ -35,7 +35,6 @@
 #include <linux/srcu.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/rr_profile.h>
 
 #include <asm/page.h>
 #include <asm/cmpxchg.h>
@@ -1228,9 +1227,7 @@ static bool __rmap_write_protect(struct kvm *kvm, unsigned long *rmapp,
 	bool flush = false;
 
 	for (sptep = rmap_get_first(*rmapp, &iter); sptep;) {
-		// XELATEX
-		//BUG_ON(!(*sptep & PT_PRESENT_MASK));
-		BUG_ON(!((*sptep & PT_PRESENT_MASK) || (*sptep & PT_TM_RECORD)));
+		BUG_ON(!(*sptep & PT_PRESENT_MASK));
 		if (spte_write_protect(kvm, sptep, &flush, pt_protect)) {
 			sptep = rmap_get_first(*rmapp, &iter);
 			continue;
@@ -1294,9 +1291,7 @@ static int kvm_unmap_rmapp(struct kvm *kvm, unsigned long *rmapp,
 	int need_tlb_flush = 0;
 
 	while ((sptep = rmap_get_first(*rmapp, &iter))) {
-		// XELATEX
-		//BUG_ON(!(*sptep & PT_PRESENT_MASK));
-		BUG_ON(!((*sptep & PT_PRESENT_MASK) || (*sptep & PT_TM_RECORD)));
+		BUG_ON(!(*sptep & PT_PRESENT_MASK));
 		rmap_printk("kvm_rmap_unmap_hva: spte %p %llx\n", sptep, *sptep);
 
 		drop_spte(kvm, sptep);
@@ -1553,7 +1548,6 @@ static void kvm_mmu_free_page(struct kvm_mmu_page *sp)
 		free_page((unsigned long)sp->gfns);
 	kmem_cache_free(mmu_page_header_cache, sp);
 }
-EXPORT_SYMBOL_GPL(kvm_mmu_free_page);
 
 static unsigned kvm_page_table_hashfn(gfn_t gfn)
 {
@@ -2694,45 +2688,6 @@ static void direct_pte_prefetch(struct kvm_vcpu *vcpu, u64 *sptep)
 	__direct_pte_prefetch(vcpu, sp, sptep);
 }
 
-/* Tamlok
- * Separate memory with copy-on-write
- * Alloc a new page to replace the original page and update the spte, then add
- * an item to vcpu->arch.private_pages list.
- */
-void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
-			   gfn_t gfn)
-{
-	void *new_page;
-	struct kvm_private_mem_page *private_mem_page;
-	u64 old_spte;
-
-	/* We should use GFP_ATOMIC here, because it will be called while holding spinlock */
-	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
-	if (!private_mem_page) {
-		printk(KERN_ERR "error: vcpu=%d %s fail to kmalloc for "
-		       "private_mem_page\n", vcpu->vcpu_id, __func__);
-		return;
-	}
-	new_page = kmalloc(PAGE_SIZE, GFP_ATOMIC);
-	if (!new_page) {
-		printk(KERN_ERR "error: vcpu=%d %s fail to kmalloc for "
-		       "new_page\n", vcpu->vcpu_id, __func__);
-		kfree(private_mem_page);
-		return;
-	}
-	private_mem_page->gfn = gfn;
-	private_mem_page->original_pfn = pfn;
-	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
-	private_mem_page->sptep = sptep;
-	copy_page(new_page, pfn_to_kaddr(pfn));
-	old_spte = *sptep;
-	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
-
-	/* Add it to the list */
-	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
-	vcpu->arch.nr_private_pages++;
-}
-
 static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			int map_writable, int level, gfn_t gfn, pfn_t pfn,
 			bool prefault)
@@ -2748,32 +2703,28 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			pte_access = ACC_ALL;
 			if (vcpu->rr_info.enabled && !write) {
 				/* Read trap
-				 * Do not give the write mask so that vcpu will trap when
-				 * it writes to this page next time.
+				 * Do not give the write mask so that vcpu will
+				 * trap when it writes to this page next time.
 				 */
 				pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
 			}
 
 			mmu_set_spte(vcpu, iterator.sptep, pte_access,
-			//mmu_set_spte(vcpu, iterator.sptep, ACC_ALL,
 				     write, &emulate, level, gfn, pfn,
 				     prefault, map_writable);
-			// XELATEX
-			//*iterator.sptep |= PT_TM_RECORD;
 
-			/* Tamlok
-			 * Disable prefetch
+			/* Disable prefetch
+			 *
+			 *direct_pte_prefetch(vcpu, iterator.sptep);
 			 */
-			//direct_pte_prefetch(vcpu, iterator.sptep);
 			++vcpu->stat.pf_fixed;
 
-			if (vcpu->rr_info.enabled &&
-				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
-				if (!write) {
-				} else {
-					kvm_record_memory_cow(vcpu, iterator.sptep, pfn, gfn);
-					kvm_x86_ops->tlb_flush(vcpu);
-				}
+			if (write &&
+			    likely(is_shadow_present_pte(*iterator.sptep)) &&
+			    vcpu->rr_info.enabled) {
+				RR_ASSERT(!is_noslot_pfn(pfn));
+				rr_memory_cow(vcpu, iterator.sptep, pfn, gfn);
+				kvm_x86_ops->tlb_flush(vcpu);
 			}
 			break;
 		}
@@ -2789,16 +2740,12 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 
 			link_shadow_page(iterator.sptep, sp);
 		}
-		if (is_shadow_present_pte(*iterator.sptep)) {
-			*iterator.sptep |= VMX_EPT_ACCESS_BIT;
-		}
+		/* Record and replay */
+		RR_ASSERT(is_shadow_present_pte(*iterator.sptep));
+		*iterator.sptep |= VMX_EPT_ACCESS_BIT;
 	}
 	return emulate;
 }
-
-#define PT64_NR_PT_ENTRY	512
-#define SHADOW_PT_ADDR(address, index, level) \
-	(address + (index << PT64_LEVEL_SHIFT(level)))
 
 static void kvm_send_hwpoison_signal(unsigned long address, struct task_struct *tsk)
 {
@@ -2982,6 +2929,7 @@ static bool fast_page_fault(struct kvm_vcpu *vcpu, gva_t gva, int level,
 	 */
 	if (!spte_is_locklessly_modifiable(spte))
 		goto exit;
+
 	/*
 	 * Currently, fast page fault only works for direct mapping since
 	 * the gfn is not stable for indirect shadow page.
@@ -2992,6 +2940,7 @@ exit:
 	trace_fast_page_fault(vcpu, gva, error_code, iterator.sptep,
 			      spte, ret);
 	walk_shadow_page_lockless_end(vcpu);
+
 	return ret;
 }
 
@@ -3469,8 +3418,8 @@ static bool try_async_pf(struct kvm_vcpu *vcpu, bool prefault, gfn_t gfn,
 	return false;
 }
 
-static int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
-			  bool prefault)
+int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
+		   bool prefault)
 {
 	pfn_t pfn;
 	int r;
@@ -3520,11 +3469,9 @@ static int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
 	make_mmu_pages_available(vcpu);
 	if (likely(!force_pt_level))
 		transparent_hugepage_adjust(vcpu, &gfn, &pfn, &level);
-	// XELATEX
+	RR_ASSERT(level == PT_PAGE_TABLE_LEVEL);
 	r = __direct_map(vcpu, gpa, write, map_writable,
-			 PT_PAGE_TABLE_LEVEL, gfn, pfn, prefault);
-	//r = __direct_map(vcpu, gpa, write, map_writable,
-	//		 level, gfn, pfn, prefault);
+			 level, gfn, pfn, prefault);
 	spin_unlock(&vcpu->kvm->mmu_lock);
 
 	return r;
@@ -3534,144 +3481,7 @@ out_unlock:
 	kvm_release_pfn_clean(pfn);
 	return 0;
 }
-
-// XELATEX
-int gfn_clear_AD_bit(struct kvm_vcpu *vcpu, gfn_t gfn)
-{
-	int level = vcpu->arch.mmu.shadow_root_level;
-	hpa_t addr = (u64)gfn << PAGE_SHIFT;
-	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-	unsigned index;
-	u64 *sptep;
-
-	if (level != PT64_ROOT_LEVEL) {
-		printk(KERN_ERR "XELATEX - NO PT64_ROOT_LEVEL support\n");
-		return -1;
-	}
-
-	if (vcpu->arch.mmu.root_hpa == INVALID_PAGE) {
-		printk(KERN_ERR "XELATEX - root_hpa == INVALID_PAGE\n");
-		return -1;
-	}
-
-	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
-		index = SHADOW_PT_INDEX(addr, level);
-		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if ((u64)sptep == 0xffff87ffffffffffULL)
-			printk(KERN_ERR "vcpu=%d, index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
-						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
-				vcpu->vcpu_id, index, (u64)sptep, shadow_addr, (u64)__va(shadow_addr), level,
-				vcpu->arch.mmu.root_hpa);
-		if (!is_shadow_present_pte(*sptep)) {
-			return -1;
-		}
-		*sptep &= ~(VMX_EPT_ACCESS_BIT);
-		if (is_last_spte(*sptep, level)) {
-			*sptep &= ~(VMX_EPT_DIRTY_BIT);
-			return 0;
-		}
-		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
-	}
-	return 0;
-}
-
-void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
-{
-	int level = vcpu->arch.mmu.shadow_root_level;
-	hpa_t addr = (u64)gfn << PAGE_SHIFT;
-	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
-	unsigned index;
-	u64 *sptep;
-
-	if (unlikely(level != PT64_ROOT_LEVEL)) {
-		printk(KERN_ERR "error: vcpu=%d %s no PT64_ROOT_LEVEL support\n",
-		       vcpu->vcpu_id, __func__);
-		return NULL;
-	}
-
-	if (unlikely(vcpu->arch.mmu.root_hpa == INVALID_PAGE)) {
-		printk(KERN_ERR "error: vcpu=%d %s root_hpa == INVALID_PAGE\n",
-		       vcpu->vcpu_id, __func__);
-		return (void *)INVALID_PAGE;
-	}
-
-	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
-		index = SHADOW_PT_INDEX(addr, level);
-		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (unlikely((u64)sptep == 0xffff87ffffffffffULL))
-			printk(KERN_ERR "vcpu=%d, index=0x%x, sptep=0x%llx, shadow_addr=0x%llx, "
-						"va(shadow_addr)=0x%llx, level=%d, root_hpa=0x%llx\n",
-				vcpu->vcpu_id, index, (u64)sptep, shadow_addr, (u64)__va(shadow_addr), level,
-				vcpu->arch.mmu.root_hpa);
-		if (!is_shadow_present_pte(*sptep)) {
-			return NULL;
-		}
-		*sptep |= VMX_EPT_ACCESS_BIT;
-		if (is_last_spte(*sptep, level)) {
-			/*if (write)
-				*sptep |= PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE | PT_USER_MASK | VMX_EPT_DIRTY_BIT;
-			else
-				*sptep |= PT_USER_MASK;
-			*/
-			if (write) {
-				if (!(*sptep & PT_WRITABLE_MASK)) {
-					return NULL;
-				}
-				*sptep |= VMX_EPT_DIRTY_BIT;
-			}
-			return (u64 *)__va(*sptep & PT64_BASE_ADDR_MASK);
-		}
-		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
-	}
-
-	return NULL;
-}
-
-void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
-{
-	void *kaddr;
-	int r;
-	u32 error_code = 0;
-
-	/*if (gfn ==  0x1fc0d) {
-		printk(KERN_INFO "gfn_to_kaddr_ept(gfn 0x1fc0d, write %d)\n", write);
-		dump_stack();
-	}*/
-	kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
-	if (kaddr == NULL) {
-		if (write)
-			error_code |= PFERR_WRITE_MASK;
-		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
-		if (r < 0) {
-			printk(KERN_ERR "error: vcpu=%d %s tdp_page_fault() "
-			       "fail for gfn 0x%llx\n",
-				vcpu->vcpu_id, __func__, gfn);
-			return NULL;
-		}
-		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
-		if (kaddr == NULL) {
-			printk(KERN_ERR "error: vcpu=%d %s fail for gfn 0x%llx\n",
-				vcpu->vcpu_id, __func__, gfn);
-			return NULL;
-		}
-	} else if (kaddr == (void *)INVALID_PAGE)
-		return NULL;
-
-	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-
-	// Generate commit again gfn list
-	if (rr_check_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info)) {
-		if (write) {
-			struct gfn_list *gfn_node = kmalloc(sizeof(struct gfn_list), GFP_ATOMIC);
-			gfn_node->gfn = gfn;
-			list_add(&gfn_node->link, &(vcpu->commit_again_gfn_list));
-		}
-		gfn_clear_AD_bit(vcpu, gfn);
-	}
-
-	return kaddr;
-}
-EXPORT_SYMBOL_GPL(gfn_to_kaddr_ept);
+EXPORT_SYMBOL_GPL(tdp_page_fault);
 
 static void nonpaging_free(struct kvm_vcpu *vcpu)
 {
