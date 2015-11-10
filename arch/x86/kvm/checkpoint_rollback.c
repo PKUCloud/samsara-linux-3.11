@@ -512,7 +512,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 int kvm_arch_getset_registers(struct kvm_vcpu *vcpu, int set)
 {
 	int ret;
-	CPUX86State *env = &(vcpu->vcpu_checkpoint);
+	CPUX86State *env = &(vcpu->rr_info.vcpu_checkpoint);
 
 	ret = kvm_getset_regs(vcpu, env, set);
     if (ret < 0) {

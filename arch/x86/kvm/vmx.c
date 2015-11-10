@@ -7176,9 +7176,6 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	vmx_complete_atomic_exit(vmx);
 	vmx_recover_nmi_blocking(vmx);
 	vmx_complete_interrupts(vmx);
-
-	// XELATEX
-	vcpu->nr_vmexit ++;
 }
 
 static void vmx_free_vcpu(struct kvm_vcpu *vcpu)

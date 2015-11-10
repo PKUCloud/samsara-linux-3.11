@@ -6996,33 +6996,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	kvm_pmu_init(vcpu);
 
 	// XELATEX
-	INIT_LIST_HEAD(&(vcpu->commit_again_gfn_list));
-	vcpu->nr_vmexit = 0;
-	vcpu->nr_sync = 0;
-	vcpu->nr_conflict = 0;
-	re_bitmap_init(&vcpu->access_bitmap, true);
-	re_bitmap_init(&vcpu->conflict_bitmap_1, false);
-	re_bitmap_init(&vcpu->conflict_bitmap_2, false);
-	re_bitmap_init(&vcpu->dirty_bitmap, true);
-	re_bitmap_init(&vcpu->DMA_access_bitmap, false);
-	vcpu->public_cb = &vcpu->conflict_bitmap_1;
-	vcpu->private_cb = &vcpu->conflict_bitmap_2;
-	vcpu->need_dma_check = 0;
 	vcpu->tm_version = 0;
-	vcpu->chunk_info.vcpu_id = vcpu->vcpu_id;
-	vcpu->chunk_info.state = RR_CHUNK_IDLE;
-
-	INIT_LIST_HEAD(&vcpu->arch.private_pages);
-	vcpu->arch.nr_private_pages = 0;
-	INIT_LIST_HEAD(&vcpu->arch.holding_pages);
-	vcpu->arch.nr_holding_pages = 0;
-#ifdef RR_ROLLBACK_PAGES
-	INIT_LIST_HEAD(&vcpu->arch.rollback_pages);
-	vcpu->arch.nr_rollback_pages = 0;
-#endif
-	vcpu->exclusive_commit = 0;
-	vcpu->nr_rollback = 0;
-
 	return 0;
 fail_free_wbinvd_dirty_mask:
 	free_cpumask_var(vcpu->arch.wbinvd_dirty_mask);
@@ -7056,12 +7030,7 @@ void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 // XELATEX
 void kvm_arch_init_record(struct kvm *kvm)
 {
-	mutex_init(&(kvm->tm_lock));
-	spin_lock_init(&(kvm->chunk_list_lock));
-	INIT_LIST_HEAD(&(kvm->chunk_list));
-	kvm->tm_last_commit_vcpu = -1;
 	kvm->tm_dma_holding_sem = false;
-	atomic_set(&kvm->tm_normal_commit, 1);
 	atomic_set(&kvm->tm_get_version, 0);
 	atomic_set(&kvm->tm_put_version, 1);
 	init_rwsem(&(kvm->tm_rwlock));

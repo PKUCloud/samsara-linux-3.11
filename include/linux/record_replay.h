@@ -6,6 +6,8 @@
 #include <linux/mutex.h>
 #include <linux/list.h>
 #include <linux/kvm_types.h>
+#include <linux/region_bitmap.h>
+#include <asm/checkpoint_rollback.h>
 
 struct kvm;
 struct kvm_vcpu;
@@ -24,6 +26,18 @@ struct kvm_lapic;
 #define RR_REQ_COMMIT_AGAIN		1
 #define RR_REQ_POST_CHECK		2
 
+/* Macros for rr_chunk_info.state */
+#define RR_CHUNK_STATE_IDLE		0
+#define RR_CHUNK_STATE_BUSY		1
+#define RR_CHUNK_STATE_FINISHED		2
+
+struct rr_chunk_info {
+	struct list_head link;
+	int vcpu_id;
+	int action;	/* KVM_RR_COMMIT or KVM_RR_ROLLBACK */
+	int state;
+};
+
 struct rr_event {
 	struct list_head link;
 	int delivery_mode;
@@ -41,12 +55,46 @@ struct rr_vcpu_info {
 	bool is_master;		/* Used for synchronization */
 	struct list_head events_list;
 	struct mutex events_list_lock;
+	struct list_head commit_again_gfn_list;
+	/* Bitmaps */
+	struct region_bitmap access_bitmap;
+	struct region_bitmap dirty_bitmap;
+	struct region_bitmap conflict_bitmap_1;	/* Double buffers */
+	struct region_bitmap conflict_bitmap_2;
+	struct region_bitmap DMA_access_bitmap;
+	struct region_bitmap *public_cb;	/* Public conflict bitmap */
+	struct region_bitmap *private_cb;	/* Private conflict bitmap */
+
+	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
+	int nr_rollback;	/* Number of continuous rollback */
+	int check_dma;
+	struct CPUX86State vcpu_checkpoint;
+	struct rr_chunk_info chunk_info;
+	struct list_head private_pages;
+	int nr_private_pages;
+	struct list_head holding_pages; /* For pages that have been COW before */
+	int nr_holding_pages;
+#ifdef RR_ROLLBACK_PAGES
+	/* For pages that need to rollback */
+	struct list_head rollback_pages;
+	int nr_rollback_pages;
+#endif
 };
 
 /* Record and replay control info for kvm */
 struct rr_kvm_info {
 	atomic_t nr_sync_vcpus;
 	atomic_t nr_fin_vcpus;
+	struct mutex tm_lock;
+	struct list_head chunk_list;
+	spinlock_t chunk_list_lock;
+	int  last_commit_vcpu;
+	/* 1 if we can commit normally, otherwise someone is in exclusive
+     * commit status.
+     */
+	atomic_t normal_commit;
+	/* Id of the vcpu that just recorded in log */
+	int last_record_vcpu;
 };
 
 struct rr_ops {
@@ -57,7 +105,7 @@ struct rr_ops {
 };
 
 void rr_init(struct rr_ops *rr_ops);
-void rr_vcpu_info_init(struct rr_vcpu_info *rr_info);
+void rr_vcpu_info_init(struct kvm_vcpu *vcpu);
 void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info);
 int rr_vcpu_enable(struct kvm_vcpu *vcpu);
 void rr_vcpu_checkpoint(struct kvm_vcpu *vcpu);

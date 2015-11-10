@@ -1,6 +1,10 @@
 #ifndef _ASM_X86_CHECKPOINT_ROLLBACK_H
 #define _ASM_X86_CHECKPOINT_ROLLBACK_H
 
+#include <asm/kvm.h>
+
+struct kvm_vcpu;
+
 typedef struct MSRdata{
 	struct kvm_msrs info;
 	struct kvm_msr_entry entries[100];

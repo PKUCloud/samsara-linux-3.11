@@ -529,18 +529,6 @@ struct kvm_vcpu_arch {
 	 * instruction.
 	 */
 	bool write_fault_to_shadow_pgtable;
-
-
-	/* Tamlok */
-	struct list_head private_pages;
-	int nr_private_pages;
-	struct list_head holding_pages; /* For pages that have been COW before */
-	int nr_holding_pages;
-#ifdef RR_ROLLBACK_PAGES
-	/* For pages that need to rollback */
-	struct list_head rollback_pages;
-	int nr_rollback_pages;
-#endif
 };
 
 struct kvm_lpage_info {

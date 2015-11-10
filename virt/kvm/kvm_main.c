@@ -256,7 +256,7 @@ int kvm_vcpu_init(struct kvm_vcpu *vcpu, struct kvm *kvm, unsigned id)
 	if (r < 0)
 		goto fail_free_run;
 
-	rr_vcpu_info_init(&vcpu->rr_info);
+	rr_vcpu_info_init(vcpu);
 	return 0;
 
 fail_free_run:
@@ -1991,7 +1991,7 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 		for (i = 0; i < DMA_access->size; i++) {
 			for (j=0; j<online_vcpus; j++) {
 				re_set_bit(DMA_access->gfn[i],
-					   &kvm->vcpus[j]->DMA_access_bitmap);
+					   &kvm->vcpus[j]->rr_info.DMA_access_bitmap);
 			}
 		}
 		break;
@@ -2001,7 +2001,7 @@ static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
 		down_write(&(kvm->tm_rwlock));
 		kvm->tm_dma_holding_sem = true;
 		for (i=0; i<online_vcpus; i++) {
-			kvm->vcpus[i]->need_dma_check = 1;
+			kvm->vcpus[i]->rr_info.check_dma = 1;
 		}
 		//sema_init(&(kvm->tm_dma_sem), 0);
 		//atomic_set(&(kvm->tm_dma), 1);

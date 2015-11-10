@@ -27,7 +27,6 @@
 #include <asm/signal.h>
 // XELATEX
 #include <linux/rr_profile.h>
-#include <linux/region_bitmap.h>
 
 #include <linux/kvm.h>
 #include <linux/kvm_para.h>
@@ -37,8 +36,6 @@
 #include <linux/record_replay.h>
 
 #include <asm/kvm_host.h>
-
-#include <asm/checkpoint_rollback.h>
 
 #ifndef KVM_MMIO_SIZE
 #define KVM_MMIO_SIZE 8
@@ -227,18 +224,6 @@ struct kvm_tm_page {
 	int write;
 };
 
-/* Macros for chunk_info.state */
-#define RR_CHUNK_IDLE		0
-#define RR_CHUNK_BUSY		1
-#define RR_CHUNK_FINISHED	2
-
-struct chunk_info {
-	struct list_head link;
-	int vcpu_id;
-	int action;	/* KVM_RR_COMMIT or KVM_RR_ROLLBACK */
-	int state;
-};
-
 struct kvm_vcpu {
 	struct kvm *kvm;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -295,25 +280,8 @@ struct kvm_vcpu {
 	bool preempted;
 	struct kvm_vcpu_arch arch;
 	// XELATEX
-	struct list_head commit_again_gfn_list;
-	unsigned long long nr_vmexit;
-	unsigned long long nr_sync;
-	unsigned long long nr_conflict;
-	struct region_bitmap access_bitmap;
-	struct region_bitmap dirty_bitmap;
-	struct region_bitmap conflict_bitmap_1;	/* Double buffers */
-	struct region_bitmap conflict_bitmap_2;
-	struct region_bitmap DMA_access_bitmap;
-	struct region_bitmap *public_cb;	/* Public conflict bitmap */
-	struct region_bitmap *private_cb;	/* Private conflict bitmap */
-	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
-	int nr_rollback;	/* Number of continuous rollback */
-	int is_early_rb;
-	int need_dma_check;
 	/* Used to decide if this vcpu can go into guest or not, init to 0 */
 	int tm_version;
-	struct chunk_info chunk_info;
-	struct CPUX86State vcpu_checkpoint;
 
 	/* Record and replay */
 	struct rr_vcpu_info rr_info;
@@ -452,8 +420,6 @@ struct kvm {
 	long tlbs_dirty;
 	struct list_head devices;
 	// XELATEX
-	struct mutex tm_lock;
-	struct semaphore tm_dma_sem;
 	atomic_t tm_dma;
 	/* Used to decide if one vcpu can go into guest or not */
 	atomic_t tm_get_version; /* Init to 0 */
@@ -462,12 +428,6 @@ struct kvm {
 	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
 	bool tm_dma_holding_sem;	/* Whether DMA is holding the tm_rwlock */
 
-	struct list_head chunk_list;
-	spinlock_t chunk_list_lock;
-
-	int tm_last_commit_vcpu;
-	/* 1 if we can commit normally, otherwise someone is in exclusive commit status */
-	atomic_t tm_normal_commit;
 	/* If someone is in exclusive commit, we can't check and commit normally, just wait on
 	 * this queue.
 	 */
@@ -476,8 +436,6 @@ struct kvm {
 	 * to sleep in this queue.
 	 */
 	wait_queue_head_t tm_version_que;
-	/* vcpu that just record */
-	int last_record_vcpu_id;
 
 	/* Record and replay */
 	struct rr_kvm_info rr_info;
