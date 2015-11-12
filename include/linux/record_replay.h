@@ -83,6 +83,10 @@ struct rr_vcpu_info {
 
 /* Record and replay control info for kvm */
 struct rr_kvm_info {
+	/* State of record and replay. Will be set to true after all vcpus
+	 * have enabled recording.
+	 */
+	bool enabled;
 	atomic_t nr_sync_vcpus;
 	atomic_t nr_fin_vcpus;
 	struct mutex tm_lock;
@@ -90,8 +94,8 @@ struct rr_kvm_info {
 	spinlock_t chunk_list_lock;
 	int  last_commit_vcpu;
 	/* 1 if we can commit normally, otherwise someone is in exclusive
-     * commit status.
-     */
+	 * commit status.
+	 */
 	atomic_t normal_commit;
 	/* Id of the vcpu that just recorded in log */
 	int last_record_vcpu;

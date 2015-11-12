@@ -1529,7 +1529,7 @@ int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 	unsigned long addr;
 
 	/* We assume that this function will not be called when recording */
-	RR_ASSERT(rr_ctrl.enabled == 0);
+	RR_ASSERT(!kvm->rr_info.enabled);
 	addr = gfn_to_hva(kvm, gfn);
 	if (kvm_is_error_hva(addr))
 		return -EFAULT;
@@ -1695,7 +1695,7 @@ int kvm_clear_guest_page(struct kvm *kvm, gfn_t gfn, int offset, int len)
 	int res = 0;
 
 	/* We assume that this function will not be called when recording */
-	RR_ASSERT(rr_ctrl.enabled == 0);
+	RR_ASSERT(!kvm->rr_info.enabled);
 	if (kvm->vcpus[0] == NULL || !(kvm->vcpus[0]->rr_info.enabled))
 		return kvm_write_guest_page_kvm(kvm, gfn,
 						(const void *) empty_zero_page,
@@ -2452,7 +2452,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	case KVM_DMA_COMMIT: {
 		struct DMA_AC DMA_access;
 
-		if (!rr_ctrl.enabled && !kvm->tm_dma_holding_sem)
+		if (!kvm->rr_info.enabled && !kvm->tm_dma_holding_sem)
 			return 0;
 		r = -EFAULT;
 		if (copy_from_user(&DMA_access, argp, sizeof(struct DMA_AC)))

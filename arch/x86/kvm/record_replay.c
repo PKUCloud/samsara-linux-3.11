@@ -131,6 +131,7 @@ static int __rr_ape_init(struct kvm_vcpu *vcpu)
 	 */
 	if (vcpu->rr_info.is_master) {
 		vcpu->kvm->arch.mmu_valid_gen++;
+		vcpu->kvm->rr_info.enabled = true;
 	}
 	kvm_mmu_unload(vcpu);
 	kvm_mmu_reload(vcpu);
@@ -189,6 +190,8 @@ EXPORT_SYMBOL_GPL(rr_vcpu_info_init);
 
 void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info)
 {
+	memset(rr_kvm_info, 0, sizeof(*rr_kvm_info));
+	rr_kvm_info->enabled = false;
 	atomic_set(&rr_kvm_info->nr_sync_vcpus, 0);
 	atomic_set(&rr_kvm_info->nr_fin_vcpus, 0);
 	mutex_init(&rr_kvm_info->tm_lock);
@@ -196,7 +199,7 @@ void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info)
 	INIT_LIST_HEAD(&rr_kvm_info->chunk_list);
 	rr_kvm_info->last_commit_vcpu = -1;
 	atomic_set(&rr_kvm_info->normal_commit, 1);
-    rr_kvm_info->last_record_vcpu = -1;
+	rr_kvm_info->last_record_vcpu = -1;
 	RR_DLOG(INIT, "rr_kvm_info initialized");
 }
 EXPORT_SYMBOL_GPL(rr_kvm_info_init);
@@ -1282,11 +1285,13 @@ void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 }
 #endif
 
+/* FIXME: We need to sync before disabling recording. */
 static void rr_vcpu_disable(struct kvm_vcpu *vcpu)
 {
     struct rr_kvm_info *krr_info = &vcpu->kvm->rr_info;
 
 	krr_info->last_commit_vcpu = -1;
+	krr_info->enabled = false;
 	atomic_set(&krr_info->normal_commit, 1);
 	vcpu->rr_info.exclusive_commit = 0;
 	vcpu->rr_info.nr_rollback = 0;
