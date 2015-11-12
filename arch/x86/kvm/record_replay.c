@@ -1151,8 +1151,6 @@ rollback:
 				}
 			}
 		}
-		/* Get the tm_version */
-		// vcpu->tm_version = atomic_inc_return(&(kvm->tm_get_version));
 		/* Insert chunk_info to rr_info->chunk_list */
 		vcpu->rr_info.chunk_info.action = commit ? KVM_RR_COMMIT : KVM_RR_ROLLBACK;
 		vcpu->rr_info.chunk_info.state = RR_CHUNK_STATE_BUSY;
@@ -1165,7 +1163,6 @@ rollback:
 			rr_commit_memory(vcpu);
 		} else rr_rollback_memory(vcpu);
 
-		// tm_check_version(vcpu);
 		rr_vcpu_set_chunk_state(vcpu, RR_CHUNK_STATE_FINISHED);
 
 		// Clear DMA bitmap
@@ -1287,17 +1284,12 @@ void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 
 static void rr_vcpu_disable(struct kvm_vcpu *vcpu)
 {
-	struct kvm *kvm = vcpu->kvm;
-    struct rr_kvm_info *krr_info = &kvm->rr_info;
-	struct rr_kvm_info *rr_kvm_info = &vcpu->kvm->rr_info;
+    struct rr_kvm_info *krr_info = &vcpu->kvm->rr_info;
 
-	rr_kvm_info->last_commit_vcpu = -1;
+	krr_info->last_commit_vcpu = -1;
 	atomic_set(&krr_info->normal_commit, 1);
-	atomic_set(&kvm->tm_get_version, 0);
-	atomic_set(&kvm->tm_put_version, 1);
 	vcpu->rr_info.exclusive_commit = 0;
 	vcpu->rr_info.nr_rollback = 0;
-	vcpu->tm_version = 0;
 	vcpu->rr_info.enabled = false;
 
 	re_bitmap_destroy(&vcpu->rr_info.access_bitmap);

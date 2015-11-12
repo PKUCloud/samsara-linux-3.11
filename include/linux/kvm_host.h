@@ -279,10 +279,6 @@ struct kvm_vcpu {
 #endif
 	bool preempted;
 	struct kvm_vcpu_arch arch;
-	// XELATEX
-	/* Used to decide if this vcpu can go into guest or not, init to 0 */
-	int tm_version;
-
 	/* Record and replay */
 	struct rr_vcpu_info rr_info;
 };
@@ -421,9 +417,6 @@ struct kvm {
 	struct list_head devices;
 	// XELATEX
 	atomic_t tm_dma;
-	/* Used to decide if one vcpu can go into guest or not */
-	atomic_t tm_get_version; /* Init to 0 */
-	atomic_t tm_put_version; /* Init to 1 */
 	//rwlock_t tm_rwlock;	/* Read/write lock for DMA and vcpus */
 	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
 	bool tm_dma_holding_sem;	/* Whether DMA is holding the tm_rwlock */
@@ -432,11 +425,6 @@ struct kvm {
 	 * this queue.
 	 */
 	wait_queue_head_t tm_exclusive_commit_que;
-	/* If vcpu.tm_version does not equal kvm.tm_put_version, it will need
-	 * to sleep in this queue.
-	 */
-	wait_queue_head_t tm_version_que;
-
 	/* Record and replay */
 	struct rr_kvm_info rr_info;
 };

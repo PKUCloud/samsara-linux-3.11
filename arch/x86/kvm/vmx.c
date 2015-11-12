@@ -5493,26 +5493,6 @@ static int handle_invalid_op(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
-static void tm_check_version(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = vcpu->kvm;
-/*
-	if (atomic_read(&kvm->tm_put_version) != vcpu->tm_version) {
-		print_record("vcpu=%d %s sleep\n", vcpu->vcpu_id, __func__);
-		if (wait_event_interruptible(kvm->tm_version_que,
-		    atomic_read(&kvm->tm_put_version) == vcpu->tm_version)) {
-			printk(KERN_ERR "error: vcpu=%d %s interruptted\n",
-			       vcpu->vcpu_id, __func__);
-		}
-	}
-*/
-	while (atomic_read(&kvm->tm_put_version) != vcpu->tm_version) {
-		continue;
-	}
-	atomic_inc(&kvm->tm_put_version);
-	// wake_up_interruptible(&kvm->tm_version_que);
-}
-
 /* Preemption handler for record and replay */
 static int handle_preemption(struct kvm_vcpu *vcpu)
 {

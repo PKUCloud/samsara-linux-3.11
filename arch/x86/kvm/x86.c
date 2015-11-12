@@ -6994,9 +6994,6 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->arch.pv_time_enabled = false;
 	kvm_async_pf_hash_reset(vcpu);
 	kvm_pmu_init(vcpu);
-
-	// XELATEX
-	vcpu->tm_version = 0;
 	return 0;
 fail_free_wbinvd_dirty_mask:
 	free_cpumask_var(vcpu->arch.wbinvd_dirty_mask);
@@ -7031,11 +7028,8 @@ void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 void kvm_arch_init_record(struct kvm *kvm)
 {
 	kvm->tm_dma_holding_sem = false;
-	atomic_set(&kvm->tm_get_version, 0);
-	atomic_set(&kvm->tm_put_version, 1);
 	init_rwsem(&(kvm->tm_rwlock));
 	init_waitqueue_head(&kvm->tm_exclusive_commit_que);
-	init_waitqueue_head(&kvm->tm_version_que);
 }
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
