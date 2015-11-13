@@ -1169,11 +1169,7 @@ rollback:
 		rr_vcpu_set_chunk_state(vcpu, RR_CHUNK_STATE_FINISHED);
 
 		// Clear DMA bitmap
-		if (atomic_read(&(kvm->tm_dma)) == 0)
-			re_bitmap_clear(&vcpu->rr_info.DMA_access_bitmap);
-		else
-			RR_ERR("error: vcpu=%d should not come here\n",
-			       vcpu->vcpu_id);
+		re_bitmap_clear(&vcpu->rr_info.DMA_access_bitmap);
 		// mutex_unlock(&(kvm->rr_info.tm_lock));
 		up_read(&(kvm->tm_rwlock));
 

@@ -1979,38 +1979,33 @@ static int create_vcpu_fd(struct kvm_vcpu *vcpu)
 	return anon_inode_getfd("kvm-vcpu", &kvm_vcpu_fops, vcpu, O_RDWR);
 }
 
-// XELATEX
-static int kvm_vm_set_DMA_access(struct kvm *kvm, struct DMA_AC *DMA_access)
+/* Record and replay */
+static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
+					struct rr_dma_info *dma_info)
 {
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 	int i;
 
-	switch (DMA_access->cmd) {
-	case SET_DMA_DATA: {
+	switch (dma_info->cmd) {
+	case RR_DMA_SET_DATA: {
 		int j;
-		for (i = 0; i < DMA_access->size; i++) {
-			for (j=0; j<online_vcpus; j++) {
-				re_set_bit(DMA_access->gfn[i],
+		int gfn_size = dma_info->size;
+		for (i = 0; i < gfn_size; ++i) {
+			for (j = 0; j < online_vcpus; ++j) {
+				re_set_bit(dma_info->gfn[i],
 					   &kvm->vcpus[j]->rr_info.DMA_access_bitmap);
 			}
 		}
 		break;
 	}
-	case DMA_START:
-		// mutex_lock(&(kvm->tm_lock));
+	case RR_DMA_START:
 		down_write(&(kvm->tm_rwlock));
 		kvm->tm_dma_holding_sem = true;
-		for (i=0; i<online_vcpus; i++) {
+		for (i = 0; i < online_vcpus; ++i) {
 			kvm->vcpus[i]->rr_info.check_dma = 1;
 		}
-		//sema_init(&(kvm->tm_dma_sem), 0);
-		//atomic_set(&(kvm->tm_dma), 1);
 		break;
-	case DMA_FINISHED:
-		//for (i=0; i<online_vcpus; i++)
-		//	up(&(kvm->tm_dma_sem));
-		//atomic_set(&(kvm->tm_dma), 0);
-		// mutex_unlock(&(kvm->tm_lock));
+	case RR_DMA_FINISH:
 		up_write(&(kvm->tm_rwlock));
 		kvm->tm_dma_holding_sem = false;
 		break;
@@ -2444,21 +2439,20 @@ static long kvm_vm_ioctl(struct file *filp,
 	struct kvm *kvm = filp->private_data;
 	void __user *argp = (void __user *)arg;
 	int r;
+	struct rr_dma_info rr_dma_info;
 
 	if (kvm->mm != current->mm)
 		return -EIO;
 	switch (ioctl) {
-	// XELATEX
+	/* Record and replay */
 	case KVM_DMA_COMMIT: {
-		struct DMA_AC DMA_access;
-
 		if (!kvm->rr_info.enabled && !kvm->tm_dma_holding_sem)
 			return 0;
 		r = -EFAULT;
-		if (copy_from_user(&DMA_access, argp, sizeof(struct DMA_AC)))
+		if (copy_from_user(&rr_dma_info, argp, sizeof(rr_dma_info)))
 			goto out;
 
-		r = kvm_vm_set_DMA_access(kvm, &DMA_access);
+		r = rr_kvm_vm_ioctl_set_dma_info(kvm, &rr_dma_info);
 		break;
 	}
 	case KVM_CREATE_VCPU:

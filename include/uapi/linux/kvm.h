@@ -373,20 +373,6 @@ struct kvm_dirty_log {
 	};
 };
 
- // XELATEX
-#define SET_DMA_BEGIN 0
-#define SET_DMA_DATA  1
-#define SET_DMA_END   2
-#define DMA_START     3
-#define DMA_FINISHED  4
-
-#define DMA_AC_SIZE 32
-struct DMA_AC {
-	int cmd;
-	int size;
-	__u32 gfn[DMA_AC_SIZE];
-};
-
 /* for KVM_SET_SIGNAL_MASK */
 struct kvm_signal_mask {
 	__u32 len;
@@ -557,7 +543,6 @@ struct kvm_ppc_smmu_info {
 #define KVM_TRACE_DISABLE         __KVM_DEPRECATED_MAIN_0x08
 
 /* Record and replay control */
-
 #define KVM_RR_CTRL		_IO(KVMIO, 0x09)
 
 struct kvm_rr_ctrl {
@@ -901,9 +886,19 @@ struct kvm_device_attr {
 					struct kvm_userspace_memory_region)
 #define KVM_SET_TSS_ADDR          _IO(KVMIO,   0x47)
 #define KVM_SET_IDENTITY_MAP_ADDR _IOW(KVMIO,  0x48, __u64)
-// XELATEX
-#define KVM_DMA_COMMIT            _IOWR(KVMIO, 0x49, struct DMA_AC)
+/* Record and replay */
+#define KVM_DMA_COMMIT            _IOWR(KVMIO, 0x49, struct rr_dma_info)
 
+#define RR_DMA_START	0
+#define RR_DMA_FINISH	1
+#define RR_DMA_SET_DATA	2
+
+#define RR_DMA_INFO_GFN_SIZE	16
+struct rr_dma_info {
+	int cmd;
+	int size;
+	__u32 gfn[RR_DMA_INFO_GFN_SIZE];
+};
 
 /* enable ucontrol for s390 */
 struct kvm_s390_ucas_mapping {

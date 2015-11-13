@@ -415,12 +415,9 @@ struct kvm {
 #endif
 	long tlbs_dirty;
 	struct list_head devices;
-	// XELATEX
-	atomic_t tm_dma;
-	//rwlock_t tm_rwlock;	/* Read/write lock for DMA and vcpus */
 	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
-	bool tm_dma_holding_sem;	/* Whether DMA is holding the tm_rwlock */
-
+	/* Whether DMA is holding the tm_rwlock */
+	bool tm_dma_holding_sem;
 	/* If someone is in exclusive commit, we can't check and commit normally, just wait on
 	 * this queue.
 	 */
