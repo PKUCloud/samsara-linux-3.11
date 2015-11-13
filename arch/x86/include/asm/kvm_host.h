@@ -96,9 +96,6 @@
 
 #define ASYNC_PF_PER_VCPU 64
 
-// XELATEX
-#define KVM_DEFAULT_PREEMPTION_VALUE 50000
-
 struct kvm_vcpu;
 struct kvm;
 struct kvm_async_pf;
@@ -334,18 +331,6 @@ struct kvm_pmu {
 	struct kvm_pmc fixed_counters[INTEL_PMC_MAX_FIXED];
 	struct irq_work irq_work;
 	u64 reprogram_pmi;
-};
-
-
-/* Tamlok
- * Structure used for keeping info about private memory page
- */
-struct kvm_private_mem_page {
-	struct list_head link;
-	gfn_t gfn;
-	pfn_t original_pfn;
-	pfn_t private_pfn;
-	u64 *sptep;	/*Pointer of the spte that references this pfn */
 };
 
 struct kvm_vcpu_arch {

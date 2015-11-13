@@ -34,7 +34,7 @@ struct kvm_lapic;
 struct rr_chunk_info {
 	struct list_head link;
 	int vcpu_id;
-	int action;	/* KVM_RR_COMMIT or KVM_RR_ROLLBACK */
+	int action;	/* RR_CHUNK_COMMIT or RR_CHUNK_ROLLBACK */
 	int state;
 };
 
@@ -99,6 +99,13 @@ struct rr_kvm_info {
 	atomic_t normal_commit;
 	/* Id of the vcpu that just recorded in log */
 	int last_record_vcpu;
+	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
+	/* Whether DMA is holding the tm_rwlock */
+	bool dma_holding_sem;
+	/* If someone is in exclusive commit, we can't check and commit
+	 * normally, just wait on this queue.
+	 */
+	wait_queue_head_t exclu_commit_que;
 };
 
 struct rr_ops {
@@ -106,6 +113,15 @@ struct rr_ops {
 	void (*tlb_flush)(struct kvm_vcpu *vcpu);
 	void (*ape_vmx_clear)(void);
 	u32 (*get_vmx_exit_reason)(struct kvm_vcpu *vcpu);
+};
+
+/* Structure used for keeping info about cow  memory page */
+struct rr_cow_page {
+	struct list_head link;
+	gfn_t gfn;
+	pfn_t original_pfn;
+	pfn_t private_pfn;
+	u64 *sptep;	/*Pointer of the spte that references this pfn */
 };
 
 void rr_init(struct rr_ops *rr_ops);

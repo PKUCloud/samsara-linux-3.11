@@ -1985,6 +1985,7 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 {
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 	int i;
+	struct rr_kvm_info *krr_info = &kvm->rr_info;
 
 	switch (dma_info->cmd) {
 	case RR_DMA_SET_DATA: {
@@ -1999,15 +2000,15 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 		break;
 	}
 	case RR_DMA_START:
-		down_write(&(kvm->tm_rwlock));
-		kvm->tm_dma_holding_sem = true;
+		down_write(&krr_info->tm_rwlock);
+		krr_info->dma_holding_sem = true;
 		for (i = 0; i < online_vcpus; ++i) {
 			kvm->vcpus[i]->rr_info.check_dma = 1;
 		}
 		break;
 	case RR_DMA_FINISH:
-		up_write(&(kvm->tm_rwlock));
-		kvm->tm_dma_holding_sem = false;
+		up_write(&krr_info->tm_rwlock);
+		krr_info->dma_holding_sem = false;
 		break;
 	default:
 		break;
@@ -2446,7 +2447,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	switch (ioctl) {
 	/* Record and replay */
 	case KVM_DMA_COMMIT: {
-		if (!kvm->rr_info.enabled && !kvm->tm_dma_holding_sem)
+		if (!kvm->rr_info.enabled && !kvm->rr_info.dma_holding_sem)
 			return 0;
 		r = -EFAULT;
 		if (copy_from_user(&rr_dma_info, argp, sizeof(rr_dma_info)))

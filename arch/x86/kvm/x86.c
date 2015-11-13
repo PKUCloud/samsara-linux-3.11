@@ -6070,10 +6070,10 @@ restart:
 	if (vcpu->rr_info.enabled) {
 		rr_clear_all_request(&vcpu->rr_info);
 		r = rr_check_chunk(vcpu);
-		if (r == KVM_RR_COMMIT) {
+		if (r == RR_CHUNK_COMMIT) {
 			rr_make_request(RR_REQ_CHECKPOINT, &vcpu->rr_info);
 			kvm_x86_ops->tlb_flush(vcpu);
-		} else if (r == KVM_RR_ROLLBACK) {
+		} else if (r == RR_CHUNK_ROLLBACK) {
 			kvm_x86_ops->tlb_flush(vcpu);
 			if (vcpu->guest_fpu_loaded) {
 				/* Unload fpu from the hardware before we
@@ -6994,6 +6994,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->arch.pv_time_enabled = false;
 	kvm_async_pf_hash_reset(vcpu);
 	kvm_pmu_init(vcpu);
+
 	return 0;
 fail_free_wbinvd_dirty_mask:
 	free_cpumask_var(vcpu->arch.wbinvd_dirty_mask);
@@ -7024,14 +7025,6 @@ void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 		static_key_slow_dec(&kvm_no_apic_vcpu);
 }
 
-// XELATEX
-void kvm_arch_init_record(struct kvm *kvm)
-{
-	kvm->tm_dma_holding_sem = false;
-	init_rwsem(&(kvm->tm_rwlock));
-	init_waitqueue_head(&kvm->tm_exclusive_commit_que);
-}
-
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 {
 	if (type)
@@ -7052,9 +7045,6 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	spin_lock_init(&kvm->arch.pvclock_gtod_sync_lock);
 
 	pvclock_update_vm_gtod_copy(kvm);
-
-	// XELATEX
-	kvm_arch_init_record(kvm);
 
 	return 0;
 }

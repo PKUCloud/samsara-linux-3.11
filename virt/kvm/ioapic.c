@@ -350,6 +350,7 @@ int kvm_ioapic_set_irq(struct kvm_ioapic *ioapic, int irq, int irq_source_id,
 out:
 	trace_kvm_ioapic_set_irq(entry.bits, irq, ret == 0);
 	spin_unlock(&ioapic->lock);
+
 	return ret;
 }
 

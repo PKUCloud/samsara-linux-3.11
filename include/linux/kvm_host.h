@@ -212,18 +212,6 @@ struct kvm_mmio_fragment {
 	unsigned len;
 };
 
-// XELATEX
-struct kvm_tm_page {
-	struct list_head queue;
-	u64 *sptep;
-	int level;
-	struct kvm_vcpu *vcpu;
-	gpa_t gpa;
-	gfn_t gfn;
-	pfn_t pfn;
-	int write;
-};
-
 struct kvm_vcpu {
 	struct kvm *kvm;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -415,13 +403,7 @@ struct kvm {
 #endif
 	long tlbs_dirty;
 	struct list_head devices;
-	struct rw_semaphore tm_rwlock; /* Read/write lock for DMA and vcpus */
-	/* Whether DMA is holding the tm_rwlock */
-	bool tm_dma_holding_sem;
-	/* If someone is in exclusive commit, we can't check and commit normally, just wait on
-	 * this queue.
-	 */
-	wait_queue_head_t tm_exclusive_commit_que;
+
 	/* Record and replay */
 	struct rr_kvm_info rr_info;
 };

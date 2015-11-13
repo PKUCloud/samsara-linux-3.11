@@ -200,6 +200,9 @@ void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info)
 	rr_kvm_info->last_commit_vcpu = -1;
 	atomic_set(&rr_kvm_info->normal_commit, 1);
 	rr_kvm_info->last_record_vcpu = -1;
+	rr_kvm_info->dma_holding_sem = false;
+	init_rwsem(&rr_kvm_info->tm_rwlock);
+	init_waitqueue_head(&rr_kvm_info->exclu_commit_que);
 	RR_DLOG(INIT, "rr_kvm_info initialized");
 }
 EXPORT_SYMBOL_GPL(rr_kvm_info_init);
@@ -346,7 +349,7 @@ EXPORT_SYMBOL_GPL(rr_spte_check_pfn);
 void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 {
 	void *new_page;
-	struct kvm_private_mem_page *private_mem_page;
+	struct rr_cow_page *private_mem_page;
 
 	/* Use GFP_ATOMIC here as it will be called while holding spinlock */
 	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
@@ -484,8 +487,8 @@ EXPORT_SYMBOL_GPL(rr_ept_gfn_to_kaddr);
  */
 void rr_commit_memory(struct kvm_vcpu *vcpu)
 {
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
 	void *origin, *private;
 	u64 old_spte;
 
@@ -513,7 +516,7 @@ void rr_commit_memory(struct kvm_vcpu *vcpu)
 }
 #else
 /* Commit one private page */
-static inline void __commit_memory_page(struct kvm_private_mem_page *private_page)
+static inline void __commit_memory_page(struct rr_cow_page *private_page)
 {
 	void *origin, *private;
 
@@ -534,8 +537,8 @@ static inline void __commit_memory_page(struct kvm_private_mem_page *private_pag
  */
 void rr_commit_memory(struct kvm_vcpu *vcpu)
 {
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
 	gfn_t gfn;
 	struct list_head temp_list;
 	void *origin, *private;
@@ -661,8 +664,8 @@ EXPORT_SYMBOL_GPL(rr_commit_memory);
  */
 void rr_rollback_memory(struct kvm_vcpu *vcpu)
 {
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
 	u64 old_spte;
 
 	list_for_each_entry_safe(private_page, temp,
@@ -696,8 +699,8 @@ void rr_rollback_memory(struct kvm_vcpu *vcpu)
  */
 void rr_rollback_memory(struct kvm_vcpu *vcpu)
 {
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
 	gfn_t gfn;
 	void *origin, *private;
 
@@ -813,11 +816,11 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	// Wait for DMA finished
 	//tm_wait_DMA(vcpu);
 
-	down_read(&kvm->tm_rwlock);
+	down_read(&kvm->rr_info.tm_rwlock);
 
 	/* See if we really has something to commit again */
 	if (is_clean && !vcpu->rr_info.check_dma) {
-		up_read(&kvm->tm_rwlock);
+		up_read(&kvm->rr_info.tm_rwlock);
 		return;
 	}
 
@@ -842,7 +845,7 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 
 	re_bitmap_clear(&vcpu->rr_info.DMA_access_bitmap);
 
-	up_read(&kvm->tm_rwlock);
+	up_read(&kvm->rr_info.tm_rwlock);
 
 	/* Reset bitmaps */
 	re_bitmap_clear(&vcpu->rr_info.access_bitmap);
@@ -893,7 +896,7 @@ retry:
 			chunk->state = RR_CHUNK_STATE_IDLE;
 			break;
 		}
-		if (chunk->action == KVM_RR_COMMIT &&
+		if (chunk->action == RR_CHUNK_COMMIT &&
 		    chunk->state != RR_CHUNK_STATE_FINISHED) {
 			/* There is one vcpu before us and it is going to
 			 * commit, so we need to wait for it.
@@ -913,7 +916,7 @@ retry:
 static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 {
 	void *origin, *private;
-	struct kvm_private_mem_page *private_page, *temp;
+	struct rr_cow_page *private_page, *temp;
 
 	list_for_each_entry_safe(private_page, temp,
 				 &vcpu->rr_info.rollback_pages, link) {
@@ -930,7 +933,7 @@ static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 
 void rr_post_check(struct kvm_vcpu *vcpu)
 {
-	bool is_rollback = (vcpu->rr_info.chunk_info.action == KVM_RR_ROLLBACK);
+	bool is_rollback = (vcpu->rr_info.chunk_info.action == RR_CHUNK_ROLLBACK);
 
 	rr_vcpu_chunk_list_check_and_del(vcpu);
 	rr_clear_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
@@ -1090,7 +1093,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
 		if (!vcpu->rr_info.exclusive_commit &&
 		    atomic_read(&krr_info->normal_commit) < 1) {
 			/* Now anothter vcpu is in exclusive commit state */
-			if (wait_event_interruptible(kvm->tm_exclusive_commit_que,
+			if (wait_event_interruptible(krr_info->exclu_commit_que,
 			    atomic_read(&krr_info->normal_commit) == 1)) {
 				printk(KERN_ERR "error: %s wait_event_interruptible() interrupted\n",
 					  __func__);
@@ -1098,7 +1101,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
 			}
 		}
 
-		down_read(&(kvm->tm_rwlock));
+		down_read(&(kvm->rr_info.tm_rwlock));
 		mutex_lock(&(kvm->rr_info.tm_lock));
 
 		// Wait for DMA finished
@@ -1120,7 +1123,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
 				/* Exclusive commit state */
 				vcpu->rr_info.exclusive_commit = 0;
 				atomic_set(&krr_info->normal_commit, 1);
-				wake_up_interruptible(&kvm->tm_exclusive_commit_que);
+				wake_up_interruptible(&krr_info->exclu_commit_que);
 			} else if (atomic_read(&krr_info->normal_commit) < 1) {
 				/* Now another vcpu is in exclusive commit state, need to rollback*/
 				commit = 0;
@@ -1155,7 +1158,7 @@ rollback:
 			}
 		}
 		/* Insert chunk_info to rr_info->chunk_list */
-		vcpu->rr_info.chunk_info.action = commit ? KVM_RR_COMMIT : KVM_RR_ROLLBACK;
+		vcpu->rr_info.chunk_info.action = commit ? RR_CHUNK_COMMIT : RR_CHUNK_ROLLBACK;
 		vcpu->rr_info.chunk_info.state = RR_CHUNK_STATE_BUSY;
 		rr_vcpu_insert_chunk_list(vcpu);
 
@@ -1171,7 +1174,7 @@ rollback:
 		// Clear DMA bitmap
 		re_bitmap_clear(&vcpu->rr_info.DMA_access_bitmap);
 		// mutex_unlock(&(kvm->rr_info.tm_lock));
-		up_read(&(kvm->tm_rwlock));
+		up_read(&(kvm->rr_info.tm_rwlock));
 
 	} else {
 		/* Error to come here when vcpu->is_recording is false */
@@ -1230,21 +1233,21 @@ int rr_check_chunk(struct kvm_vcpu *vcpu)
 		} else if (ret == 1) {
 			rr_make_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info);
 			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
-			return KVM_RR_COMMIT;
+			return RR_CHUNK_COMMIT;
 		} else {
 			rr_make_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
-			return KVM_RR_ROLLBACK;
+			return RR_CHUNK_ROLLBACK;
 		}
 	}
 
-	return KVM_RR_SKIP;
+	return RR_CHUNK_SKIP;
 }
 EXPORT_SYMBOL_GPL(rr_check_chunk);
 
 void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 {
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
 
 	list_for_each_entry_safe(private_page, temp,
 				 &vcpu->rr_info.holding_pages,
@@ -1263,8 +1266,8 @@ void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 #ifdef RR_ROLLBACK_PAGES
 void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 {
-	struct kvm_private_mem_page *private_page;
-	struct kvm_private_mem_page *temp;
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
 
 	list_for_each_entry_safe(private_page, temp,
 				 &vcpu->rr_info.rollback_pages,

@@ -283,12 +283,6 @@ struct kvm_reinject_control {
 #define KVM_X86_SHADOW_INT_MOV_SS	0x01
 #define KVM_X86_SHADOW_INT_STI		0x02
 
-// XELATEX
-#define KVM_RR_COMMIT 0
-#define KVM_RR_ROLLBACK 1
-#define KVM_RR_SKIP 2
-#define KVM_RR_ERROR 3
-
 /* for KVM_GET/SET_VCPU_EVENTS */
 struct kvm_vcpu_events {
 	struct {
