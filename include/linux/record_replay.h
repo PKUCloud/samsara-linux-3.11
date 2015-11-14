@@ -13,6 +13,34 @@ struct kvm;
 struct kvm_vcpu;
 struct kvm_lapic;
 
+/* Macro switches */
+/* Each bit in the bitmap represents one memory page.
+ * 2G memory needs at least 2G/4k, that is 512 * 1024.
+ * Should also change RE_BITMAP_SIZE in region_bitmap.h.
+ */
+#define RR_BITMAP_SIZE		(1024 * 1024)
+
+/* Max consecutive rollback times before exclusive commit */
+#define RR_CONSEC_RB_TIME	3
+
+/* Early rollback and early check is exclusive */
+/* #define RR_EARLY_ROLLBACK */
+#define RR_EARLY_CHECK
+
+/* If defined, we use the vcpu.rr_info.holding_pages to hold a list of pages
+ * that have been COW. We will not withdraw the write permission and free
+ * the private pages until we have to.
+ */
+#define RR_HOLDING_PAGES
+/* Maximum length of vcpu.rr_info.holding_pages list */
+#define RR_HOLDING_PAGES_MAXM        512
+#define RR_HOLDING_PAGES_TARGET_NR   256
+
+/* If defined, we use a separate list to hold pages needed to rollback and
+ * before entering guest, we copy the new content of those pages.
+ */
+#define RR_ROLLBACK_PAGES
+
 #define RR_ASYNC_PREEMPTION_EPT	(KVM_RR_CTRL_MEM_EPT | KVM_RR_CTRL_MODE_ASYNC |\
 				 KVM_RR_CTRL_KICK_PREEMPTION)
 

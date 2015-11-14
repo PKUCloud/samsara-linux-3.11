@@ -1,10 +1,13 @@
 #ifndef __REGION_BITMAP_H
 #define __REGION_BITMAP_H
-#include <linux/rr_profile.h>
 #include <linux/bitmap.h>
 #include <linux/slab.h>
 
-#define RE_BITMAP_SIZE	TM_BITMAP_SIZE
+/* Each bit in the bitmap represents one memory page.
+ * 2G memory needs at least 2G/4k, that is 512 * 1024.
+ * Should be consistent with RR_BITMAP_SIZE in record_replay.h.
+ */
+#define RE_BITMAP_SIZE	(1024 * 1024)
 #define RE_BITMAP_MAX	0xffffffffffffffffULL
 #define RE_BITMAP_MIN	0x0ULL
 

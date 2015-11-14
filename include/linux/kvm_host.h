@@ -25,8 +25,6 @@
 #include <linux/irqflags.h>
 #include <linux/context_tracking.h>
 #include <asm/signal.h>
-// XELATEX
-#include <linux/rr_profile.h>
 
 #include <linux/kvm.h>
 #include <linux/kvm_para.h>
