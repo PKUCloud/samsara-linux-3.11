@@ -158,20 +158,12 @@ void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info);
 int rr_vcpu_enable(struct kvm_vcpu *vcpu);
 void rr_vcpu_checkpoint(struct kvm_vcpu *vcpu);
 void rr_vcpu_rollback(struct kvm_vcpu *vcpu);
-void rr_spte_set_pfn(u64 *sptep, pfn_t pfn);
-void rr_spte_withdraw_wperm(u64 *sptep);
-int rr_spte_check_pfn(u64 spte, pfn_t pfn);
-void rr_commit_memory(struct kvm_vcpu *vcpu);
-void rr_rollback_memory(struct kvm_vcpu *vcpu);
 void rr_commit_again(struct kvm_vcpu *vcpu);
-void rr_vcpu_insert_chunk_list(struct kvm_vcpu *vcpu);
-void rr_vcpu_set_chunk_state(struct kvm_vcpu *vcpu, int state);
 void rr_post_check(struct kvm_vcpu *vcpu);
 int rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 		       int vector, int level, int trig_mode,
 		       unsigned long *dest_map);
 void rr_apic_reinsert_irq(struct kvm_vcpu *vcpu);
-void rr_gen_bitmap_from_spt(struct kvm_vcpu *vcpu);
 void rr_set_mmio_spte_mask(u64 mmio_mask);
 int rr_check_chunk(struct kvm_vcpu *vcpu);
 void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn);
