@@ -34,7 +34,7 @@ struct kvm_lapic;
 #define RR_HOLDING_PAGES
 /* Maximum length of vcpu.rr_info.holding_pages list */
 #define RR_HOLDING_PAGES_MAXM        512
-#define RR_HOLDING_PAGES_TARGET_NR   256
+#define RR_HOLDING_PAGES_TARGET_NR   512
 
 /* If defined, we use a separate list to hold pages needed to rollback and
  * before entering guest, we copy the new content of those pages.
