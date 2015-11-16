@@ -5853,6 +5853,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_int_win = !irqchip_in_kernel(vcpu->kvm) &&
 		vcpu->run->request_interrupt_window;
 	bool req_immediate_exit = false;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 
 restart:
 	if (vcpu->requests) {
@@ -5906,11 +5907,11 @@ restart:
 	}
 
 	/* Enable record and replay */
-	if (unlikely(rr_ctrl.enabled && !vcpu->rr_info.enabled)) {
+	if (unlikely(rr_ctrl.enabled && !vrr_info->enabled)) {
 		rr_vcpu_enable(vcpu);
 	}
 
-	if (rr_check_request(RR_REQ_CHECKPOINT, &vcpu->rr_info)) {
+	if (rr_check_request(RR_REQ_CHECKPOINT, vrr_info)) {
 		if (vcpu->guest_fpu_loaded) {
 			/* We need to read back the value from hardware fpu
 			 * (unload the fpu).
@@ -5962,14 +5963,14 @@ restart:
 	 * fail at the first try to enter guest and we need to commit memory
 	 * again until it enters guest.
 	 */
-	if (rr_check_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info)) {
+	if (rr_check_request(RR_REQ_COMMIT_AGAIN, vrr_info)) {
 		rr_commit_again(vcpu);
 	}
 
 	/* Check if we need to wait other vcpus to finish commit/rollback
 	 * memory before we enter guest.
 	 */
-	if (rr_check_request(RR_REQ_POST_CHECK, &vcpu->rr_info)) {
+	if (rr_check_request(RR_REQ_POST_CHECK, vrr_info)) {
 		rr_post_check(vcpu);
 	}
 
@@ -6067,11 +6068,11 @@ restart:
 	if (vcpu->arch.apic_attention)
 		kvm_lapic_sync_from_vapic(vcpu);
 
-	if (vcpu->rr_info.enabled) {
-		rr_clear_all_request(&vcpu->rr_info);
+	if (vrr_info->enabled) {
+		rr_clear_all_request(vrr_info);
 		r = rr_check_chunk(vcpu);
 		if (r == RR_CHUNK_COMMIT) {
-			rr_make_request(RR_REQ_CHECKPOINT, &vcpu->rr_info);
+			rr_make_request(RR_REQ_CHECKPOINT, vrr_info);
 			kvm_x86_ops->tlb_flush(vcpu);
 		} else if (r == RR_CHUNK_ROLLBACK) {
 			kvm_x86_ops->tlb_flush(vcpu);
