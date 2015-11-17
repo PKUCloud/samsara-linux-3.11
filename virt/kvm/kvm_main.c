@@ -1979,6 +1979,21 @@ static int create_vcpu_fd(struct kvm_vcpu *vcpu)
 	return anon_inode_getfd("kvm-vcpu", &kvm_vcpu_fops, vcpu, O_RDWR);
 }
 
+static void rr_set_dma_bitmap(struct kvm *kvm, struct rr_dma_info *dma_info,
+			      int online_vcpus)
+{
+	struct region_bitmap *rbitmap;
+	int i, j;
+	int gfn_size = dma_info->size;
+
+	for (i = 0; i < online_vcpus; ++i) {
+		rbitmap = &kvm->vcpus[i]->rr_info.DMA_access_bitmap;
+		for (j = 0; j < gfn_size; ++j) {
+			re_set_bit(dma_info->gfn[j], rbitmap);
+		}
+	}
+}
+
 /* Record and replay */
 static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 					struct rr_dma_info *dma_info)
@@ -1989,14 +2004,7 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 
 	switch (dma_info->cmd) {
 	case RR_DMA_SET_DATA: {
-		int j;
-		int gfn_size = dma_info->size;
-		for (i = 0; i < gfn_size; ++i) {
-			for (j = 0; j < online_vcpus; ++j) {
-				re_set_bit(dma_info->gfn[i],
-					   &kvm->vcpus[j]->rr_info.DMA_access_bitmap);
-			}
-		}
+		rr_set_dma_bitmap(kvm, dma_info, online_vcpus);
 		break;
 	}
 	case RR_DMA_START:
@@ -2007,6 +2015,8 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 		}
 		break;
 	case RR_DMA_FINISH:
+		if (dma_info->size > 0)
+			rr_set_dma_bitmap(kvm, dma_info, online_vcpus);
 		up_write(&krr_info->tm_rwlock);
 		krr_info->dma_holding_sem = false;
 		break;
