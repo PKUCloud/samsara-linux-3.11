@@ -893,7 +893,7 @@ struct kvm_device_attr {
 #define RR_DMA_FINISH	1
 #define RR_DMA_SET_DATA	2
 
-#define RR_DMA_INFO_GFN_SIZE	16
+#define RR_DMA_INFO_GFN_SIZE	32
 struct rr_dma_info {
 	int cmd;
 	int size;
