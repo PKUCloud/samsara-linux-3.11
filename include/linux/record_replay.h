@@ -154,7 +154,8 @@ struct rr_cow_page {
 
 void rr_init(struct rr_ops *rr_ops);
 void rr_vcpu_info_init(struct kvm_vcpu *vcpu);
-void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info);
+void rr_kvm_info_init(struct kvm *kvm);
+void rr_kvm_info_exit(struct kvm *kvm);
 int rr_vcpu_enable(struct kvm_vcpu *vcpu);
 void rr_vcpu_checkpoint(struct kvm_vcpu *vcpu);
 void rr_vcpu_rollback(struct kvm_vcpu *vcpu);

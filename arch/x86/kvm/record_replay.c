@@ -9,6 +9,8 @@
 #include "lapic.h"
 
 struct rr_ops *rr_ops;
+/* Cache for struct rr_cow_page */
+struct kmem_cache *rr_cow_page_cache;
 
 /* Definitions from vmx.c */
 #define __ex(x) __kvm_handle_fault_on_reboot(x)
@@ -190,8 +192,10 @@ void rr_vcpu_info_init(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(rr_vcpu_info_init);
 
-void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info)
+void rr_kvm_info_init(struct kvm *kvm)
 {
+	struct rr_kvm_info *rr_kvm_info = &kvm->rr_info;
+
 	memset(rr_kvm_info, 0, sizeof(*rr_kvm_info));
 	rr_kvm_info->enabled = false;
 	atomic_set(&rr_kvm_info->nr_sync_vcpus, 0);
@@ -205,9 +209,29 @@ void rr_kvm_info_init(struct rr_kvm_info *rr_kvm_info)
 	rr_kvm_info->dma_holding_sem = false;
 	init_rwsem(&rr_kvm_info->tm_rwlock);
 	init_waitqueue_head(&rr_kvm_info->exclu_commit_que);
+
+	/* Init kmem_cache */
+	if (!rr_cow_page_cache) {
+		rr_cow_page_cache = kmem_cache_create("rr_cow_page",
+						      sizeof(struct rr_cow_page),
+						      0, 0, NULL);
+		if (!rr_cow_page_cache)
+			RR_ERR("error: fail to kmem_cache_create() for "
+			       "rr_cow_page");
+	}
 	RR_DLOG(INIT, "rr_kvm_info initialized");
 }
 EXPORT_SYMBOL_GPL(rr_kvm_info_init);
+
+void rr_kvm_info_exit(struct kvm *kvm)
+{
+	if (rr_cow_page_cache) {
+		kmem_cache_destroy(rr_cow_page_cache);
+		rr_cow_page_cache = NULL;
+	}
+	printk(KERN_INFO "%s: rr_kvm_info released", __func__);
+}
+EXPORT_SYMBOL_GPL(rr_kvm_info_exit);
 
 int rr_vcpu_enable(struct kvm_vcpu *vcpu)
 {
@@ -350,9 +374,9 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 	struct rr_cow_page *private_mem_page;
 
 	/* Use GFP_ATOMIC here as it will be called while holding spinlock */
-	private_mem_page = kmalloc(sizeof(*private_mem_page), GFP_ATOMIC);
+	private_mem_page = kmem_cache_alloc(rr_cow_page_cache, GFP_ATOMIC);
 	if (!private_mem_page) {
-		RR_ERR("error: vcpu=%d failed to kmalloc() for "
+		RR_ERR("error: vcpu=%d failed to kmem_cache_alloc() for "
 		       "private_mem_page", vcpu->vcpu_id);
 		return;
 	}
@@ -360,7 +384,7 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 	if (!new_page) {
 		RR_ERR("error: vcpu=%d failed to kmalloc() for "
 		       "new_page", vcpu->vcpu_id);
-		kfree(private_mem_page);
+		kmem_cache_free(rr_cow_page_cache, private_mem_page);
 		return;
 	}
 	private_mem_page->gfn = gfn;
@@ -512,7 +536,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
-		kfree(private_page);
+		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
 	}
 }
@@ -549,7 +573,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
-			kfree(private_page);
+			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		} else if (re_test_bit(gfn, &vrr_info->dirty_bitmap)) {
 			/* This page was touched by this vcpu in this quantum */
@@ -582,7 +606,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
-			kfree(private_page);
+			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_private_pages--;
 		}
 	}
@@ -596,7 +620,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
-			kfree(private_page);
+			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 			if (vrr_info->nr_holding_pages <=
 			    RR_HOLDING_PAGES_TARGET_NR) {
@@ -643,7 +667,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
-		kfree(private_page);
+		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
 	}
 }
@@ -685,7 +709,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
-			kfree(private_page);
+			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		}
 #else
@@ -699,7 +723,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kfree(pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
-			kfree(private_page);
+			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		}
 #endif
@@ -724,7 +748,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
-		kfree(private_page);
+		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
 #endif
 	}
@@ -1198,7 +1222,7 @@ static void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
-		kfree(private_page);
+		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_holding_pages--;
 	}
 }
@@ -1218,7 +1242,7 @@ void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kfree(pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
-		kfree(private_page);
+		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_rollback_pages--;
 	}
 }

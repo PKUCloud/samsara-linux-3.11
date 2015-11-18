@@ -522,7 +522,7 @@ static struct kvm *kvm_create_vm(unsigned long type)
 	list_add(&kvm->vm_list, &vm_list);
 	raw_spin_unlock(&kvm_lock);
 
-	rr_kvm_info_init(&kvm->rr_info);
+	rr_kvm_info_init(kvm);
 	return kvm;
 
 out_err:
@@ -629,6 +629,9 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	kvm_arch_free_vm(kvm);
 	hardware_disable_all();
 	mmdrop(mm);
+
+	/* Record and replay */
+	rr_kvm_info_exit(kvm);
 }
 
 void kvm_get_kvm(struct kvm *kvm)
