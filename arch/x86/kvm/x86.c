@@ -5907,7 +5907,7 @@ restart:
 	}
 
 	/* Enable record and replay */
-	if (unlikely(rr_ctrl.enabled && !vrr_info->enabled)) {
+	if (unlikely(!vrr_info->enabled && rr_ctrl.enabled)) {
 		rr_vcpu_enable(vcpu);
 	}
 
