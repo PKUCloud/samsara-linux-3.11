@@ -817,6 +817,7 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 				 link) {
 		re_set_bit(gfn_node->gfn, &vrr_info->dirty_bitmap);
 		list_del(&gfn_node->link);
+		kfree(gfn_node);
 	}
 
 	down_read(&krr_info->tm_rwlock);
