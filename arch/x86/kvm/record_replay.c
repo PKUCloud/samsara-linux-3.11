@@ -15,6 +15,8 @@ struct kmem_cache *rr_cow_page_cache;
 struct kmem_cache *rr_priv_page_cache;
 /* Cache for struct rr_event */
 struct kmem_cache *rr_event_cache;
+/* Cache for struct gfn_list */
+struct kmem_cache *rr_gfn_list_cache;
 
 /* Definitions from vmx.c */
 #define __ex(x) __kvm_handle_fault_on_reboot(x)
@@ -196,6 +198,11 @@ void rr_vcpu_info_init(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(rr_vcpu_info_init);
 
+struct gfn_list {
+	struct list_head link;
+	gfn_t gfn;
+};
+
 void rr_kvm_info_init(struct kvm *kvm)
 {
 	struct rr_kvm_info *rr_kvm_info = &kvm->rr_info;
@@ -247,10 +254,25 @@ void rr_kvm_info_init(struct kvm *kvm)
 		}
 	}
 
+	if (!rr_gfn_list_cache) {
+		rr_gfn_list_cache = kmem_cache_create("rr_gfn_list",
+						      sizeof(struct gfn_list),
+						      0, 0, NULL);
+		if (unlikely(!rr_gfn_list_cache)) {
+			RR_ERR("error: fail to kmem_cache_create() for "
+			       "gfn_list");
+			goto free_event;
+		}
+	}
+
 	RR_DLOG(INIT, "rr_kvm_info initialized");
 
 out:
 	return;
+
+free_event:
+	kmem_cache_destroy(rr_event_cache);
+	rr_event_cache = NULL;
 
 free_priv:
 	kmem_cache_destroy(rr_priv_page_cache);
@@ -275,6 +297,10 @@ void rr_kvm_info_exit(struct kvm *kvm)
 	if (rr_event_cache) {
 		kmem_cache_destroy(rr_event_cache);
 		rr_event_cache = NULL;
+	}
+	if (rr_gfn_list_cache) {
+		kmem_cache_destroy(rr_gfn_list_cache);
+		rr_gfn_list_cache = NULL;
 	}
 	printk(KERN_INFO "%s: rr_kvm_info released", __func__);
 }
@@ -510,11 +536,6 @@ static void *__rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
 		   bool prefault);
 
-struct gfn_list {
-	struct list_head link;
-	gfn_t gfn;
-};
-
 void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 {
 	void *kaddr;
@@ -539,14 +560,21 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	/* Generate commit again gfn list */
 	if (rr_check_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info)) {
 		if (write) {
-			struct gfn_list *gfn_node = kmalloc(sizeof(*gfn_node),
-							    GFP_ATOMIC);
+			struct gfn_list *gfn_node = kmem_cache_alloc(rr_gfn_list_cache,
+								     GFP_ATOMIC);
+			if (unlikely(!gfn_node)) {
+				RR_ERR("error: vcpu=%d failed to "
+				       "kmem_cache_alloc() for gfn_list",
+				       vcpu->vcpu_id);
+				goto out;
+			}
 			gfn_node->gfn = gfn;
 			list_add(&gfn_node->link,
 				 &(vcpu->rr_info.commit_again_gfn_list));
 		}
 		rr_clear_AD_bit_by_gfn(vcpu, gfn);
 	}
+out:
 	return kaddr;
 }
 EXPORT_SYMBOL_GPL(rr_ept_gfn_to_kaddr);
@@ -846,7 +874,7 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 				 link) {
 		re_set_bit(gfn_node->gfn, &vrr_info->dirty_bitmap);
 		list_del(&gfn_node->link);
-		kfree(gfn_node);
+		kmem_cache_free(rr_gfn_list_cache, gfn_node);
 	}
 
 	down_read(&krr_info->tm_rwlock);
