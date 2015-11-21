@@ -107,6 +107,7 @@ struct rr_vcpu_info {
 	struct list_head rollback_pages;
 	int nr_rollback_pages;
 #endif
+	bool tlb_flush;
 };
 
 /* Record and replay control info for kvm */

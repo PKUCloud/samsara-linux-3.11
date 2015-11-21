@@ -6000,6 +6000,11 @@ restart:
 		goto cancel_injection;
 	}
 
+	if (vrr_info->tlb_flush) {
+		kvm_x86_ops->tlb_flush(vcpu);
+		vrr_info->tlb_flush = false;
+	}
+
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
 
 	if (req_immediate_exit)

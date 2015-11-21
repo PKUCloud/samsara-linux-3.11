@@ -194,6 +194,7 @@ void rr_vcpu_info_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&rr_info->rollback_pages);
 	rr_info->nr_rollback_pages = 0;
 #endif
+	rr_info->tlb_flush = false;
 	RR_DLOG(INIT, "rr_vcpu_info initialized");
 }
 EXPORT_SYMBOL_GPL(rr_vcpu_info_init);
@@ -541,6 +542,7 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	void *kaddr;
 	int r;
 	u32 error_code = 0;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 
 	kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
 	if (kaddr == NULL) {
@@ -556,9 +558,9 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		}
 	}
 
-	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+	vrr_info->tlb_flush = true;
 	/* Generate commit again gfn list */
-	if (rr_check_request(RR_REQ_COMMIT_AGAIN, &vcpu->rr_info)) {
+	if (rr_check_request(RR_REQ_COMMIT_AGAIN, vrr_info)) {
 		if (write) {
 			struct gfn_list *gfn_node = kmem_cache_alloc(rr_gfn_list_cache,
 								     GFP_ATOMIC);
@@ -570,7 +572,7 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 			}
 			gfn_node->gfn = gfn;
 			list_add(&gfn_node->link,
-				 &(vcpu->rr_info.commit_again_gfn_list));
+				 &(vrr_info->commit_again_gfn_list));
 		}
 		rr_clear_AD_bit_by_gfn(vcpu, gfn);
 	}
@@ -912,8 +914,7 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	re_bitmap_clear(&vrr_info->dirty_bitmap);
 	re_bitmap_clear(vrr_info->private_cb);
 
-	/* Should flush right now instead of making request */
-	rr_ops->tlb_flush(vcpu);
+	vrr_info->tlb_flush = true;
 	return;
 }
 EXPORT_SYMBOL_GPL(rr_commit_again);
@@ -1248,7 +1249,7 @@ rollback:
 
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
 out:
-	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+	vrr_info->tlb_flush = true;
 	return commit;
 
 record_disable:
