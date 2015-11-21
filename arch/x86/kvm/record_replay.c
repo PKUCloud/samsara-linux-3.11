@@ -13,6 +13,8 @@ struct rr_ops *rr_ops;
 struct kmem_cache *rr_cow_page_cache;
 /* Cache for a private page of memory */
 struct kmem_cache *rr_priv_page_cache;
+/* Cache for struct rr_event */
+struct kmem_cache *rr_event_cache;
 
 /* Definitions from vmx.c */
 #define __ex(x) __kvm_handle_fault_on_reboot(x)
@@ -217,9 +219,11 @@ void rr_kvm_info_init(struct kvm *kvm)
 		rr_cow_page_cache = kmem_cache_create("rr_cow_page",
 						      sizeof(struct rr_cow_page),
 						      0, 0, NULL);
-		if (!rr_cow_page_cache)
+		if (!rr_cow_page_cache) {
 			RR_ERR("error: fail to kmem_cache_create() for "
 			       "rr_cow_page");
+			goto out;
+		}
 	}
 
 	if (!rr_priv_page_cache) {
@@ -228,12 +232,33 @@ void rr_kvm_info_init(struct kvm *kvm)
 		if (!rr_priv_page_cache) {
 			RR_ERR("error: fail to kmem_cache_create() for "
 			       "rr_priv_page");
-			kmem_cache_destroy(rr_cow_page_cache);
-			rr_cow_page_cache = NULL;
+			goto free_cow;
+		}
+	}
+
+	if (!rr_event_cache) {
+		rr_event_cache = kmem_cache_create("rr_event",
+						   sizeof(struct rr_event),
+						   0, 0, NULL);
+		if (!rr_event_cache) {
+			RR_ERR("error: fail to kmem_cache_create() for "
+			       "rr_event");
+			goto free_priv;
 		}
 	}
 
 	RR_DLOG(INIT, "rr_kvm_info initialized");
+
+out:
+	return;
+
+free_priv:
+	kmem_cache_destroy(rr_priv_page_cache);
+	rr_priv_page_cache = NULL;
+
+free_cow:
+	kmem_cache_destroy(rr_cow_page_cache);
+	rr_cow_page_cache = NULL;
 }
 EXPORT_SYMBOL_GPL(rr_kvm_info_init);
 
@@ -246,6 +271,10 @@ void rr_kvm_info_exit(struct kvm *kvm)
 	if (rr_priv_page_cache) {
 		kmem_cache_destroy(rr_priv_page_cache);
 		rr_priv_page_cache = NULL;
+	}
+	if (rr_event_cache) {
+		kmem_cache_destroy(rr_event_cache);
+		rr_event_cache = NULL;
 	}
 	printk(KERN_INFO "%s: rr_kvm_info released", __func__);
 }
@@ -279,7 +308,7 @@ static void __rr_vcpu_clean_events(struct kvm_vcpu *vcpu)
 		       e->trig_mode, vcpu->arch.regs[VCPU_REGS_RIP],
 		       0, vcpu->arch.regs[VCPU_REGS_RCX]);
 		list_del(&e->link);
-		kfree(e);
+		kmem_cache_free(rr_event_cache, e);
 	}
 }
 
@@ -960,7 +989,14 @@ int rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 
 	if (vrr_info->enabled) {
 		mutex_lock(&(vrr_info->events_list_lock));
-		rr_event = kmalloc(sizeof(struct rr_event), GFP_KERNEL);
+		rr_event = kmem_cache_alloc(rr_event_cache, GFP_KERNEL);
+		if (unlikely(!rr_event)) {
+			RR_ERR("error: failed to kmem_cache_alloc() for "
+			       "rr_event");
+			mutex_unlock(&(vrr_info->events_list_lock));
+			goto out;
+		}
+
 		rr_event->delivery_mode = delivery_mode;
 		rr_event->vector = vector;
 		rr_event->level = level;
@@ -969,7 +1005,7 @@ int rr_apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 		list_add(&(rr_event->link), &(vrr_info->events_list));
 		mutex_unlock(&(vrr_info->events_list_lock));
 	}
-
+out:
 	return apic_accept_irq_without_record(apic, delivery_mode, vector,
 					      level, trig_mode, dest_map);
 }
