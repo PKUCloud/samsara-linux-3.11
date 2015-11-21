@@ -11,6 +11,8 @@
 struct rr_ops *rr_ops;
 /* Cache for struct rr_cow_page */
 struct kmem_cache *rr_cow_page_cache;
+/* Cache for a private page of memory */
+struct kmem_cache *rr_priv_page_cache;
 
 /* Definitions from vmx.c */
 #define __ex(x) __kvm_handle_fault_on_reboot(x)
@@ -219,6 +221,18 @@ void rr_kvm_info_init(struct kvm *kvm)
 			RR_ERR("error: fail to kmem_cache_create() for "
 			       "rr_cow_page");
 	}
+
+	if (!rr_priv_page_cache) {
+		rr_priv_page_cache = kmem_cache_create("rr_priv_page",
+						       PAGE_SIZE, 0, 0, NULL);
+		if (!rr_priv_page_cache) {
+			RR_ERR("error: fail to kmem_cache_create() for "
+			       "rr_priv_page");
+			kmem_cache_destroy(rr_cow_page_cache);
+			rr_cow_page_cache = NULL;
+		}
+	}
+
 	RR_DLOG(INIT, "rr_kvm_info initialized");
 }
 EXPORT_SYMBOL_GPL(rr_kvm_info_init);
@@ -228,6 +242,10 @@ void rr_kvm_info_exit(struct kvm *kvm)
 	if (rr_cow_page_cache) {
 		kmem_cache_destroy(rr_cow_page_cache);
 		rr_cow_page_cache = NULL;
+	}
+	if (rr_priv_page_cache) {
+		kmem_cache_destroy(rr_priv_page_cache);
+		rr_priv_page_cache = NULL;
 	}
 	printk(KERN_INFO "%s: rr_kvm_info released", __func__);
 }
@@ -380,9 +398,10 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 		       "private_mem_page", vcpu->vcpu_id);
 		return;
 	}
-	new_page = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+
+	new_page = kmem_cache_alloc(rr_priv_page_cache, GFP_ATOMIC);
 	if (!new_page) {
-		RR_ERR("error: vcpu=%d failed to kmalloc() for "
+		RR_ERR("error: vcpu=%d failed to kmem_cache_alloc() for "
 		       "new_page", vcpu->vcpu_id);
 		kmem_cache_free(rr_cow_page_cache, private_mem_page);
 		return;
@@ -534,7 +553,8 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 				private_page->original_pfn);
 		/* Widthdraw the write permission */
 		rr_spte_withdraw_wperm(private_page->sptep);
-		kfree(pfn_to_kaddr(private_page->private_pfn));
+		kmem_cache_free(rr_priv_page_cache,
+				pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
@@ -571,7 +591,8 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			rr_spte_set_pfn(private_page->sptep,
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
-			kfree(pfn_to_kaddr(private_page->private_pfn));
+			kmem_cache_free(rr_priv_page_cache,
+					pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
@@ -604,7 +625,8 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 					private_page->original_pfn);
 			/* Widthdraw the write permission */
 			rr_spte_withdraw_wperm(private_page->sptep);
-			kfree(pfn_to_kaddr(private_page->private_pfn));
+			kmem_cache_free(rr_priv_page_cache,
+					pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_private_pages--;
@@ -618,7 +640,8 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			rr_spte_set_pfn(private_page->sptep,
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
-			kfree(pfn_to_kaddr(private_page->private_pfn));
+			kmem_cache_free(rr_priv_page_cache,
+					pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
@@ -665,7 +688,8 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		/* Widthdraw the write permission */
 		rr_spte_withdraw_wperm(private_page->sptep);
 
-		kfree(pfn_to_kaddr(private_page->private_pfn));
+		kmem_cache_free(rr_priv_page_cache,
+				pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
@@ -707,7 +731,8 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			rr_spte_set_pfn(private_page->sptep,
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
-			kfree(pfn_to_kaddr(private_page->private_pfn));
+			kmem_cache_free(rr_priv_page_cache,
+					pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
@@ -721,7 +746,8 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			rr_spte_set_pfn(private_page->sptep,
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
-			kfree(pfn_to_kaddr(private_page->private_pfn));
+			kmem_cache_free(rr_priv_page_cache,
+					pfn_to_kaddr(private_page->private_pfn));
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
@@ -746,7 +772,8 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		rr_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
-		kfree(pfn_to_kaddr(private_page->private_pfn));
+		kmem_cache_free(rr_priv_page_cache,
+				pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
@@ -1220,7 +1247,8 @@ static void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 		rr_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
-		kfree(pfn_to_kaddr(private_page->private_pfn));
+		kmem_cache_free(rr_priv_page_cache,
+				pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_holding_pages--;
@@ -1240,7 +1268,8 @@ void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 		rr_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
-		kfree(pfn_to_kaddr(private_page->private_pfn));
+		kmem_cache_free(rr_priv_page_cache,
+				pfn_to_kaddr(private_page->private_pfn));
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_rollback_pages--;
