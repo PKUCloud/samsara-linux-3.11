@@ -448,14 +448,14 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 
 	/* Use GFP_ATOMIC here as it will be called while holding spinlock */
 	private_mem_page = kmem_cache_alloc(rr_cow_page_cache, GFP_ATOMIC);
-	if (!private_mem_page) {
+	if (unlikely(!private_mem_page)) {
 		RR_ERR("error: vcpu=%d failed to kmem_cache_alloc() for "
 		       "private_mem_page", vcpu->vcpu_id);
 		return;
 	}
 
 	new_page = kmem_cache_alloc(rr_priv_page_cache, GFP_ATOMIC);
-	if (!new_page) {
+	if (unlikely(!new_page)) {
 		RR_ERR("error: vcpu=%d failed to kmem_cache_alloc() for "
 		       "new_page", vcpu->vcpu_id);
 		kmem_cache_free(rr_cow_page_cache, private_mem_page);

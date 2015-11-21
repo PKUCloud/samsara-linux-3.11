@@ -416,7 +416,7 @@ int logger_alloc_page(void)
 	int result = 0;
 
 	ptr = kmem_cache_alloc(quantum_cache, GFP_ATOMIC);
-	if(!ptr) {
+	if(unlikely(!ptr)) {
 		result = -ENOMEM;
 		pr_err("error: fail to kmem_cache_alloc() for logger\n");
 		goto out;
@@ -424,7 +424,7 @@ int logger_alloc_page(void)
 	memset(ptr, 0, sizeof(*ptr));
 
 	ptr->data = kmem_cache_alloc(data_cache, GFP_ATOMIC);
-	if(!ptr->data) {
+	if(unlikely(!ptr->data)) {
 		kmem_cache_free(quantum_cache, ptr);
 		result = -ENOMEM;
 		pr_err("error: fail to kmem_cache_alloc() for logger\n");
