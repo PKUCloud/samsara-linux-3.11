@@ -11,6 +11,8 @@
 #define RE_BITMAP_MAX	0xffffffffffffffffULL
 #define RE_BITMAP_MIN	0x0ULL
 
+#define RE_INIT_CAP	4096
+
 struct bits_list {
 	int nbits;	/* Number of valid bits in the list */
 	int capacity;	/* Current capacity of array bits */
@@ -20,7 +22,7 @@ struct bits_list {
 static inline void bits_list_init(struct bits_list *blist)
 {
 	blist->nbits = 0;
-	blist->capacity = 1024;
+	blist->capacity = RE_INIT_CAP;
 	blist->bits = kmalloc(blist->capacity * sizeof(unsigned long), GFP_ATOMIC);
 	if (unlikely(!blist->bits)) {
 		printk(KERN_ERR "error: %s fail to kmalloc\n", __func__);
