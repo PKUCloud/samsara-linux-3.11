@@ -2724,7 +2724,7 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			    vcpu->rr_info.enabled) {
 				RR_ASSERT(!is_noslot_pfn(pfn));
 				rr_memory_cow(vcpu, iterator.sptep, pfn, gfn);
-				kvm_x86_ops->tlb_flush(vcpu);
+				kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
 			}
 			break;
 		}

@@ -5974,7 +5974,6 @@ restart:
 		rr_post_check(vcpu);
 	}
 
-	kvm_x86_ops->tlb_flush(vcpu);
 	preempt_disable();
 
 	kvm_x86_ops->prepare_guest_switch(vcpu);
@@ -6071,11 +6070,7 @@ restart:
 	if (vrr_info->enabled) {
 		rr_clear_all_request(vrr_info);
 		r = rr_check_chunk(vcpu);
-		if (r == RR_CHUNK_COMMIT) {
-			rr_make_request(RR_REQ_CHECKPOINT, vrr_info);
-			kvm_x86_ops->tlb_flush(vcpu);
-		} else if (r == RR_CHUNK_ROLLBACK) {
-			kvm_x86_ops->tlb_flush(vcpu);
+		if (r == RR_CHUNK_ROLLBACK) {
 			if (vcpu->guest_fpu_loaded) {
 				/* Unload fpu from the hardware before we
 				 * rollback fpu, or kvm may override the value
@@ -6087,7 +6082,7 @@ restart:
 			}
 			rr_vcpu_rollback(vcpu);
 			rr_apic_reinsert_irq(vcpu);
-			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+
 			goto restart;
 		}
 	}

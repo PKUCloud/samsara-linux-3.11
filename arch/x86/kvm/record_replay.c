@@ -1164,7 +1164,8 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
 		    atomic_read(&krr_info->normal_commit) == 1)) {
 			RR_ERR("error: vcpu=%d wait_event_interruptible() "
 			       "interrupted", vcpu->vcpu_id);
-			return -1;
+			commit = -1;
+			goto out;
 		}
 	}
 
@@ -1289,6 +1290,7 @@ int rr_check_chunk(struct kvm_vcpu *vcpu)
 		} else if (ret == 1) {
 			rr_make_request(RR_REQ_COMMIT_AGAIN, vrr_info);
 			rr_make_request(RR_REQ_POST_CHECK, vrr_info);
+			rr_make_request(RR_REQ_CHECKPOINT, vrr_info);
 			return RR_CHUNK_COMMIT;
 		} else {
 			rr_make_request(RR_REQ_POST_CHECK, vrr_info);
