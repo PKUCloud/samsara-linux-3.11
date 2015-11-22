@@ -464,9 +464,11 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 	}
 	private_mem_page->gfn = gfn;
 	private_mem_page->original_pfn = pfn;
+	private_mem_page->original_addr = pfn_to_kaddr(pfn);
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
+	private_mem_page->private_addr = new_page;
 	private_mem_page->sptep = sptep;
-	copy_page(new_page, pfn_to_kaddr(pfn));
+	copy_page(new_page, private_mem_page->original_addr);
 	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
 
 	/* Add it to the list */
@@ -581,16 +583,6 @@ out:
 }
 EXPORT_SYMBOL_GPL(rr_ept_gfn_to_kaddr);
 
-/* Commit one private page */
-static __always_inline void __commit_memory_page(struct rr_cow_page *private_page)
-{
-	void *origin, *private;
-
-	origin = pfn_to_kaddr(private_page->original_pfn);
-	private = pfn_to_kaddr(private_page->private_pfn);
-	copy_page(origin, private);
-}
-
 #ifndef RR_HOLDING_PAGES
 /* Commit the private pages to the original ones. Called when a quantum is
  * finished and can commit.
@@ -605,7 +597,8 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 				 &vrr_info->private_pages,
 				 link)
 	{
-		__commit_memory_page(private_page);
+		copy_page(private_page->original_addr,
+			  private_page->private_addr);
 		RR_ASSERT(rr_spte_check_pfn(*(private_page->sptep),
 					    private_page->private_pfn));
 		rr_spte_set_pfn(private_page->sptep,
@@ -613,7 +606,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 		/* Widthdraw the write permission */
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
-				pfn_to_kaddr(private_page->private_pfn));
+				private_page->private_addr);
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
@@ -636,7 +629,6 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	struct rr_cow_page *temp;
 	gfn_t gfn;
 	struct list_head temp_list;
-	void *origin, *private;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct kvm *kvm = vcpu->kvm;
 
@@ -651,13 +643,14 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
-					pfn_to_kaddr(private_page->private_pfn));
+					private_page->private_addr);
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		} else if (re_test_bit(gfn, &vrr_info->dirty_bitmap)) {
 			/* This page was touched by this vcpu in this quantum */
-			__commit_memory_page(private_page);
+			copy_page(private_page->original_addr,
+				  private_page->private_addr);
 			list_move_tail(&private_page->link, &temp_list);
 		}
 	}
@@ -671,13 +664,15 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp,
 				 &vrr_info->private_pages, link) {
 		if (memslot_id(kvm, private_page->gfn) == 8) {
-			__commit_memory_page(private_page);
+			copy_page(private_page->original_addr,
+				  private_page->private_addr);
 			list_move_tail(&private_page->link,
 				       &vrr_info->holding_pages);
 			vrr_info->nr_private_pages--;
 			vrr_info->nr_holding_pages++;
 		} else {
-			__commit_memory_page(private_page);
+			copy_page(private_page->original_addr,
+				  private_page->private_addr);
 			RR_ASSERT(rr_spte_check_pfn(*(private_page->sptep),
 						    private_page->private_pfn));
 			rr_spte_set_pfn(private_page->sptep,
@@ -685,7 +680,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			/* Widthdraw the write permission */
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
-					pfn_to_kaddr(private_page->private_pfn));
+					private_page->private_addr);
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_private_pages--;
@@ -700,7 +695,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
-					pfn_to_kaddr(private_page->private_pfn));
+					private_page->private_addr);
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
@@ -717,9 +712,8 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 					 &vrr_info->holding_pages, link) {
 			if (re_test_bit(private_page->gfn,
 					&vrr_info->DMA_access_bitmap)) {
-				origin = pfn_to_kaddr(private_page->original_pfn);
-				private = pfn_to_kaddr(private_page->private_pfn);
-				copy_page(private, origin);
+				copy_page(private_page->private_addr,
+					  private_page->original_addr);
 			}
 		}
 		vrr_info->check_dma = 0;
@@ -748,7 +742,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		rr_spte_withdraw_wperm(private_page->sptep);
 
 		kmem_cache_free(rr_priv_page_cache,
-				pfn_to_kaddr(private_page->private_pfn));
+				private_page->private_addr);
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
@@ -769,7 +763,6 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 	struct rr_cow_page *private_page;
 	struct rr_cow_page *temp;
 	gfn_t gfn;
-	void *origin, *private;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 
 	/* Traverse the holding_pages */
@@ -791,7 +784,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
-					pfn_to_kaddr(private_page->private_pfn));
+					private_page->private_addr);
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
@@ -806,7 +799,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
-					pfn_to_kaddr(private_page->private_pfn));
+					private_page->private_addr);
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
@@ -832,7 +825,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
-				pfn_to_kaddr(private_page->private_pfn));
+				private_page->private_addr);
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
@@ -845,9 +838,8 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 					 &vrr_info->holding_pages, link) {
 			if (re_test_bit(private_page->gfn,
 					&vrr_info->DMA_access_bitmap)) {
-				origin = pfn_to_kaddr(private_page->original_pfn);
-				private = pfn_to_kaddr(private_page->private_pfn);
-				copy_page(private, origin);
+				copy_page(private_page->private_addr,
+					  private_page->original_addr);
 			}
 		}
 		vrr_info->check_dma = 0;
@@ -975,15 +967,13 @@ retry:
 /* Update pages of the rollback_pages list from the public memory */
 static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 {
-	void *origin, *private;
 	struct rr_cow_page *private_page, *temp;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 
 	list_for_each_entry_safe(private_page, temp,
 				 &vrr_info->rollback_pages, link) {
-		origin = pfn_to_kaddr(private_page->original_pfn);
-		private = pfn_to_kaddr(private_page->private_pfn);
-		copy_page(private, origin);
+		copy_page(private_page->private_addr,
+			  private_page->original_addr);
 		list_move_tail(&private_page->link,
 			       &vrr_info->holding_pages);
 		vrr_info->nr_rollback_pages--;
@@ -1316,7 +1306,7 @@ static void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
-				pfn_to_kaddr(private_page->private_pfn));
+				private_page->private_addr);
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_holding_pages--;
@@ -1337,7 +1327,7 @@ void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
-				pfn_to_kaddr(private_page->private_pfn));
+				private_page->private_addr);
 		list_del(&private_page->link);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_rollback_pages--;

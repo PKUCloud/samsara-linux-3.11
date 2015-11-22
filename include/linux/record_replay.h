@@ -149,7 +149,9 @@ struct rr_cow_page {
 	struct list_head link;
 	gfn_t gfn;
 	pfn_t original_pfn;
+	void *original_addr;
 	pfn_t private_pfn;
+	void *private_addr;
 	u64 *sptep;	/*Pointer of the spte that references this pfn */
 };
 
