@@ -3323,6 +3323,22 @@ out:
 	return r;
 }
 
+/* Record and replay */
+static __always_inline void rr_put_guest_fpu(struct kvm_vcpu *vcpu)
+{
+	if (!vcpu->guest_fpu_loaded)
+		return;
+
+	preempt_disable();
+
+	kvm_put_guest_xcr0(vcpu);
+	vcpu->guest_fpu_loaded = 0;
+	fpu_save_init(&vcpu->arch.guest_fpu);
+	__kernel_fpu_end();
+
+	preempt_enable();
+}
+
 static int rr_vcpu_checkpoint_get_lapic(struct kvm_vcpu *vcpu,
 					struct rsr_lapic *s)
 {
@@ -5912,14 +5928,10 @@ restart:
 	}
 
 	if (rr_check_request(RR_REQ_CHECKPOINT, vrr_info)) {
-		if (vcpu->guest_fpu_loaded) {
-			/* We need to read back the value from hardware fpu
-			 * (unload the fpu).
-			 */
-			vcpu->guest_fpu_loaded = 0;
-			fpu_save_init(&vcpu->arch.guest_fpu);
-			__kernel_fpu_end();
-		}
+		/* We need to read back the value from hardware fpu
+		 * (unload the fpu).
+		 */
+		rr_put_guest_fpu(vcpu);
 		rr_vcpu_checkpoint(vcpu);
 	}
 
@@ -6076,15 +6088,11 @@ restart:
 		rr_clear_all_request(vrr_info);
 		r = rr_check_chunk(vcpu);
 		if (r == RR_CHUNK_ROLLBACK) {
-			if (vcpu->guest_fpu_loaded) {
-				/* Unload fpu from the hardware before we
-				 * rollback fpu, or kvm may override the value
-				 * we just rollback.
-				 */
-				vcpu->guest_fpu_loaded = 0;
-				fpu_save_init(&vcpu->arch.guest_fpu);
-				__kernel_fpu_end();
-			}
+			/* Unload fpu from the hardware before we
+			 * rollback fpu, or kvm may override the value
+			 * we just rollback.
+			 */
+			rr_put_guest_fpu(vcpu);
 			rr_vcpu_rollback(vcpu);
 			rr_apic_reinsert_irq(vcpu);
 
