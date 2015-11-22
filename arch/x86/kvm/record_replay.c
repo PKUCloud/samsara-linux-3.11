@@ -545,18 +545,23 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	int r;
 	u32 error_code = 0;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	gpa_t gpa;
 
 	kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
 	if (kaddr == NULL) {
 		if (write)
 			error_code |= PFERR_WRITE_MASK;
-		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
-		if (r < 0) {
-			return NULL;
-		}
-		kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
-		if (kaddr == NULL) {
-			return NULL;
+		gpa = gfn_to_gpa(gfn);
+		while (kaddr == NULL) {
+			r = tdp_page_fault(vcpu, gpa, error_code,
+					   false);
+			if (unlikely(r < 0)) {
+				RR_ERR("error: vcpu=%d tdp_page_fault failed "
+				       "for gfn=0x%llx r=%d",
+				       vcpu->vcpu_id, gfn, r);
+				return NULL;
+			}
+			kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
 		}
 	}
 

@@ -1462,16 +1462,23 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 	void *kaddr;
 
 	addr = gfn_to_hva_read(kvm, gfn);
-	if (kvm_is_error_hva(addr))
+	if (unlikely(kvm_is_error_hva(addr)))
 		return -EFAULT;
 
-	if (vcpu->rr_info.enabled) {
+	if (likely(vcpu->rr_info.enabled)) {
 		kaddr = rr_ept_gfn_to_kaddr(vcpu, gfn, 0);
-		if (kaddr == NULL) {
-			RR_ERR("error: vcpu=%d fail to get addr via ept for "
-			       "gfn 0x%llx, offset 0x%x", vcpu->vcpu_id,
-			       gfn, offset);
-			return -EFAULT;
+		if (unlikely(kaddr == NULL)) {
+			RR_ERR("error: vcpu=%d fail to get addr via "
+			       "ept for gfn 0x%llx, offset 0x%x",
+			       vcpu->vcpu_id, gfn, offset);
+			r = kvm_read_hva(data, (void __user *)addr + offset,
+					 len);
+			if (r) {
+				return -EFAULT;
+			}
+			RR_ERR("error: vcpu=%d fix it for gfn 0x%llx",
+			       vcpu->vcpu_id, gfn);
+			return 0;
 		}
 		memcpy(data, kaddr + offset, len);
 		return 0;
@@ -1553,19 +1560,28 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 	unsigned long addr;
 
 	addr = gfn_to_hva(kvm, gfn);
-	if (kvm_is_error_hva(addr))
+	if (unlikely(kvm_is_error_hva(addr)))
 		return -EFAULT;
-	if (vcpu->rr_info.enabled) {
+
+	if (likely(vcpu->rr_info.enabled)) {
 		kaddr = rr_ept_gfn_to_kaddr(vcpu, gfn, 1);
-		if (kaddr == NULL) {
-			RR_ERR("error: vcpu=%d fail to get addr via ept for "
-			       "gfn 0x%llx, offset 0x%x", vcpu->vcpu_id,
-			       gfn, offset);
-			return -EFAULT;
+		if (unlikely(kaddr == NULL)) {
+			RR_ERR("error: vcpu=%d fail to get addr via "
+			       "ept for gfn 0x%llx, offset 0x%x",
+			       vcpu->vcpu_id, gfn, offset);
+			r = __copy_to_user((void __user *)addr + offset, data,
+					   len);
+			if (r) {
+				return -EFAULT;
+			}
+			RR_ERR("error: vcpu=%d fix it for gfn 0x%llx",
+			       vcpu->vcpu_id, gfn);
+			return 0;
 		}
 		memcpy(kaddr + offset, data, len);
 		return 0;
 	}
+
 	r = __copy_to_user((void __user *)addr + offset, data, len);
 	if (r)
 		return -EFAULT;
