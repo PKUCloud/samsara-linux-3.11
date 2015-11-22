@@ -6066,6 +6066,16 @@ restart:
 
 	kvm_guest_exit();
 
+	/* Record and replay. Unload fpu every time after exit guest to avoid
+	 * frequent unloading when checkpoint or rollback.
+	 */
+	if (vcpu->guest_fpu_loaded) {
+		kvm_put_guest_xcr0(vcpu);
+		vcpu->guest_fpu_loaded = 0;
+		fpu_save_init(&vcpu->arch.guest_fpu);
+		__kernel_fpu_end();
+	}
+
 	preempt_enable();
 
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
