@@ -958,7 +958,6 @@ retry:
 	}
 	spin_unlock(&krr_info->chunk_list_lock);
 	if (!can_leave) {
-		yield();
 		goto retry;
 	}
 }
