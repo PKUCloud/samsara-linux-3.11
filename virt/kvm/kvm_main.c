@@ -1576,9 +1576,11 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 			}
 			RR_ERR("error: vcpu=%d fix it for gfn 0x%llx",
 			       vcpu->vcpu_id, gfn);
+			mark_page_dirty(kvm, gfn);
 			return 0;
 		}
 		memcpy(kaddr + offset, data, len);
+		mark_page_dirty(kvm, gfn);
 		return 0;
 	}
 
