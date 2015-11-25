@@ -2008,7 +2008,7 @@ static void rr_set_dma_bitmap(struct kvm *kvm, struct rr_dma_info *dma_info,
 	int gfn_size = dma_info->size;
 
 	for (i = 0; i < online_vcpus; ++i) {
-		rbitmap = &kvm->vcpus[i]->rr_info.DMA_access_bitmap;
+		rbitmap = kvm->vcpus[i]->rr_info.public_cb;
 		for (j = 0; j < gfn_size; ++j) {
 			re_set_bit(dma_info->gfn[j], rbitmap);
 		}
@@ -2020,7 +2020,6 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 					struct rr_dma_info *dma_info)
 {
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
-	int i;
 	struct rr_kvm_info *krr_info = &kvm->rr_info;
 
 	switch (dma_info->cmd) {
@@ -2031,9 +2030,6 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 	case RR_DMA_START:
 		down_write(&krr_info->tm_rwlock);
 		krr_info->dma_holding_sem = true;
-		for (i = 0; i < online_vcpus; ++i) {
-			kvm->vcpus[i]->rr_info.check_dma = 1;
-		}
 		break;
 	case RR_DMA_FINISH:
 		if (dma_info->size > 0)

@@ -89,13 +89,11 @@ struct rr_vcpu_info {
 	struct region_bitmap dirty_bitmap;
 	struct region_bitmap conflict_bitmap_1;	/* Double buffers */
 	struct region_bitmap conflict_bitmap_2;
-	struct region_bitmap DMA_access_bitmap;
 	struct region_bitmap *public_cb;	/* Public conflict bitmap */
 	struct region_bitmap *private_cb;	/* Private conflict bitmap */
 
 	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
 	int nr_rollback;	/* Number of continuous rollback */
-	int check_dma;
 	struct CPUX86State vcpu_checkpoint;
 	struct rr_chunk_info chunk_info;
 	struct list_head private_pages;

@@ -178,12 +178,10 @@ void rr_vcpu_info_init(struct kvm_vcpu *vcpu)
 	re_bitmap_init(&rr_info->dirty_bitmap, true);
 	re_bitmap_init(&rr_info->conflict_bitmap_1, false);
 	re_bitmap_init(&rr_info->conflict_bitmap_2, false);
-	re_bitmap_init(&rr_info->DMA_access_bitmap, false);
 	rr_info->public_cb = &rr_info->conflict_bitmap_1;
 	rr_info->private_cb = &rr_info->conflict_bitmap_2;
 	rr_info->exclusive_commit = 0;
 	rr_info->nr_rollback = 0;
-	rr_info->check_dma = 0;
 	rr_info->chunk_info.vcpu_id = vcpu->vcpu_id;
 	rr_info->chunk_info.state = RR_CHUNK_STATE_IDLE;
 	INIT_LIST_HEAD(&rr_info->private_pages);
@@ -710,19 +708,6 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			}
 		}
 	}
-
-	/* Copy inconsistent page based on DMA access bitmap */
-	if (vrr_info->check_dma) {
-		list_for_each_entry_safe(private_page, temp,
-					 &vrr_info->holding_pages, link) {
-			if (re_test_bit(private_page->gfn,
-					&vrr_info->DMA_access_bitmap)) {
-				copy_page(private_page->private_addr,
-					  private_page->original_addr);
-			}
-		}
-		vrr_info->check_dma = 0;
-	}
 }
 #endif
 
@@ -837,18 +822,6 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 #endif
 	}
 
-	/* Copy inconsistent page based on DMA access bitmap */
-	if (vrr_info->check_dma) {
-		list_for_each_entry_safe(private_page, temp,
-					 &vrr_info->holding_pages, link) {
-			if (re_test_bit(private_page->gfn,
-					&vrr_info->DMA_access_bitmap)) {
-				copy_page(private_page->private_addr,
-					  private_page->original_addr);
-			}
-		}
-		vrr_info->check_dma = 0;
-	}
 }
 #endif
 
@@ -867,6 +840,11 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
 	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 
+	/* See if we really has something to commit again */
+	if (is_clean) {
+		return;
+	}
+
 	// Fill in dirty_bitmap
 	list_for_each_entry_safe(gfn_node, temp,
 				 &(vrr_info->commit_again_gfn_list),
@@ -877,12 +855,6 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	}
 
 	down_read(&krr_info->tm_rwlock);
-
-	/* See if we really has something to commit again */
-	if (is_clean && !vrr_info->check_dma) {
-		up_read(&krr_info->tm_rwlock);
-		return;
-	}
 
 	mutex_lock(&krr_info->tm_lock);
 	/* Spread the dirty_bitmap to other vcpus's conflict_bitmap */
@@ -901,8 +873,6 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	rr_commit_memory(vcpu);
 
 	mutex_unlock(&krr_info->tm_lock);
-
-	re_bitmap_clear(&vrr_info->DMA_access_bitmap);
 
 	up_read(&krr_info->tm_rwlock);
 
@@ -1170,10 +1140,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
 		/* Detect conflict */
 		if (early_rollback ||
 		    rr_detect_conflict(&vrr_info->access_bitmap,
-				       vrr_info->public_cb) ||
-		    (vrr_info->check_dma &&
-		     rr_detect_conflict(&vrr_info->access_bitmap,
-					&vrr_info->DMA_access_bitmap))) {
+				       vrr_info->public_cb)) {
 			commit = 0;
 		}
 	}
@@ -1228,8 +1195,6 @@ rollback:
 
 	rr_vcpu_set_chunk_state(vcpu, RR_CHUNK_STATE_FINISHED);
 
-	/* Clear DMA bitmap */
-	re_bitmap_clear(&vrr_info->DMA_access_bitmap);
 	up_read(&(krr_info->tm_rwlock));
 
 	/* Reset bitmaps */
@@ -1356,7 +1321,6 @@ static void rr_vcpu_disable(struct kvm_vcpu *vcpu)
 	re_bitmap_destroy(&vrr_info->conflict_bitmap_1);
 	re_bitmap_destroy(&vrr_info->conflict_bitmap_2);
 	re_bitmap_destroy(&vrr_info->dirty_bitmap);
-	re_bitmap_destroy(&vrr_info->DMA_access_bitmap);
 
 	rr_clear_holding_pages(vcpu);
 #ifdef RR_ROLLBACK_PAGES
