@@ -61,12 +61,14 @@ static __always_inline u64 vmcs_read64(unsigned long field)
 }
 
 /* Synchronize all vcpus before enabling record and replay.
- * Master will do things before slaves. After calling this function,
+ * Master will do master_pre_func before slaves. And do master_post_func
+ * after slaves. After calling this function,
  * @nr_sync_vcpus and @nr_fin_vcpus will be set to 0.
  */
 static int __rr_vcpu_sync(struct kvm_vcpu *vcpu,
-			  int (*master_func)(struct kvm_vcpu *vcpu),
-			  int (*slave_func)(struct kvm_vcpu *vcpu))
+			  int (*master_pre_func)(struct kvm_vcpu *vcpu),
+			  int (*slave_func)(struct kvm_vcpu *vcpu),
+			  int (*master_post_func)(struct kvm_vcpu *vcpu))
 {
 	int ret = 0;
 	struct kvm *kvm = vcpu->kvm;
@@ -101,8 +103,8 @@ static int __rr_vcpu_sync(struct kvm_vcpu *vcpu,
 			msleep(1);
 		}
 		/* Do master things here */
-		if (master_func)
-			ret = master_func(vcpu);
+		if (master_pre_func)
+			ret = master_pre_func(vcpu);
 		/* Let slaves begin */
 		atomic_set(&rr_kvm_info->nr_sync_vcpus, 0);
 	} else {
@@ -119,6 +121,8 @@ static int __rr_vcpu_sync(struct kvm_vcpu *vcpu,
 		while (atomic_read(&rr_kvm_info->nr_fin_vcpus) < online_vcpus) {
 			msleep(1);
 		}
+		if (master_post_func)
+			ret = master_post_func(vcpu);
 		atomic_set(&rr_kvm_info->nr_fin_vcpus, 0);
 	} else {
 		while (atomic_read(&rr_kvm_info->nr_fin_vcpus) != 0) {
@@ -129,97 +133,16 @@ static int __rr_vcpu_sync(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-/* Initialization for RR_ASYNC_PREEMPTION_EPT */
-static int __rr_ape_init(struct kvm_vcpu *vcpu)
-{
-	/* MUST make rr_info.enabled true before separating page tables */
-	vcpu->rr_info.enabled = true;
-	vcpu->rr_info.timer_value = rr_ctrl.timer_value;
-
-	/* Obsolete existing paging structures to separate page tables of
-	 * different vcpus.
-	 */
-	if (vcpu->rr_info.is_master) {
-		vcpu->kvm->arch.mmu_valid_gen++;
-		vcpu->kvm->rr_info.enabled = true;
-	}
-	kvm_mmu_unload(vcpu);
-	kvm_mmu_reload(vcpu);
-
-	rr_ops->ape_vmx_setup(vcpu->rr_info.timer_value);
-
-	RR_DLOG(INIT, "vcpu=%d enabled, preemption_timer=%lu, root_hpa=0x%llx",
-		vcpu->vcpu_id, vcpu->rr_info.timer_value,
-		vcpu->arch.mmu.root_hpa);
-	return 0;
-}
-
-void rr_init(struct rr_ops *vmx_rr_ops)
-{
-	RR_ASSERT(!rr_ops);
-	rr_ops = vmx_rr_ops;
-	RR_DLOG(INIT, "rr_ops initialized");
-}
-EXPORT_SYMBOL_GPL(rr_init);
-
-void rr_vcpu_info_init(struct kvm_vcpu *vcpu)
-{
-	struct rr_vcpu_info *rr_info = &vcpu->rr_info;
-
-	memset(rr_info, 0, sizeof(*rr_info));
-	rr_info->enabled = false;
-	rr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
-	rr_info->requests = 0;
-	rr_info->is_master = false;
-	INIT_LIST_HEAD(&rr_info->events_list);
-	mutex_init(&rr_info->events_list_lock);
-	INIT_LIST_HEAD(&rr_info->commit_again_gfn_list);
-	re_bitmap_init(&rr_info->access_bitmap, true);
-	re_bitmap_init(&rr_info->dirty_bitmap, true);
-	re_bitmap_init(&rr_info->conflict_bitmap_1, false);
-	re_bitmap_init(&rr_info->conflict_bitmap_2, false);
-	rr_info->public_cb = &rr_info->conflict_bitmap_1;
-	rr_info->private_cb = &rr_info->conflict_bitmap_2;
-	rr_info->exclusive_commit = 0;
-	rr_info->nr_rollback = 0;
-	rr_info->chunk_info.vcpu_id = vcpu->vcpu_id;
-	rr_info->chunk_info.state = RR_CHUNK_STATE_IDLE;
-	INIT_LIST_HEAD(&rr_info->private_pages);
-	rr_info->nr_private_pages = 0;
-	INIT_LIST_HEAD(&rr_info->holding_pages);
-	rr_info->nr_holding_pages = 0;
-#ifdef RR_ROLLBACK_PAGES
-	INIT_LIST_HEAD(&rr_info->rollback_pages);
-	rr_info->nr_rollback_pages = 0;
-#endif
-	rr_info->tlb_flush = false;
-	RR_DLOG(INIT, "rr_vcpu_info initialized");
-}
-EXPORT_SYMBOL_GPL(rr_vcpu_info_init);
-
 struct gfn_list {
 	struct list_head link;
 	gfn_t gfn;
 };
 
-void rr_kvm_info_init(struct kvm *kvm)
+static void __rr_kvm_enable(struct kvm *kvm);
+static void __rr_vcpu_enable(struct kvm_vcpu *vcpu);
+
+static void __rr_kmem_cache_init(void)
 {
-	struct rr_kvm_info *rr_kvm_info = &kvm->rr_info;
-
-	memset(rr_kvm_info, 0, sizeof(*rr_kvm_info));
-	rr_kvm_info->enabled = false;
-	atomic_set(&rr_kvm_info->nr_sync_vcpus, 0);
-	atomic_set(&rr_kvm_info->nr_fin_vcpus, 0);
-	mutex_init(&rr_kvm_info->tm_lock);
-	spin_lock_init(&rr_kvm_info->chunk_list_lock);
-	INIT_LIST_HEAD(&rr_kvm_info->chunk_list);
-	rr_kvm_info->last_commit_vcpu = -1;
-	atomic_set(&rr_kvm_info->normal_commit, 1);
-	rr_kvm_info->last_record_vcpu = -1;
-	rr_kvm_info->dma_holding_sem = false;
-	init_rwsem(&rr_kvm_info->tm_rwlock);
-	init_waitqueue_head(&rr_kvm_info->exclu_commit_que);
-
 	/* Init kmem_cache */
 	if (!rr_cow_page_cache) {
 		rr_cow_page_cache = kmem_cache_create("rr_cow_page",
@@ -264,8 +187,7 @@ void rr_kvm_info_init(struct kvm *kvm)
 		}
 	}
 
-	RR_DLOG(INIT, "rr_kvm_info initialized");
-
+	RR_DLOG(INIT, "kmem_cache initialized");
 out:
 	return;
 
@@ -281,42 +203,147 @@ free_cow:
 	kmem_cache_destroy(rr_cow_page_cache);
 	rr_cow_page_cache = NULL;
 }
+
+/* Initialization for RR_ASYNC_PREEMPTION_EPT */
+static int __rr_ape_init(struct kvm_vcpu *vcpu)
+{
+	if (vcpu->rr_info.is_master) {
+		__rr_kmem_cache_init();
+	}
+
+	/* MUST make rr_info.enabled true before separating page tables */
+	__rr_vcpu_enable(vcpu);
+
+	/* Obsolete existing paging structures to separate page tables of
+	 * different vcpus.
+	 */
+	if (vcpu->rr_info.is_master) {
+		vcpu->kvm->arch.mmu_valid_gen++;
+	}
+	kvm_mmu_unload(vcpu);
+	kvm_mmu_reload(vcpu);
+
+	rr_ops->ape_vmx_setup(vcpu->rr_info.timer_value);
+
+	RR_DLOG(INIT, "vcpu=%d enabled, preemption_timer=%lu, root_hpa=0x%llx",
+		vcpu->vcpu_id, vcpu->rr_info.timer_value,
+		vcpu->arch.mmu.root_hpa);
+	return 0;
+}
+
+static int __rr_ape_post_init(struct kvm_vcpu *vcpu)
+{
+	RR_DLOG(INIT, "vcpu=%d", vcpu->vcpu_id);
+	RR_ASSERT(vcpu->rr_info.is_master);
+	__rr_kvm_enable(vcpu->kvm);
+	return 0;
+}
+
+void rr_init(struct rr_ops *vmx_rr_ops)
+{
+	RR_ASSERT(!rr_ops);
+	rr_ops = vmx_rr_ops;
+	RR_DLOG(INIT, "rr_ops initialized");
+}
+EXPORT_SYMBOL_GPL(rr_init);
+
+/* Called when creating vcpu */
+void rr_vcpu_info_init(struct kvm_vcpu *vcpu)
+{
+	struct rr_vcpu_info *rr_info = &vcpu->rr_info;
+
+	memset(rr_info, 0, sizeof(*rr_info));
+	rr_info->enabled = false;
+	rr_info->is_master = false;
+
+	RR_DLOG(INIT, "vcpu=%d rr_vcpu_info initialized partially",
+		vcpu->vcpu_id);
+}
+EXPORT_SYMBOL_GPL(rr_vcpu_info_init);
+
+static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
+{
+	struct rr_vcpu_info *rr_info = &vcpu->rr_info;
+
+	if (rr_ctrl.timer_value != 0) {
+		rr_info->timer_value = rr_ctrl.timer_value;
+	} else {
+		rr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
+	}
+
+	rr_info->requests = 0;
+	INIT_LIST_HEAD(&rr_info->events_list);
+	mutex_init(&rr_info->events_list_lock);
+	INIT_LIST_HEAD(&rr_info->commit_again_gfn_list);
+	re_bitmap_init(&rr_info->access_bitmap, true);
+	re_bitmap_init(&rr_info->dirty_bitmap, true);
+	re_bitmap_init(&rr_info->conflict_bitmap_1, false);
+	re_bitmap_init(&rr_info->conflict_bitmap_2, false);
+	rr_info->public_cb = &rr_info->conflict_bitmap_1;
+	rr_info->private_cb = &rr_info->conflict_bitmap_2;
+	rr_info->exclusive_commit = 0;
+	rr_info->nr_rollback = 0;
+	rr_info->chunk_info.vcpu_id = vcpu->vcpu_id;
+	rr_info->chunk_info.state = RR_CHUNK_STATE_IDLE;
+	INIT_LIST_HEAD(&rr_info->private_pages);
+	rr_info->nr_private_pages = 0;
+	INIT_LIST_HEAD(&rr_info->holding_pages);
+	rr_info->nr_holding_pages = 0;
+#ifdef RR_ROLLBACK_PAGES
+	INIT_LIST_HEAD(&rr_info->rollback_pages);
+	rr_info->nr_rollback_pages = 0;
+#endif
+	rr_info->tlb_flush = false;
+	rr_info->enabled = true;
+	RR_DLOG(INIT, "vcpu=%d rr_vcpu_info initialized", vcpu->vcpu_id);
+}
+
+/* Called when creating a vm */
+void rr_kvm_info_init(struct kvm *kvm)
+{
+	struct rr_kvm_info *rr_kvm_info = &kvm->rr_info;
+
+	memset(rr_kvm_info, 0, sizeof(*rr_kvm_info));
+	rr_kvm_info->enabled = false;
+	atomic_set(&rr_kvm_info->nr_sync_vcpus, 0);
+	atomic_set(&rr_kvm_info->nr_fin_vcpus, 0);
+
+	RR_DLOG(INIT, "rr_kvm_info initialized partially");
+}
 EXPORT_SYMBOL_GPL(rr_kvm_info_init);
 
-void rr_kvm_info_exit(struct kvm *kvm)
+static void __rr_kvm_enable(struct kvm *kvm)
 {
-	if (rr_cow_page_cache) {
-		kmem_cache_destroy(rr_cow_page_cache);
-		rr_cow_page_cache = NULL;
-	}
-	if (rr_priv_page_cache) {
-		kmem_cache_destroy(rr_priv_page_cache);
-		rr_priv_page_cache = NULL;
-	}
-	if (rr_event_cache) {
-		kmem_cache_destroy(rr_event_cache);
-		rr_event_cache = NULL;
-	}
-	if (rr_gfn_list_cache) {
-		kmem_cache_destroy(rr_gfn_list_cache);
-		rr_gfn_list_cache = NULL;
-	}
-	printk(KERN_INFO "%s: rr_kvm_info released", __func__);
+	struct rr_kvm_info *rr_kvm_info = &kvm->rr_info;
+
+	mutex_init(&rr_kvm_info->tm_lock);
+	spin_lock_init(&rr_kvm_info->chunk_list_lock);
+	INIT_LIST_HEAD(&rr_kvm_info->chunk_list);
+	rr_kvm_info->last_commit_vcpu = -1;
+	atomic_set(&rr_kvm_info->normal_commit, 1);
+	rr_kvm_info->last_record_vcpu = -1;
+	rr_kvm_info->dma_holding_sem = false;
+	init_rwsem(&rr_kvm_info->tm_rwlock);
+	init_waitqueue_head(&rr_kvm_info->exclu_commit_que);
+	rr_kvm_info->enabled = true;
+
+	RR_DLOG(INIT, "rr_kvm_info initialized");
 }
-EXPORT_SYMBOL_GPL(rr_kvm_info_exit);
 
 int rr_vcpu_enable(struct kvm_vcpu *vcpu)
 {
 	int ret;
 
 	RR_DLOG(INIT, "vcpu=%d start", vcpu->vcpu_id);
-	ret = __rr_vcpu_sync(vcpu, __rr_ape_init, __rr_ape_init);
+	ret = __rr_vcpu_sync(vcpu, __rr_ape_init, __rr_ape_init,
+			     __rr_ape_post_init);
 	if (!ret)
 		rr_make_request(RR_REQ_CHECKPOINT, &vcpu->rr_info);
 	else
 		RR_ERR("error: vcpu=%d fail to __rr_vcpu_sync()",
 		       vcpu->vcpu_id);
 	RR_DLOG(INIT, "vcpu=%d finish", vcpu->vcpu_id);
+	printk(KERN_INFO "vcpu=%d enabled\n", vcpu->vcpu_id);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(rr_vcpu_enable);
@@ -1108,8 +1135,6 @@ static void rr_log_chunk(struct kvm_vcpu *vcpu)
 	RR_LOG("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, 0);
 }
 
-static void rr_vcpu_disable(struct kvm_vcpu *vcpu);
-
 static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -1202,18 +1227,10 @@ rollback:
 	re_bitmap_clear(&vrr_info->dirty_bitmap);
 	re_bitmap_clear(vrr_info->private_cb);
 
-	if (!rr_ctrl.enabled) {
-		goto record_disable;
-	}
-
 	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
 out:
 	vrr_info->tlb_flush = true;
 	return commit;
-
-record_disable:
-	rr_vcpu_disable(vcpu);
-	goto out;
 }
 
 int rr_check_chunk(struct kvm_vcpu *vcpu)
@@ -1283,7 +1300,7 @@ static void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 }
 
 #ifdef RR_ROLLBACK_PAGES
-void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
+static void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 {
 	struct rr_cow_page *private_page;
 	struct rr_cow_page *temp;
@@ -1304,28 +1321,126 @@ void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 }
 #endif
 
-/* FIXME: We need to sync before disabling recording. */
-static void rr_vcpu_disable(struct kvm_vcpu *vcpu)
+static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 {
 	struct rr_kvm_info *krr_info = &vcpu->kvm->rr_info;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct rr_event *eve, *eve_tmp;
+	struct gfn_list *gfn_node, *gfn_tmp;
 
-	krr_info->last_commit_vcpu = -1;
-	krr_info->enabled = false;
-	atomic_set(&krr_info->normal_commit, 1);
-	vrr_info->exclusive_commit = 0;
-	vrr_info->nr_rollback = 0;
+	if (vrr_info->is_master) {
+		struct rr_chunk_info *chunk, *temp;
+
+		/* Release rr_kvm_info */
+		krr_info->enabled = false;
+
+		while (krr_info->dma_holding_sem) {
+			RR_DLOG(INIT, "DMA is holding sem, waiting");
+			msleep(1);
+		}
+
+		spin_lock(&krr_info->chunk_list_lock);
+		/* Release chunk_list */
+		list_for_each_entry_safe(chunk, temp, &krr_info->chunk_list,
+					 link) {
+			list_del(&chunk->link);
+		}
+		spin_unlock(&krr_info->chunk_list_lock);
+		krr_info->last_commit_vcpu = -1;
+		atomic_set(&krr_info->normal_commit, 1);
+		krr_info->last_record_vcpu = -1;
+	}
+
 	vrr_info->enabled = false;
+	rr_clear_all_request(vrr_info);
+	vrr_info->nr_rollback = 0;
+	vrr_info->tlb_flush = false;
 
+	/* Release events_list */
+	mutex_lock(&vrr_info->events_list_lock);
+	list_for_each_entry_safe(eve, eve_tmp, &vrr_info->events_list, link) {
+		list_del(&eve->link);
+		kmem_cache_free(rr_event_cache, eve);
+	}
+	mutex_unlock(&vrr_info->events_list_lock);
+
+	/* Release commit_again_gfn_list */
+	list_for_each_entry_safe(gfn_node, gfn_tmp,
+				 &vrr_info->commit_again_gfn_list, link) {
+		list_del(&gfn_node->link);
+		kmem_cache_free(rr_gfn_list_cache, gfn_node);
+	}
+
+	/* Release bitmap */
 	re_bitmap_destroy(&vrr_info->access_bitmap);
 	re_bitmap_destroy(&vrr_info->conflict_bitmap_1);
 	re_bitmap_destroy(&vrr_info->conflict_bitmap_2);
 	re_bitmap_destroy(&vrr_info->dirty_bitmap);
+	vrr_info->public_cb = &vrr_info->conflict_bitmap_1;
+	vrr_info->private_cb = &vrr_info->conflict_bitmap_2;
 
 	rr_clear_holding_pages(vcpu);
 #ifdef RR_ROLLBACK_PAGES
 	rr_clear_rollback_pages(vcpu);
 #endif
+	RR_ASSERT(vrr_info->nr_private_pages == 0);
+	RR_ASSERT(vrr_info->nr_holding_pages == 0);
+	RR_ASSERT(vrr_info->nr_rollback_pages == 0);
+
 	rr_ops->ape_vmx_clear();
+
+	RR_DLOG(INIT, "vcpu=%d disabled", vcpu->vcpu_id);
+
+	return 0;
 }
+
+static int __rr_ape_post_disable(struct kvm_vcpu *vcpu)
+{
+	RR_DLOG(INIT, "vcpu=%d");
+	RR_ASSERT(vcpu->rr_info.is_master);
+	/* Release kmem cache */
+	if (rr_cow_page_cache) {
+		kmem_cache_destroy(rr_cow_page_cache);
+		rr_cow_page_cache = NULL;
+	}
+	if (rr_priv_page_cache) {
+		kmem_cache_destroy(rr_priv_page_cache);
+		rr_priv_page_cache = NULL;
+	}
+	if (rr_event_cache) {
+		kmem_cache_destroy(rr_event_cache);
+		rr_event_cache = NULL;
+	}
+	if (rr_gfn_list_cache) {
+		kmem_cache_destroy(rr_gfn_list_cache);
+		rr_gfn_list_cache = NULL;
+	}
+
+	vcpu->kvm->arch.mmu_valid_gen++;
+
+	return 0;
+}
+
+void rr_vcpu_disable(struct kvm_vcpu *vcpu)
+{
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+
+	RR_DLOG(INIT, "vcpu=%d start", vcpu->vcpu_id);
+	if (vrr_info->exclusive_commit) {
+		/* Wake up other vcpus */
+		vrr_info->exclusive_commit = 0;
+		atomic_set(&vcpu->kvm->rr_info.normal_commit, 1);
+		wake_up_interruptible(&vcpu->kvm->rr_info.exclu_commit_que);
+	}
+	__rr_vcpu_sync(vcpu, __rr_ape_disable, __rr_ape_disable,
+		       __rr_ape_post_disable);
+
+	kvm_mmu_unload(vcpu);
+	kvm_mmu_reload(vcpu);
+	kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+
+	RR_DLOG(INIT, "vcpu=%d finish", vcpu->vcpu_id);
+	printk(KERN_INFO "vcpu=%d disabled\n", vcpu->vcpu_id);
+}
+EXPORT_SYMBOL_GPL(rr_vcpu_disable);
 

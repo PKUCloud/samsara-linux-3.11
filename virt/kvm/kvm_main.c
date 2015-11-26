@@ -629,9 +629,6 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	kvm_arch_free_vm(kvm);
 	hardware_disable_all();
 	mmdrop(mm);
-
-	/* Record and replay */
-	rr_kvm_info_exit(kvm);
 }
 
 void kvm_get_kvm(struct kvm *kvm)
@@ -2024,6 +2021,9 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 
 	switch (dma_info->cmd) {
 	case RR_DMA_SET_DATA: {
+		if (unlikely(!krr_info->dma_holding_sem)) {
+			break;
+		}
 		rr_set_dma_bitmap(kvm, dma_info, online_vcpus);
 		break;
 	}
@@ -2032,6 +2032,9 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 		krr_info->dma_holding_sem = true;
 		break;
 	case RR_DMA_FINISH:
+		if (unlikely(!krr_info->dma_holding_sem)) {
+			break;
+		}
 		if (dma_info->size > 0)
 			rr_set_dma_bitmap(kvm, dma_info, online_vcpus);
 		up_write(&krr_info->tm_rwlock);
@@ -2474,8 +2477,14 @@ static long kvm_vm_ioctl(struct file *filp,
 	switch (ioctl) {
 	/* Record and replay */
 	case KVM_DMA_COMMIT: {
-		if (!kvm->rr_info.enabled && !kvm->rr_info.dma_holding_sem)
+		if (unlikely(!kvm->rr_info.enabled)) {
+			if(kvm->rr_info.dma_holding_sem) {
+				/* DMA is holding the sem after disabling. */
+				up_write(&kvm->rr_info.tm_rwlock);
+				kvm->rr_info.dma_holding_sem = false;
+			}
 			return 0;
+		}
 		r = -EFAULT;
 		if (copy_from_user(&rr_dma_info, argp, sizeof(rr_dma_info)))
 			goto out;

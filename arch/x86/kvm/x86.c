@@ -6106,7 +6106,15 @@ restart:
 			rr_vcpu_rollback(vcpu);
 			rr_apic_reinsert_irq(vcpu);
 
+			if (unlikely(!rr_ctrl.enabled)) {
+				goto rr_disable;
+			}
 			goto restart;
+		}
+		if (unlikely(!rr_ctrl.enabled) && (r == RR_CHUNK_COMMIT)) {
+rr_disable:
+			/* Only after commit or rollback can we disable it */
+			rr_vcpu_disable(vcpu);
 		}
 	}
 	r = kvm_x86_ops->handle_exit(vcpu);
