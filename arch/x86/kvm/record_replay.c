@@ -643,6 +643,21 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	}
 }
 #else
+static inline void rr_age_holding_page(struct rr_vcpu_info *vrr_info,
+				       struct rr_cow_page *private_page)
+{
+	if ((++(private_page->age)) >= RR_MAX_HOLDING_PAGE_AGE) {
+		rr_spte_set_pfn(private_page->sptep,
+				private_page->original_pfn);
+		rr_spte_withdraw_wperm(private_page->sptep);
+		kmem_cache_free(rr_priv_page_cache,
+				private_page->private_addr);
+		list_del(&private_page->link);
+		kmem_cache_free(rr_cow_page_cache, private_page);
+		vrr_info->nr_holding_pages--;
+	}
+}
+
 /* Commit memory.
  * 1. Check the holding_pages list. For each node, test the gfn in
  *    conflict_bitmap. If set, this page was updated by other vcpus and we need
@@ -679,10 +694,12 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			vrr_info->nr_holding_pages--;
 		} else if (re_test_bit(gfn, &vrr_info->dirty_bitmap)) {
 			/* This page was touched by this vcpu in this quantum */
+			private_page->age = 0;
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
 			list_move_tail(&private_page->link, &temp_list);
-		}
+		} else
+			rr_age_holding_page(vrr_info, private_page);
 	}
 
 	if (!list_empty(&temp_list)) {
@@ -694,6 +711,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp,
 				 &vrr_info->private_pages, link) {
 		if (memslot_id(kvm, private_page->gfn) == 8) {
+			private_page->age = 0;
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
 			list_move_tail(&private_page->link,
@@ -714,25 +732,6 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_private_pages--;
-		}
-	}
-
-	/* Delete old holding pages */
-	if (vrr_info->nr_holding_pages > RR_HOLDING_PAGES_MAXM) {
-		list_for_each_entry_safe(private_page, temp,
-					 &vrr_info->holding_pages, link) {
-			rr_spte_set_pfn(private_page->sptep,
-					private_page->original_pfn);
-			rr_spte_withdraw_wperm(private_page->sptep);
-			kmem_cache_free(rr_priv_page_cache,
-					private_page->private_addr);
-			list_del(&private_page->link);
-			kmem_cache_free(rr_cow_page_cache, private_page);
-			vrr_info->nr_holding_pages--;
-			if (vrr_info->nr_holding_pages <=
-			    RR_HOLDING_PAGES_TARGET_NR) {
-				break;
-			}
 		}
 	}
 }
@@ -805,7 +804,8 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
-		}
+		} else
+			rr_age_holding_page(vrr_info, private_page);
 #else
 		/* Whether this page has been touched by other vcpus or by
 		 * this vcpu in this quantum.
@@ -820,7 +820,8 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			list_del(&private_page->link);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
-		}
+		} else
+			rr_age_holding_page(vrr_info, private_page);
 #endif
 	}
 
@@ -973,6 +974,7 @@ static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 
 	list_for_each_entry_safe(private_page, temp,
 				 &vrr_info->rollback_pages, link) {
+		private_page->age = 0;
 		copy_page(private_page->private_addr,
 			  private_page->original_addr);
 		list_move_tail(&private_page->link,

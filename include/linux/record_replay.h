@@ -32,9 +32,8 @@ struct kvm_lapic;
  * the private pages until we have to.
  */
 #define RR_HOLDING_PAGES
-/* Maximum length of vcpu.rr_info.holding_pages list */
-#define RR_HOLDING_PAGES_MAXM        512
-#define RR_HOLDING_PAGES_TARGET_NR   512
+
+#define RR_MAX_HOLDING_PAGE_AGE	100
 
 /* If defined, we use a separate list to hold pages needed to rollback and
  * before entering guest, we copy the new content of those pages.
@@ -151,6 +150,7 @@ struct rr_cow_page {
 	pfn_t private_pfn;
 	void *private_addr;
 	u64 *sptep;	/*Pointer of the spte that references this pfn */
+	int age;
 };
 
 void rr_init(struct rr_ops *rr_ops);
