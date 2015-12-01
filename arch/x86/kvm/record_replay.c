@@ -1065,7 +1065,9 @@ static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 
 void rr_post_check(struct kvm_vcpu *vcpu)
 {
+#ifdef RR_ROLLBACK_PAGES
 	bool is_rollback = (vcpu->rr_info.chunk_info.action == RR_CHUNK_ROLLBACK);
+#endif
 
 	rr_vcpu_chunk_list_check_and_del(vcpu);
 	rr_clear_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
@@ -1464,10 +1466,10 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 	rr_clear_holding_pages(vcpu);
 #ifdef RR_ROLLBACK_PAGES
 	rr_clear_rollback_pages(vcpu);
+	RR_ASSERT(vrr_info->nr_rollback_pages == 0);
 #endif
 	RR_ASSERT(vrr_info->nr_private_pages == 0);
 	RR_ASSERT(vrr_info->nr_holding_pages == 0);
-	RR_ASSERT(vrr_info->nr_rollback_pages == 0);
 
 	rr_ops->ape_vmx_clear();
 
