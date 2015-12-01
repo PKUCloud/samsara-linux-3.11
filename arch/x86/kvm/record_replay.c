@@ -255,6 +255,8 @@ void rr_vcpu_info_init(struct kvm_vcpu *vcpu)
 	memset(rr_info, 0, sizeof(*rr_info));
 	rr_info->enabled = false;
 	rr_info->is_master = false;
+	rr_info->requests = 0;
+	rr_info->tlb_flush = true;
 
 	RR_DLOG(INIT, "vcpu=%d rr_vcpu_info initialized partially",
 		vcpu->vcpu_id);
@@ -293,7 +295,7 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&rr_info->rollback_pages);
 	rr_info->nr_rollback_pages = 0;
 #endif
-	rr_info->tlb_flush = false;
+	rr_info->tlb_flush = true;
 	rr_info->enabled = true;
 	RR_DLOG(INIT, "vcpu=%d rr_vcpu_info initialized", vcpu->vcpu_id);
 }
@@ -307,6 +309,7 @@ void rr_kvm_info_init(struct kvm *kvm)
 	rr_kvm_info->enabled = false;
 	atomic_set(&rr_kvm_info->nr_sync_vcpus, 0);
 	atomic_set(&rr_kvm_info->nr_fin_vcpus, 0);
+	rr_kvm_info->dma_holding_sem = false;
 
 	RR_DLOG(INIT, "rr_kvm_info initialized partially");
 }
