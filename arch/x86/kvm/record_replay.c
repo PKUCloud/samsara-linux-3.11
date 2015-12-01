@@ -442,6 +442,17 @@ void rr_set_mmio_spte_mask(u64 mmio_mask)
 }
 EXPORT_SYMBOL_GPL(rr_set_mmio_spte_mask);
 
+static inline void rr_spte_set_cow_tag(u64 *sptep)
+{
+	RR_ASSERT(!(*sptep & RR_PT_COW_TAG));
+	*sptep |= RR_PT_COW_TAG;
+}
+
+static inline void rr_spte_clear_cow_tag(u64 *sptep)
+{
+	*sptep &= ~RR_PT_COW_TAG;
+}
+
 static inline void rr_spte_set_pfn(u64 *sptep, pfn_t pfn)
 {
 	u64 spte;
@@ -455,7 +466,7 @@ static inline void rr_spte_set_pfn(u64 *sptep, pfn_t pfn)
 /* Withdrwo write permission of the spte */
 static inline void rr_spte_withdraw_wperm(u64 *sptep)
 {
-	*sptep &= ~(PT_WRITABLE_MASK | SPTE_MMU_WRITEABLE);
+	*sptep &= ~PT_WRITABLE_MASK;
 }
 
 static inline bool rr_spte_check_pfn(u64 spte, pfn_t pfn)
@@ -495,12 +506,54 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 	private_mem_page->sptep = sptep;
 	copy_page(new_page, private_mem_page->original_addr);
 	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
+	rr_spte_set_cow_tag(sptep);
 
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->rr_info.private_pages);
 	vcpu->rr_info.nr_private_pages++;
 }
 EXPORT_SYMBOL_GPL(rr_memory_cow);
+
+/* Just cow but not change the sptep yet */
+void rr_memory_cow_fast(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn)
+{
+	void *new_page;
+	struct rr_cow_page *private_mem_page;
+	pfn_t pfn = (*sptep & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+
+	private_mem_page = kmem_cache_alloc(rr_cow_page_cache, GFP_ATOMIC);
+	if (unlikely(!private_mem_page)) {
+		RR_ERR("error: vcpu=%d failed to kmem_cache_alloc() for "
+		       "private_mem_page", vcpu->vcpu_id);
+		return;
+	}
+
+	new_page = kmem_cache_alloc(rr_priv_page_cache, GFP_ATOMIC);
+	if (unlikely(!new_page)) {
+		RR_ERR("error: vcpu=%d failed to kmem_cache_alloc() for "
+		       "new_page", vcpu->vcpu_id);
+		kmem_cache_free(rr_cow_page_cache, private_mem_page);
+		return;
+	}
+	private_mem_page->gfn = gfn;
+	private_mem_page->original_pfn = pfn;
+	private_mem_page->original_addr = pfn_to_kaddr(pfn);
+	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
+	private_mem_page->private_addr = new_page;
+	private_mem_page->sptep = sptep;
+	copy_page(new_page, private_mem_page->original_addr);
+	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
+	rr_spte_set_cow_tag(sptep);
+	*sptep |= PT_WRITABLE_MASK;
+
+	/* Add it to the list */
+	list_add(&private_mem_page->link, &vrr_info->private_pages);
+	vrr_info->nr_private_pages++;
+
+	return;
+}
+EXPORT_SYMBOL_GPL(rr_memory_cow_fast);
 
 static int rr_clear_AD_bit_by_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 {
@@ -529,13 +582,16 @@ static int rr_clear_AD_bit_by_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 	return 0;
 }
 
-static void *__rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
+static void *__rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write,
+				   u64 *present)
 {
 	int level = vcpu->arch.mmu.shadow_root_level;
 	hpa_t addr = (u64)gfn << PAGE_SHIFT;
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
 	unsigned index;
 	u64 *sptep;
+	u64 spte;
+	u64 bitand = PT_PRESENT_MASK;
 
 	RR_ASSERT(level == PT64_ROOT_LEVEL);
 	RR_ASSERT(shadow_addr != INVALID_PAGE);
@@ -543,21 +599,26 @@ static void *__rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (!is_shadow_present_pte(*sptep)) {
+		spte = *sptep;
+		bitand &= spte;
+		if (!is_shadow_present_pte(spte)) {
+			*present = bitand;
 			return NULL;
 		}
 		*sptep |= VMX_EPT_ACCESS_BIT;
-		if (is_last_spte(*sptep, level)) {
+		if (is_last_spte(spte, level)) {
+			*present = bitand;
 			if (write) {
-				if (!(*sptep & PT_WRITABLE_MASK)) {
+				if (!(spte & PT_WRITABLE_MASK)) {
 					return NULL;
 				}
 				*sptep |= VMX_EPT_DIRTY_BIT;
 			}
-			return (u64 *)__va(*sptep & PT64_BASE_ADDR_MASK);
+			return (u64 *)__va(spte & PT64_BASE_ADDR_MASK);
 		}
-		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
+		shadow_addr = spte & PT64_BASE_ADDR_MASK;
 	}
+	*present = bitand;
 	return NULL;
 }
 
@@ -569,24 +630,30 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	void *kaddr;
 	int r;
 	u32 error_code = 0;
+	u32 temp;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	gpa_t gpa;
+	u64 present;
 
-	kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
+	kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write, &present);
 	if (kaddr == NULL) {
 		if (write)
 			error_code |= PFERR_WRITE_MASK;
 		gpa = gfn_to_gpa(gfn);
 		while (kaddr == NULL) {
-			r = tdp_page_fault(vcpu, gpa, error_code,
-					   false);
+			if (present) {
+				temp = error_code | PFERR_PRESENT_MASK;
+			} else temp = error_code;
+
+			r = tdp_page_fault(vcpu, gpa, temp, false);
 			if (unlikely(r < 0)) {
 				RR_ERR("error: vcpu=%d tdp_page_fault failed "
 				       "for gfn=0x%llx r=%d",
 				       vcpu->vcpu_id, gfn, r);
 				return NULL;
 			}
-			kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write);
+			kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write,
+						      &present);
 		}
 	}
 
@@ -635,6 +702,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 				private_page->original_pfn);
 		/* Widthdraw the write permission */
 		rr_spte_withdraw_wperm(private_page->sptep);
+		rr_spte_clear_cow_tag(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
@@ -650,6 +718,7 @@ static inline void rr_age_holding_page(struct rr_vcpu_info *vrr_info,
 		rr_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
+		rr_spte_clear_cow_tag(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
@@ -687,6 +756,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			rr_spte_set_pfn(private_page->sptep,
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
+			rr_spte_clear_cow_tag(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
@@ -727,6 +797,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 					private_page->original_pfn);
 			/* Widthdraw the write permission */
 			rr_spte_withdraw_wperm(private_page->sptep);
+			rr_spte_clear_cow_tag(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
@@ -756,6 +827,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 				private_page->original_pfn);
 		/* Widthdraw the write permission */
 		rr_spte_withdraw_wperm(private_page->sptep);
+		rr_spte_clear_cow_tag(private_page->sptep);
 
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
@@ -799,6 +871,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			rr_spte_set_pfn(private_page->sptep,
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
+			rr_spte_clear_cow_tag(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
@@ -815,6 +888,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 			rr_spte_set_pfn(private_page->sptep,
 					private_page->original_pfn);
 			rr_spte_withdraw_wperm(private_page->sptep);
+			rr_spte_clear_cow_tag(private_page->sptep);
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
@@ -842,6 +916,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		rr_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
+		rr_spte_clear_cow_tag(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
@@ -1293,6 +1368,7 @@ static void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 		rr_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
+		rr_spte_clear_cow_tag(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
@@ -1314,6 +1390,7 @@ static void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 		rr_spte_set_pfn(private_page->sptep,
 				private_page->original_pfn);
 		rr_spte_withdraw_wperm(private_page->sptep);
+		rr_spte_clear_cow_tag(private_page->sptep);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);

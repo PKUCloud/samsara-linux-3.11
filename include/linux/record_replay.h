@@ -58,6 +58,9 @@ struct kvm_lapic;
 #define RR_CHUNK_STATE_BUSY		1
 #define RR_CHUNK_STATE_FINISHED		2
 
+/* Use bit 52 in spte to indicate this page has been cow */
+#define RR_PT_COW_TAG			(1ULL << 52)
+
 struct rr_chunk_info {
 	struct list_head link;
 	int vcpu_id;
@@ -170,6 +173,7 @@ int rr_check_chunk(struct kvm_vcpu *vcpu);
 void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn);
 void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
 void rr_vcpu_disable(struct kvm_vcpu *vcpu);
+void rr_memory_cow_fast(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

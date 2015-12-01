@@ -2874,6 +2874,15 @@ fast_pf_fix_direct_spte(struct kvm_vcpu *vcpu, u64 *sptep, u64 spte)
 	 */
 	gfn = kvm_mmu_page_get_gfn(sp, sptep - sp->spt);
 
+	/* If this page is not cow, cow it */
+	if (likely(!(spte & RR_PT_COW_TAG) && vcpu->rr_info.enabled)) {
+		/* Cow this page */
+		RR_ASSERT(*sptep == spte);
+		rr_memory_cow_fast(vcpu, sptep, gfn);
+		mark_page_dirty(vcpu->kvm, gfn);
+		return true;
+	}
+
 	if (cmpxchg64(sptep, spte, spte | PT_WRITABLE_MASK) == spte)
 		mark_page_dirty(vcpu->kvm, gfn);
 
