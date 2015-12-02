@@ -85,7 +85,7 @@ struct rr_vcpu_info {
 	bool is_master;		/* Used for synchronization */
 	struct list_head events_list;
 	struct mutex events_list_lock;
-	struct list_head commit_again_gfn_list;
+	bool commit_again_clean;
 	/* Bitmaps */
 	struct region_bitmap access_bitmap;
 	struct region_bitmap dirty_bitmap;

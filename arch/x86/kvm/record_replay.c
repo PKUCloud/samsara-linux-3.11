@@ -15,8 +15,6 @@ struct kmem_cache *rr_cow_page_cache;
 struct kmem_cache *rr_priv_page_cache;
 /* Cache for struct rr_event */
 struct kmem_cache *rr_event_cache;
-/* Cache for struct gfn_list */
-struct kmem_cache *rr_gfn_list_cache;
 
 /* Definitions from vmx.c */
 #define __ex(x) __kvm_handle_fault_on_reboot(x)
@@ -133,11 +131,6 @@ static int __rr_vcpu_sync(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-struct gfn_list {
-	struct list_head link;
-	gfn_t gfn;
-};
-
 static void __rr_kvm_enable(struct kvm *kvm);
 static void __rr_vcpu_enable(struct kvm_vcpu *vcpu);
 
@@ -176,24 +169,9 @@ static void __rr_kmem_cache_init(void)
 		}
 	}
 
-	if (!rr_gfn_list_cache) {
-		rr_gfn_list_cache = kmem_cache_create("rr_gfn_list",
-						      sizeof(struct gfn_list),
-						      0, 0, NULL);
-		if (unlikely(!rr_gfn_list_cache)) {
-			RR_ERR("error: fail to kmem_cache_create() for "
-			       "gfn_list");
-			goto free_event;
-		}
-	}
-
 	RR_DLOG(INIT, "kmem_cache initialized");
 out:
 	return;
-
-free_event:
-	kmem_cache_destroy(rr_event_cache);
-	rr_event_cache = NULL;
 
 free_priv:
 	kmem_cache_destroy(rr_priv_page_cache);
@@ -276,7 +254,6 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->requests = 0;
 	INIT_LIST_HEAD(&rr_info->events_list);
 	mutex_init(&rr_info->events_list_lock);
-	INIT_LIST_HEAD(&rr_info->commit_again_gfn_list);
 	re_bitmap_init(&rr_info->access_bitmap, true);
 	re_bitmap_init(&rr_info->dirty_bitmap, true);
 	re_bitmap_init(&rr_info->conflict_bitmap_1, false);
@@ -297,6 +274,7 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 #endif
 	rr_info->tlb_flush = true;
 	rr_info->enabled = true;
+	rr_info->commit_again_clean = true;
 	RR_DLOG(INIT, "vcpu=%d rr_vcpu_info initialized", vcpu->vcpu_id);
 }
 
@@ -661,24 +639,13 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	}
 
 	vrr_info->tlb_flush = true;
-	/* Generate commit again gfn list */
 	if (rr_check_request(RR_REQ_COMMIT_AGAIN, vrr_info)) {
 		if (write) {
-			struct gfn_list *gfn_node = kmem_cache_alloc(rr_gfn_list_cache,
-								     GFP_ATOMIC);
-			if (unlikely(!gfn_node)) {
-				RR_ERR("error: vcpu=%d failed to "
-				       "kmem_cache_alloc() for gfn_list",
-				       vcpu->vcpu_id);
-				goto out;
-			}
-			gfn_node->gfn = gfn;
-			list_add(&gfn_node->link,
-				 &(vrr_info->commit_again_gfn_list));
+			vrr_info->commit_again_clean = false;
+			re_set_bit(gfn, &vrr_info->dirty_bitmap);
 		}
 		rr_clear_AD_bit_by_gfn(vcpu, gfn);
 	}
-out:
 	return kaddr;
 }
 EXPORT_SYMBOL_GPL(rr_ept_gfn_to_kaddr);
@@ -939,25 +906,11 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	int i;
 	int online_vcpus = atomic_read(&kvm->online_vcpus);
-	struct gfn_list *gfn_node, *temp;
-	bool is_clean = list_empty(&vrr_info->commit_again_gfn_list);
 	struct kvm_vcpu *vcpu_it;
 
-	/* Get access_bitmap and dirty_bitmap. Clean AD bits. */
-	//tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
-
 	/* See if we really has something to commit again */
-	if (is_clean) {
+	if (vrr_info->commit_again_clean) {
 		return;
-	}
-
-	// Fill in dirty_bitmap
-	list_for_each_entry_safe(gfn_node, temp,
-				 &(vrr_info->commit_again_gfn_list),
-				 link) {
-		re_set_bit(gfn_node->gfn, &vrr_info->dirty_bitmap);
-		list_del(&gfn_node->link);
-		kmem_cache_free(rr_gfn_list_cache, gfn_node);
 	}
 
 	down_read(&krr_info->tm_rwlock);
@@ -986,6 +939,8 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	re_bitmap_clear(&vrr_info->access_bitmap);
 	re_bitmap_clear(&vrr_info->dirty_bitmap);
 	re_bitmap_clear(vrr_info->private_cb);
+
+	vrr_info->commit_again_clean = true;
 
 	vrr_info->tlb_flush = true;
 	return;
@@ -1350,6 +1305,7 @@ int rr_check_chunk(struct kvm_vcpu *vcpu)
 			rr_make_request(RR_REQ_COMMIT_AGAIN, vrr_info);
 			rr_make_request(RR_REQ_POST_CHECK, vrr_info);
 			rr_make_request(RR_REQ_CHECKPOINT, vrr_info);
+			vrr_info->commit_again_clean = true;
 			return RR_CHUNK_COMMIT;
 		} else {
 			rr_make_request(RR_REQ_POST_CHECK, vrr_info);
@@ -1410,7 +1366,6 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 	struct rr_kvm_info *krr_info = &vcpu->kvm->rr_info;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct rr_event *eve, *eve_tmp;
-	struct gfn_list *gfn_node, *gfn_tmp;
 
 	if (vrr_info->is_master) {
 		struct rr_chunk_info *chunk, *temp;
@@ -1447,13 +1402,6 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 		kmem_cache_free(rr_event_cache, eve);
 	}
 	mutex_unlock(&vrr_info->events_list_lock);
-
-	/* Release commit_again_gfn_list */
-	list_for_each_entry_safe(gfn_node, gfn_tmp,
-				 &vrr_info->commit_again_gfn_list, link) {
-		list_del(&gfn_node->link);
-		kmem_cache_free(rr_gfn_list_cache, gfn_node);
-	}
 
 	/* Release bitmap */
 	re_bitmap_destroy(&vrr_info->access_bitmap);
@@ -1495,11 +1443,6 @@ static int __rr_ape_post_disable(struct kvm_vcpu *vcpu)
 		kmem_cache_destroy(rr_event_cache);
 		rr_event_cache = NULL;
 	}
-	if (rr_gfn_list_cache) {
-		kmem_cache_destroy(rr_gfn_list_cache);
-		rr_gfn_list_cache = NULL;
-	}
-
 	vcpu->kvm->arch.mmu_valid_gen++;
 
 	return 0;
