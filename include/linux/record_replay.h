@@ -23,8 +23,6 @@ struct kvm_lapic;
 /* Max consecutive rollback times before exclusive commit */
 #define RR_CONSEC_RB_TIME	3
 
-/* Early rollback and early check is exclusive */
-/* #define RR_EARLY_ROLLBACK */
 #define RR_EARLY_CHECK
 
 /* If defined, we use the vcpu.rr_info.holding_pages to hold a list of pages

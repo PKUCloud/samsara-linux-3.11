@@ -1172,7 +1172,7 @@ static void rr_log_chunk(struct kvm_vcpu *vcpu)
 	RR_LOG("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, 0);
 }
 
-static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
+static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
 	struct rr_kvm_info *krr_info = &kvm->rr_info;
@@ -1200,8 +1200,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu, int early_rollback)
 	mutex_lock(&(krr_info->tm_lock));
 	if (krr_info->last_commit_vcpu != vcpu->vcpu_id) {
 		/* Detect conflict */
-		if (early_rollback ||
-		    rr_detect_conflict(&vrr_info->access_bitmap,
+		if (rr_detect_conflict(&vrr_info->access_bitmap,
 				       vrr_info->public_cb)) {
 			commit = 0;
 		}
@@ -1275,17 +1274,6 @@ int rr_check_chunk(struct kvm_vcpu *vcpu)
 	u32 exit_reason = rr_ops->get_vmx_exit_reason(vcpu);
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	int ret;
-	int early_rollback = 0;
-
-	#ifdef RR_EARLY_ROLLBACK
-	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
-		gfn_t gfn = vmcs_read64(GUEST_PHYSICAL_ADDRESS) >> PAGE_SHIFT;
-		if (re_test_bit(gfn, vrr_info->public_cb)) {
-			exit_reason = EXIT_REASON_PREEMPTION_TIMER;
-			early_rollback = 1;
-		}
-	}
-	#endif
 
 	#ifdef RR_EARLY_CHECK
 	if (exit_reason == EXIT_REASON_EPT_VIOLATION) {
@@ -1297,7 +1285,7 @@ int rr_check_chunk(struct kvm_vcpu *vcpu)
 	#endif
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION
 	    && exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
-		ret = rr_ape_check_chunk(vcpu, early_rollback);
+		ret = rr_ape_check_chunk(vcpu);
 		if (ret == -1) {
 			RR_ERR("error: vcpu=%d rr_ape_check_chunk() returns -1",
 			       vcpu->vcpu_id);
