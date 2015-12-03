@@ -2037,8 +2037,8 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 		}
 		if (dma_info->size > 0)
 			rr_set_dma_bitmap(kvm, dma_info, online_vcpus);
-		up_write(&krr_info->tm_rwlock);
 		krr_info->dma_holding_sem = false;
+		up_write(&krr_info->tm_rwlock);
 		break;
 	default:
 		break;
