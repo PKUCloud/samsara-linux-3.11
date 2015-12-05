@@ -11,7 +11,7 @@
 #define RE_BITMAP_MAX	0xffffffffffffffffULL
 #define RE_BITMAP_MIN	0x0ULL
 
-#define RE_INIT_CAP	4096
+#define RE_INIT_CAP	8192
 
 struct bits_list {
 	int nbits;	/* Number of valid bits in the list */
@@ -53,6 +53,8 @@ static inline void bits_list_insert(struct bits_list *blist, unsigned long ele)
 		blist->bits[blist->nbits++] = ele;
 	} else {
 		/* Realloc more space */
+		unsigned long *bits = blist->bits;
+
 		old_cap = blist->capacity;
 		new_cap = blist->capacity * 2;
 		temp = kmalloc(new_cap * sizeof(unsigned long), GFP_ATOMIC);
@@ -63,7 +65,7 @@ static inline void bits_list_insert(struct bits_list *blist, unsigned long ele)
 		}
 		blist->capacity = new_cap;
 		for (i = 0; i < old_cap; ++i) {
-			temp[i] = blist->bits[i];
+			temp[i] = bits[i];
 		}
 		kfree(blist->bits);
 		blist->bits = temp;
@@ -79,45 +81,30 @@ struct region_bitmap {
 	DECLARE_BITMAP(bitmap, RE_BITMAP_SIZE);
 	unsigned long low;
 	unsigned long  high;
-	bool bits_list_valid;	/* Whether region_bitmap->bits is valid */
 	struct bits_list blist;
 };
 
-static inline void re_bitmap_init(struct region_bitmap *re_bitmap,
-				  bool bits_list_valid)
+static inline void re_bitmap_init(struct region_bitmap *re_bitmap)
 {
 	bitmap_clear(re_bitmap->bitmap, 0, RE_BITMAP_SIZE);
 	re_bitmap->low = RE_BITMAP_MAX;
 	re_bitmap->high = RE_BITMAP_MIN;
-	re_bitmap->bits_list_valid = bits_list_valid;
 
 	bits_list_init(&re_bitmap->blist);
 }
 
 static inline void re_bitmap_clear(struct region_bitmap *re_bitmap)
 {
-	unsigned long low, high;
 	int i, size;
 	struct bits_list *blist = &re_bitmap->blist;
 	unsigned long *bitmap = re_bitmap->bitmap;
+	unsigned long *bits = blist->bits;
 
-	if (re_bitmap->bits_list_valid) {
-		/* Clear the bitmap through the list */
-		size = blist->nbits;
-		for (i = 0; i < size; ++i) {
-			clear_bit(blist->bits[i], bitmap);
-		}
-		goto out;
+	/* Clear the bitmap through the list */
+	size = blist->nbits;
+	for (i = 0; i < size; ++i) {
+		clear_bit(bits[i], bitmap);
 	}
-	low = re_bitmap->low;
-	high = re_bitmap->high;
-	if (likely(low <= high)) {
-		/* Just clear bitmap[low, high] */
-		bitmap_clear(re_bitmap->bitmap, low, high - low + 1);
-	} else {
-		bitmap_clear(re_bitmap->bitmap, 0, RE_BITMAP_SIZE);
-	}
-out:
 	re_bitmap->low = RE_BITMAP_MAX;
 	re_bitmap->high = RE_BITMAP_MIN;
 
@@ -129,24 +116,25 @@ static inline void re_bitmap_destroy(struct region_bitmap *re_bitmap)
 	bits_list_destroy(&re_bitmap->blist);
 }
 
+static inline int re_test_bit(unsigned long nr, struct region_bitmap *re_bitmap)
+{
+	if (nr < re_bitmap->low || nr > re_bitmap->high)
+		return 0;
+	return test_bit(nr, re_bitmap->bitmap);
+}
+
 static inline void re_set_bit(unsigned long nr, struct region_bitmap *re_bitmap)
 {
+	if (re_test_bit(nr, re_bitmap))
+		return;
+
 	set_bit(nr, re_bitmap->bitmap);
 	if (nr < re_bitmap->low)
 		re_bitmap->low = nr;
 	if (nr > re_bitmap->high)
 		re_bitmap->high = nr;
 
-	if (re_bitmap->bits_list_valid) {
-		bits_list_insert(&re_bitmap->blist, nr);
-	}
-}
-
-static inline int re_test_bit(unsigned long nr, struct region_bitmap *re_bitmap)
-{
-	if (nr < re_bitmap->low || nr > re_bitmap->high)
-		return 0;
-	return test_bit(nr, re_bitmap->bitmap);
+	bits_list_insert(&re_bitmap->blist, nr);
 }
 
 /* dst = dst | src */
@@ -156,14 +144,17 @@ static inline void re_bitmap_or(struct region_bitmap *dst,
 	int i, size;
 	const struct bits_list *blist = &src->blist;
 	unsigned long *bitmap = dst->bitmap;
+	struct bits_list *dst_blist = &dst->blist;
+	unsigned long nr;
+	unsigned long *bits = blist->bits;
 
-	/* Assumptions based on our system */
-	if (unlikely(!src->bits_list_valid || dst->bits_list_valid)) {
-		printk(KERN_ERR "error: %s region_bitmap error\n", __func__);
-	}
 	size = blist->nbits;
 	for (i = 0; i < size; ++i) {
-		set_bit(blist->bits[i], bitmap);
+		nr = bits[i];
+		if (re_test_bit(nr, dst))
+			continue;
+		set_bit(nr, bitmap);
+		bits_list_insert(dst_blist, nr);
 	}
 	dst->low = min(src->low, dst->low);
 	dst->high = max(src->high, dst->high);
@@ -174,17 +165,15 @@ static inline int re_bitmap_intersects(struct region_bitmap *bitmap1,
 {
 	int i, size;
 	struct bits_list *blist = &bitmap2->blist;
+	unsigned long *bits = blist->bits;
 
-	/* Assumptions based on our system */
-	if (unlikely(!bitmap2->bits_list_valid || bitmap1->bits_list_valid)) {
-		printk(KERN_ERR "error: %s region_bitmap error\n", __func__);
-	}
 	size = blist->nbits;
 	for (i = 0; i < size; ++i) {
-		if (re_test_bit(blist->bits[i], bitmap1))
+		if (re_test_bit(bits[i], bitmap1))
 			return 1;
 	}
 	return 0;
 }
 
 #endif
+

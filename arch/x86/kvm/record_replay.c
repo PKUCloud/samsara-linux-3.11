@@ -254,10 +254,10 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->requests = 0;
 	INIT_LIST_HEAD(&rr_info->events_list);
 	mutex_init(&rr_info->events_list_lock);
-	re_bitmap_init(&rr_info->access_bitmap, true);
-	re_bitmap_init(&rr_info->dirty_bitmap, true);
-	re_bitmap_init(&rr_info->conflict_bitmap_1, false);
-	re_bitmap_init(&rr_info->conflict_bitmap_2, false);
+	re_bitmap_init(&rr_info->access_bitmap);
+	re_bitmap_init(&rr_info->dirty_bitmap);
+	re_bitmap_init(&rr_info->conflict_bitmap_1);
+	re_bitmap_init(&rr_info->conflict_bitmap_2);
 	rr_info->public_cb = &rr_info->conflict_bitmap_1;
 	rr_info->private_cb = &rr_info->conflict_bitmap_2;
 	rr_info->exclusive_commit = 0;
@@ -1153,7 +1153,6 @@ static void rr_gen_bitmap_from_spt(struct kvm_vcpu *vcpu)
 static inline int rr_detect_conflict(struct region_bitmap *access_bm,
 				     struct region_bitmap *conflict_bm)
 {
-	/* Notice the order of the arguments */
 	return re_bitmap_intersects(conflict_bm, access_bm);
 }
 
