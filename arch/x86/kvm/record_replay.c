@@ -7,6 +7,7 @@
 
 #include "mmu.h"
 #include "lapic.h"
+#include "rr_hash.h"
 
 struct rr_ops *rr_ops;
 /* Cache for struct rr_cow_page */
@@ -254,6 +255,7 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->requests = 0;
 	INIT_LIST_HEAD(&rr_info->events_list);
 	mutex_init(&rr_info->events_list_lock);
+	rr_init_hash(&rr_info->cow_hash);
 	re_bitmap_init(&rr_info->access_bitmap);
 	re_bitmap_init(&rr_info->dirty_bitmap);
 	re_bitmap_init(&rr_info->conflict_bitmap_1);
@@ -455,6 +457,27 @@ static inline bool rr_spte_check_pfn(u64 spte, pfn_t pfn)
 	return (pfn == ((spte & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT));
 }
 
+/* Called when fixing a page fault. */
+void rr_fix_cow_page(struct rr_cow_page *cow_page, u64 *sptep)
+{
+	pfn_t pfn = (*sptep & PT64_BASE_ADDR_MASK) >> PAGE_SHIFT;
+
+	RR_ASSERT(sptep == cow_page->sptep);
+	cow_page->original_pfn = pfn;
+	cow_page->original_addr = pfn_to_kaddr(pfn);
+	rr_spte_set_pfn(sptep, cow_page->private_pfn);
+	rr_spte_set_cow_tag(sptep);
+	*sptep |= (VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
+	RR_DLOG(MMU, "warning: fix gfn=0x%llx", cow_page->gfn);
+}
+EXPORT_SYMBOL_GPL(rr_fix_cow_page);
+
+struct rr_cow_page *rr_check_cow_page(struct rr_vcpu_info *vrr_info, gfn_t gfn)
+{
+	return rr_hash_find(vrr_info->cow_hash, gfn);
+}
+EXPORT_SYMBOL_GPL(rr_check_cow_page);
+
 /* Separate memory with copy-on-write
  * Alloc a new page to replace the original page and update the spte, then add
  * an item to vcpu->arch.private_pages list.
@@ -463,6 +486,7 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 {
 	void *new_page;
 	struct rr_cow_page *private_mem_page;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 
 	/* Use GFP_ATOMIC here as it will be called while holding spinlock */
 	private_mem_page = kmem_cache_alloc(rr_cow_page_cache, GFP_ATOMIC);
@@ -485,13 +509,15 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn)
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->private_addr = new_page;
 	private_mem_page->sptep = sptep;
+	private_mem_page->state = RR_COW_STATE_PRIVATE;
 	copy_page(new_page, private_mem_page->original_addr);
 	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
 	rr_spte_set_cow_tag(sptep);
 
 	/* Add it to the list */
-	list_add(&private_mem_page->link, &vcpu->rr_info.private_pages);
-	vcpu->rr_info.nr_private_pages++;
+	list_add(&private_mem_page->link, &vrr_info->private_pages);
+	(vrr_info->nr_private_pages)++;
+	rr_hash_insert(vrr_info->cow_hash, private_mem_page);
 }
 EXPORT_SYMBOL_GPL(rr_memory_cow);
 
@@ -523,6 +549,7 @@ void rr_memory_cow_fast(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn)
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
 	private_mem_page->private_addr = new_page;
 	private_mem_page->sptep = sptep;
+	private_mem_page->state = RR_COW_STATE_PRIVATE;
 	copy_page(new_page, private_mem_page->original_addr);
 	rr_spte_set_pfn(sptep, private_mem_page->private_pfn);
 	rr_spte_set_cow_tag(sptep);
@@ -531,6 +558,7 @@ void rr_memory_cow_fast(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn)
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vrr_info->private_pages);
 	vrr_info->nr_private_pages++;
+	rr_hash_insert(vrr_info->cow_hash, private_mem_page);
 
 	return;
 }
@@ -650,6 +678,82 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 }
 EXPORT_SYMBOL_GPL(rr_ept_gfn_to_kaddr);
 
+static void rr_check_hash_one(struct kvm_vcpu *vcpu,
+			      struct rr_cow_page *ele_page)
+{
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct rr_cow_page *ret_page;
+
+	RR_ASSERT(vcpu);
+	RR_ASSERT(ele_page);
+
+	ret_page = rr_hash_find_page(vrr_info->cow_hash, ele_page);
+	if (!ret_page) {
+		RR_DLOG(MMU, "error: vcpu=%d can't find gfn=0x%llx "
+			"in hash", vcpu->vcpu_id, ele_page->gfn);
+	} else if (ret_page != ele_page) {
+		RR_ASSERT(ele_page);
+		RR_DLOG(MMU, "error: vcpu=%d gfn=0x%llx in hash is "
+			"different than that in list",
+			vcpu->vcpu_id, ele_page->gfn);
+	}
+}
+
+static void rr_check_hash(struct kvm_vcpu *vcpu)
+{
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	int i;
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *tmp_page;
+	struct hlist_head *phead;
+	struct hlist_node *temp;
+	int nr_hash_ele = 0;
+	int nr_cow_ele = vrr_info->nr_holding_pages + vrr_info->nr_private_pages
+			 + vrr_info->nr_rollback_pages;
+
+	/* Make sure that elements in hash equals those in list */
+	for (i = 0; i < RR_HASH_SIZE; ++i) {
+		phead = &vrr_info->cow_hash[i];
+		hlist_for_each_entry_safe(private_page, temp, phead, hlink) {
+			++nr_hash_ele;
+		}
+	}
+
+	if (nr_hash_ele != nr_cow_ele) {
+		RR_DLOG(MMU, "error: vcpu=%d num of elements in hash=%d NOT "
+			"equals that in the holding_pages=%d", vcpu->vcpu_id,
+			nr_hash_ele, nr_cow_ele);
+	}
+
+	/* Make sure that every ele in holding_pages is in the hash */
+	list_for_each_entry_safe(private_page, tmp_page,
+				 &vrr_info->holding_pages, link) {
+		if (private_page->state != RR_COW_STATE_HOLDING) {
+			RR_DLOG(MMU, "error: vcpu=%d page state is %d in holding_pages",
+				vcpu->vcpu_id, private_page->state);
+		}
+		rr_check_hash_one(vcpu, private_page);
+	}
+
+	list_for_each_entry_safe(private_page, tmp_page,
+				 &vrr_info->private_pages, link) {
+		if (private_page->state != RR_COW_STATE_PRIVATE) {
+			RR_DLOG(MMU, "error: vcpu=%d page state is %d in private_pages",
+				vcpu->vcpu_id, private_page->state);
+		}
+		rr_check_hash_one(vcpu, private_page);
+	}
+
+	list_for_each_entry_safe(private_page, tmp_page,
+				 &vrr_info->rollback_pages, link) {
+		if (private_page->state != RR_COW_STATE_ROLLBACK) {
+			RR_DLOG(MMU, "error: vcpu=%d page state is %d in rollback_pages",
+				vcpu->vcpu_id, private_page->state);
+		}
+		rr_check_hash_one(vcpu, private_page);
+	}
+}
+
 #ifndef RR_HOLDING_PAGES
 /* Commit the private pages to the original ones. Called when a quantum is
  * finished and can commit.
@@ -692,6 +796,7 @@ static inline void rr_age_holding_page(struct rr_vcpu_info *vrr_info,
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
+		hlist_del(&private_page->hlink);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_holding_pages--;
 	}
@@ -719,6 +824,7 @@ static inline void rr_commit_holding_pages_by_list(struct rr_vcpu_info *vrr_info
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
+			hlist_del(&private_page->hlink);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		} else if (re_test_bit(gfn, dirty_bm)) {
@@ -763,6 +869,9 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			private_page->age = 0;
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
+			RR_ASSERT(rr_spte_check_pfn(*(private_page->sptep),
+						    private_page->private_pfn));
+			private_page->state = RR_COW_STATE_HOLDING;
 			list_move_tail(&private_page->link,
 				       &vrr_info->holding_pages);
 			vrr_info->nr_private_pages--;
@@ -780,6 +889,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
+			hlist_del(&private_page->hlink);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_private_pages--;
 		}
@@ -834,6 +944,7 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 			 * list and copy the new content back before entering
 			 * guest.
 			 */
+			private_page->state = RR_COW_STATE_ROLLBACK;
 			list_move_tail(&private_page->link,
 				       &vrr_info->rollback_pages);
 			vrr_info->nr_holding_pages--;
@@ -846,6 +957,7 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
+			hlist_del(&private_page->hlink);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		} else
@@ -863,6 +975,7 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 			kmem_cache_free(rr_priv_page_cache,
 					private_page->private_addr);
 			list_del(&private_page->link);
+			hlist_del(&private_page->hlink);
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		} else
@@ -897,6 +1010,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		 * list and copy the new content back before entering
 		 * guest.
 		 */
+		private_page->state = RR_COW_STATE_ROLLBACK;
 		list_move_tail(&private_page->link,
 			       &vrr_info->rollback_pages);
 		vrr_info->nr_private_pages--;
@@ -909,6 +1023,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
+		hlist_del(&private_page->hlink);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
 #endif
@@ -1028,6 +1143,7 @@ static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 		private_page->age = 0;
 		copy_page(private_page->private_addr,
 			  private_page->original_addr);
+		private_page->state = RR_COW_STATE_HOLDING;
 		list_move_tail(&private_page->link,
 			       &vrr_info->holding_pages);
 		vrr_info->nr_rollback_pages--;
@@ -1338,6 +1454,7 @@ static void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
+		hlist_del(&private_page->hlink);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_holding_pages--;
 	}
@@ -1360,6 +1477,7 @@ static void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
+		hlist_del(&private_page->hlink);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_rollback_pages--;
 	}
@@ -1423,6 +1541,8 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 #endif
 	RR_ASSERT(vrr_info->nr_private_pages == 0);
 	RR_ASSERT(vrr_info->nr_holding_pages == 0);
+
+	rr_clear_hash(&vrr_info->cow_hash);
 
 	rr_ops->ape_vmx_clear();
 

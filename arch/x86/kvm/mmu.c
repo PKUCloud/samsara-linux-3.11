@@ -2697,16 +2697,26 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 	int emulate = 0;
 	gfn_t pseudo_gfn;
 	unsigned pte_access = 0;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct rr_cow_page *cow_page = NULL;
 
 	for_each_shadow_entry(vcpu, (u64)gfn << PAGE_SHIFT, iterator) {
 		if (iterator.level == level) {
 			pte_access = ACC_ALL;
-			if (vcpu->rr_info.enabled && !write) {
-				/* Read trap
-				 * Do not give the write mask so that vcpu will
-				 * trap when it writes to this page next time.
+			if (likely(vrr_info->enabled)) {
+				/* Check if this spte has been CoW before and
+				 * was dropped by the mmu notifier.
 				 */
-				pte_access = ACC_EXEC_MASK | ACC_USER_MASK;
+				cow_page = rr_check_cow_page(vrr_info, gfn);
+				if (!cow_page && !write) {
+					/* Read trap
+					 * Do not give the write mask so that
+					 * vcpu will trap when
+					 * it writes to this page next time.
+					 */
+					pte_access = ACC_EXEC_MASK |
+						     ACC_USER_MASK;
+				}
 			}
 
 			mmu_set_spte(vcpu, iterator.sptep, pte_access,
@@ -2719,11 +2729,19 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 			 */
 			++vcpu->stat.pf_fixed;
 
-			if (write &&
-			    likely(is_shadow_present_pte(*iterator.sptep)) &&
-			    vcpu->rr_info.enabled) {
-				RR_ASSERT(!is_noslot_pfn(pfn));
-				rr_memory_cow(vcpu, iterator.sptep, pfn, gfn);
+			if (likely(vrr_info->enabled)) {
+				if (cow_page) {
+					rr_fix_cow_page(cow_page,
+							iterator.sptep);
+					break;
+				}
+
+				if (write &&
+				    likely(is_shadow_present_pte(*iterator.sptep))) {
+					RR_ASSERT(!is_noslot_pfn(pfn));
+					rr_memory_cow(vcpu, iterator.sptep,
+						      pfn, gfn);
+				}
 			}
 			break;
 		}

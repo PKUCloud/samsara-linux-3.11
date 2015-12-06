@@ -100,6 +100,7 @@ struct rr_vcpu_info {
 	int nr_private_pages;
 	struct list_head holding_pages; /* For pages that have been COW before */
 	int nr_holding_pages;
+	struct hlist_head *cow_hash; /* Hash table for cow pages */
 #ifdef RR_ROLLBACK_PAGES
 	/* For pages that need to rollback */
 	struct list_head rollback_pages;
@@ -142,9 +143,15 @@ struct rr_ops {
 	u32 (*get_vmx_exit_reason)(struct kvm_vcpu *vcpu);
 };
 
+/* State of the rr_cow_page */
+#define RR_COW_STATE_PRIVATE	0	/* In private_pages */
+#define RR_COW_STATE_HOLDING	1	/* In holding_pages */
+#define RR_COW_STATE_ROLLBACK	2	/* In rollback_pages */
+
 /* Structure used for keeping info about cow  memory page */
 struct rr_cow_page {
 	struct list_head link;
+	struct hlist_node hlink;
 	gfn_t gfn;
 	pfn_t original_pfn;
 	void *original_addr;
@@ -152,6 +159,7 @@ struct rr_cow_page {
 	void *private_addr;
 	u64 *sptep;	/*Pointer of the spte that references this pfn */
 	int age;
+	int state;
 };
 
 void rr_init(struct rr_ops *rr_ops);
@@ -172,6 +180,8 @@ void rr_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn, gfn_t gfn);
 void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write);
 void rr_vcpu_disable(struct kvm_vcpu *vcpu);
 void rr_memory_cow_fast(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn);
+void rr_fix_cow_page(struct rr_cow_page *cow_page, u64 *sptep);
+struct rr_cow_page *rr_check_cow_page(struct rr_vcpu_info *vrr_info, gfn_t gfn);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {
