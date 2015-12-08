@@ -749,35 +749,6 @@ static void rr_check_hash(struct kvm_vcpu *vcpu)
 	}
 }
 
-#ifndef RR_HOLDING_PAGES
-/* Commit the private pages to the original ones. Called when a quantum is
- * finished and can commit.
- */
-static void rr_commit_memory(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *private_page;
-	struct rr_cow_page *temp;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-
-	list_for_each_entry_safe(private_page, temp,
-				 &vrr_info->private_pages,
-				 link)
-	{
-		copy_page(private_page->original_addr,
-			  private_page->private_addr);
-		rr_spte_set_pfn(private_page->sptep,
-				private_page->original_pfn);
-		/* Widthdraw the write permission */
-		rr_spte_withdraw_wperm(private_page->sptep);
-		rr_spte_clear_cow_tag(private_page->sptep);
-		kmem_cache_free(rr_priv_page_cache,
-				private_page->private_addr);
-		list_del(&private_page->link);
-		kmem_cache_free(rr_cow_page_cache, private_page);
-		vrr_info->nr_private_pages--;
-	}
-}
-#else
 /* Before accessing the original pfn of the cow_page, we need to check that
  * if that spte was dropped. If so, we need to reconstruct it and get the
  * new correct original pfn.
@@ -927,35 +898,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 		}
 	}
 }
-#endif
 
-#ifndef RR_HOLDING_PAGES
-/* Rollback the private pages to the original ones. Called when a quantum is
- * finished and conflict with others so that have to rollback.
- */
-static void rr_rollback_memory(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *private_page;
-	struct rr_cow_page *temp;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-
-	list_for_each_entry_safe(private_page, temp,
-				 &vrr_info->private_pages, link)
-	{
-		rr_spte_set_pfn(private_page->sptep,
-				private_page->original_pfn);
-		/* Widthdraw the write permission */
-		rr_spte_withdraw_wperm(private_page->sptep);
-		rr_spte_clear_cow_tag(private_page->sptep);
-
-		kmem_cache_free(rr_priv_page_cache,
-				private_page->private_addr);
-		list_del(&private_page->link);
-		kmem_cache_free(rr_cow_page_cache, private_page);
-		vrr_info->nr_private_pages--;
-	}
-}
-#else
 static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_info)
 {
 	struct rr_cow_page *private_page;
@@ -1050,7 +993,6 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 #endif
 	}
 }
-#endif
 
 /* Assume that pages committed here will never conflit with other vcpus. */
 void rr_commit_again(struct kvm_vcpu *vcpu)

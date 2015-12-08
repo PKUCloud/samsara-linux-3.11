@@ -25,12 +25,6 @@ struct kvm_lapic;
 
 #define RR_EARLY_CHECK
 
-/* If defined, we use the vcpu.rr_info.holding_pages to hold a list of pages
- * that have been COW. We will not withdraw the write permission and free
- * the private pages until we have to.
- */
-#define RR_HOLDING_PAGES
-
 #define RR_MAX_HOLDING_PAGE_AGE	100
 
 /* If defined, we use a separate list to hold pages needed to rollback and
