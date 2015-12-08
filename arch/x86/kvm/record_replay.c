@@ -264,6 +264,7 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->private_cb = &rr_info->conflict_bitmap_2;
 	rr_info->exclusive_commit = 0;
 	rr_info->nr_rollback = 0;
+	rr_info->nr_chunk = 0;
 	rr_info->chunk_info.vcpu_id = vcpu->vcpu_id;
 	rr_info->chunk_info.state = RR_CHUNK_STATE_IDLE;
 	INIT_LIST_HEAD(&rr_info->private_pages);
@@ -799,9 +800,10 @@ static __always_inline void rr_spte_restore(struct rr_cow_page *cow_page)
 }
 
 static inline void rr_age_holding_page(struct rr_vcpu_info *vrr_info,
-				       struct rr_cow_page *private_page)
+				       struct rr_cow_page *private_page,
+				       u64 target_chunk_num)
 {
-	if ((++(private_page->age)) >= RR_MAX_HOLDING_PAGE_AGE) {
+	if (private_page->chunk_num < target_chunk_num) {
 		rr_spte_restore(private_page);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
@@ -822,6 +824,8 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 	struct list_head *head = &vrr_info->holding_pages;
 	struct region_bitmap *conflict_bm = vrr_info->private_cb;
 	struct region_bitmap *dirty_bm = &vrr_info->dirty_bitmap;
+	u64 chunk_num = (vrr_info->nr_chunk > RR_MAX_HOLDING_PAGE_AGE) ?
+			(vrr_info->nr_chunk - RR_MAX_HOLDING_PAGE_AGE) : 0;
 
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, head, link) {
@@ -837,13 +841,14 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 			vrr_info->nr_holding_pages--;
 		} else if (re_test_bit(gfn, dirty_bm)) {
 			/* This page was touched by this vcpu in this quantum */
-			private_page->age = 0;
+			private_page->chunk_num = vrr_info->nr_chunk;
 			rr_check_cow_page_before_access(vcpu, private_page);
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
 			list_move_tail(&private_page->link, &temp_list);
 		} else
-			rr_age_holding_page(vrr_info, private_page);
+			rr_age_holding_page(vrr_info, private_page,
+					    chunk_num);
 	}
 
 	if (!list_empty(&temp_list)) {
@@ -875,7 +880,7 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	/* Traverse the private_pages */
 	list_for_each_entry_safe(private_page, temp, head, link) {
 		if (memslot_id(kvm, private_page->gfn) == 8) {
-			private_page->age = 0;
+			private_page->chunk_num = vrr_info->nr_chunk;
 			rr_check_cow_page_before_access(vcpu, private_page);
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
@@ -907,6 +912,8 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 	struct list_head *head = &vrr_info->holding_pages;
 	struct region_bitmap *dirty_bm = &vrr_info->dirty_bitmap;
 	struct region_bitmap *conflict_bm = vrr_info->private_cb;
+	u64 chunk_num = (vrr_info->nr_chunk > RR_MAX_HOLDING_PAGE_AGE) ?
+			(vrr_info->nr_chunk - RR_MAX_HOLDING_PAGE_AGE) : 0;
 
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, head, link) {
@@ -931,7 +938,7 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		} else
-			rr_age_holding_page(vrr_info, private_page);
+			rr_age_holding_page(vrr_info, private_page, chunk_num);
 #else
 		/* Whether this page has been touched by other vcpus or by
 		 * this vcpu in this quantum.
@@ -946,7 +953,7 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 			kmem_cache_free(rr_cow_page_cache, private_page);
 			vrr_info->nr_holding_pages--;
 		} else
-			rr_age_holding_page(vrr_info, private_page);
+			rr_age_holding_page(vrr_info, private_page, chunk_num);
 #endif
 	}
 }
@@ -1103,7 +1110,7 @@ static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 	struct list_head *head = &vrr_info->rollback_pages;
 
 	list_for_each_entry_safe(private_page, temp, head, link) {
-		private_page->age = 0;
+		private_page->chunk_num = vrr_info->nr_chunk;
 		rr_check_cow_page_before_access(vcpu, private_page);
 		copy_page(private_page->private_addr,
 			  private_page->original_addr);
@@ -1293,6 +1300,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 		}
 	}
 
+	++vrr_info->nr_chunk;
 	down_read(&(krr_info->tm_rwlock));
 	mutex_lock(&(krr_info->tm_lock));
 	if (krr_info->last_commit_vcpu != vcpu->vcpu_id) {

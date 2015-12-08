@@ -88,6 +88,7 @@ struct rr_vcpu_info {
 
 	int exclusive_commit; /* Whether vcpu is in exclusive commit state */
 	int nr_rollback;	/* Number of continuous rollback */
+	u64 nr_chunk;		/* Number of chunks */
 	struct CPUX86State vcpu_checkpoint;
 	struct rr_chunk_info chunk_info;
 	struct list_head private_pages;
@@ -152,7 +153,7 @@ struct rr_cow_page {
 	pfn_t private_pfn;
 	void *private_addr;
 	u64 *sptep;	/*Pointer of the spte that references this pfn */
-	int age;
+	u64 chunk_num;	/* val of nr_chunk when added to holding_pages */
 	int state;
 };
 
