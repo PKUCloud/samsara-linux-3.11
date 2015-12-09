@@ -819,7 +819,6 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 	struct rr_cow_page *private_page;
 	struct rr_cow_page *temp;
 	gfn_t gfn;
-	LIST_HEAD(temp_list);
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct list_head *head = &vrr_info->holding_pages;
 	struct region_bitmap *conflict_bm = vrr_info->private_cb;
@@ -845,15 +844,9 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 			rr_check_cow_page_before_access(vcpu, private_page);
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
-			list_move_tail(&private_page->link, &temp_list);
 		} else
 			rr_age_holding_page(vrr_info, private_page,
 					    chunk_num);
-	}
-
-	if (!list_empty(&temp_list)) {
-		/* Move the temp_list to the back of the holding_pages */
-		list_splice_tail_init(&temp_list, &vrr_info->holding_pages);
 	}
 }
 
