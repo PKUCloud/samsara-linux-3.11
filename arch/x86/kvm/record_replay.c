@@ -1268,6 +1268,25 @@ static void rr_log_chunk(struct kvm_vcpu *vcpu)
 	RR_LOG("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, 0);
 }
 
+/* Dropping spte may miss some entries in the EPT. We try to complement the
+ * access and dirty bitmap.
+ */
+static void rr_gen_bitmap_from_private_pages(struct kvm_vcpu *vcpu)
+{
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct region_bitmap *access_bm = &vrr_info->access_bitmap;
+	struct region_bitmap *dirty_bm = &vrr_info->dirty_bitmap;
+	struct rr_cow_page *cow_page;
+	struct list_head *head = &vrr_info->private_pages;
+	gfn_t gfn;
+
+	list_for_each_entry(cow_page, head, link) {
+		gfn = cow_page->gfn;
+		re_set_bit(gfn, access_bm);
+		re_set_bit(gfn, dirty_bm);
+	}
+}
+
 static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -1280,6 +1299,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 
 	RR_ASSERT(vrr_info->enabled);
 	rr_gen_bitmap_from_spt(vcpu);
+	rr_gen_bitmap_from_private_pages(vcpu);
 	if (!vrr_info->exclusive_commit &&
 	    atomic_read(&krr_info->normal_commit) < 1) {
 		/* Now anothter vcpu is in exclusive commit state */
