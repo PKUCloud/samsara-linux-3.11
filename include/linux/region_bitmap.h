@@ -175,6 +175,11 @@ static inline int re_bitmap_intersects(struct region_bitmap *bitmap1,
 	return 0;
 }
 
+static inline int re_bitmap_empty(struct region_bitmap *re_bitmap)
+{
+	return (re_bitmap->blist.nbits == 0);
+}
+
 #define re_bitmap_for_each_bit(pele, tmp, re_bitmap)	\
 	for (pele = (re_bitmap)->blist.bits,		\
 	     tmp = pele + (re_bitmap)->blist.nbits;	\

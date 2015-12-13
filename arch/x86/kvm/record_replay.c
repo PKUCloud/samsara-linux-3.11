@@ -303,7 +303,6 @@ static void __rr_kvm_enable(struct kvm *kvm)
 	mutex_init(&rr_kvm_info->tm_lock);
 	spin_lock_init(&rr_kvm_info->chunk_list_lock);
 	INIT_LIST_HEAD(&rr_kvm_info->chunk_list);
-	rr_kvm_info->last_commit_vcpu = -1;
 	atomic_set(&rr_kvm_info->normal_commit, 1);
 	rr_kvm_info->last_record_vcpu = -1;
 	rr_kvm_info->dma_holding_sem = false;
@@ -1026,7 +1025,6 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 
 	/* Commit memory here */
 	rr_commit_memory(vcpu);
-	krr_info->last_commit_vcpu = vcpu->vcpu_id;
 
 	mutex_unlock(&krr_info->tm_lock);
 
@@ -1297,7 +1295,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 	++vrr_info->nr_chunk;
 	down_read(&(krr_info->tm_rwlock));
 	mutex_lock(&(krr_info->tm_lock));
-	if (krr_info->last_commit_vcpu != vcpu->vcpu_id) {
+	if (!re_bitmap_empty(vrr_info->public_cb)) {
 		/* Detect conflict */
 		if (rr_detect_conflict(&vrr_info->access_bitmap,
 				       vrr_info->public_cb)) {
@@ -1327,7 +1325,6 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 				     &vrr_info->dirty_bitmap);
 		}
 
-		krr_info->last_commit_vcpu = vcpu->vcpu_id;
 		vrr_info->nr_rollback = 0;
 		rr_log_chunk(vcpu);
 	} else {
@@ -1468,7 +1465,6 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 			list_del(&chunk->link);
 		}
 		spin_unlock(&krr_info->chunk_list_lock);
-		krr_info->last_commit_vcpu = -1;
 		atomic_set(&krr_info->normal_commit, 1);
 		krr_info->last_record_vcpu = -1;
 	}

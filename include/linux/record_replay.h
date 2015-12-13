@@ -115,7 +115,6 @@ struct rr_kvm_info {
 	struct mutex tm_lock;
 	struct list_head chunk_list;
 	spinlock_t chunk_list_lock;
-	int  last_commit_vcpu;
 	/* 1 if we can commit normally, otherwise someone is in exclusive
 	 * commit status.
 	 */
