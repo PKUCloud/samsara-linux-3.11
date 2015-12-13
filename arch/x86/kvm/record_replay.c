@@ -1026,6 +1026,7 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 
 	/* Commit memory here */
 	rr_commit_memory(vcpu);
+	krr_info->last_commit_vcpu = vcpu->vcpu_id;
 
 	mutex_unlock(&krr_info->tm_lock);
 

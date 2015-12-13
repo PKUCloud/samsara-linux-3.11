@@ -2038,6 +2038,8 @@ static int rr_kvm_vm_ioctl_set_dma_info(struct kvm *kvm,
 		if (dma_info->size > 0)
 			rr_set_dma_bitmap(kvm, dma_info, online_vcpus);
 		krr_info->dma_holding_sem = false;
+		/* Let the vcpu that committed last time to check conflict */
+		krr_info->last_commit_vcpu = -1;
 		up_write(&krr_info->tm_rwlock);
 		break;
 	default:
