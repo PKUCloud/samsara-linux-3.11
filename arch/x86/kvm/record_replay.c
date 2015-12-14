@@ -336,12 +336,13 @@ static void __rr_vcpu_clean_events(struct kvm_vcpu *vcpu)
 {
 	struct rr_vcpu_info *rr_info = &vcpu->rr_info;
 	struct rr_event *e, *tmp;
+	unsigned long rip = vcpu->arch.regs[VCPU_REGS_RIP];
+	unsigned long rcx = vcpu->arch.regs[VCPU_REGS_RCX];
 
 	list_for_each_entry_safe(e, tmp, &rr_info->events_list, link) {
 		RR_LOG("2 %d %d %d %d 0x%llx, %d, 0x%llx\n",
 		       e->delivery_mode, e->vector, e->level,
-		       e->trig_mode, vcpu->arch.regs[VCPU_REGS_RIP],
-		       0, vcpu->arch.regs[VCPU_REGS_RCX]);
+		       e->trig_mode, rip, 0, rcx);
 		list_del(&e->link);
 		kmem_cache_free(rr_event_cache, e);
 	}
@@ -565,6 +566,7 @@ static int rr_clear_AD_bit_by_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 	hpa_t shadow_addr = vcpu->arch.mmu.root_hpa;
 	unsigned index;
 	u64 *sptep;
+	u64 spte;
 
 	RR_ASSERT(level == PT64_ROOT_LEVEL);
 	RR_ASSERT(shadow_addr != INVALID_PAGE);
@@ -572,15 +574,16 @@ static int rr_clear_AD_bit_by_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 	for (; level >= PT_PAGE_TABLE_LEVEL; --level) {
 		index = SHADOW_PT_INDEX(addr, level);
 		sptep = ((u64 *)__va(shadow_addr)) + index;
-		if (unlikely(!is_shadow_present_pte(*sptep))) {
+		spte = *sptep;
+		if (unlikely(!is_shadow_present_pte(spte))) {
 			return -1;
 		}
 		*sptep &= ~(VMX_EPT_ACCESS_BIT);
-		if (is_last_spte(*sptep, level)) {
+		if (is_last_spte(spte, level)) {
 			*sptep &= ~(VMX_EPT_DIRTY_BIT);
 			return 0;
 		}
-		shadow_addr = *sptep & PT64_BASE_ADDR_MASK;
+		shadow_addr = spte & PT64_BASE_ADDR_MASK;
 	}
 	return 0;
 }
@@ -640,6 +643,7 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 
 	kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write, &present);
 	if (kaddr == NULL) {
+		vrr_info->tlb_flush = true;
 		if (write)
 			error_code |= PFERR_WRITE_MASK;
 		gpa = gfn_to_gpa(gfn);
@@ -660,7 +664,6 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 		}
 	}
 
-	vrr_info->tlb_flush = true;
 	if (rr_check_request(RR_REQ_COMMIT_AGAIN, vrr_info)) {
 		if (write) {
 			vrr_info->commit_again_clean = false;
@@ -821,8 +824,9 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 	struct list_head *head = &vrr_info->holding_pages;
 	struct region_bitmap *conflict_bm = vrr_info->private_cb;
 	struct region_bitmap *dirty_bm = &vrr_info->dirty_bitmap;
-	u64 chunk_num = (vrr_info->nr_chunk > RR_MAX_HOLDING_PAGE_AGE) ?
-			(vrr_info->nr_chunk - RR_MAX_HOLDING_PAGE_AGE) : 0;
+	u64 nr_chunk = vrr_info->nr_chunk;
+	u64 chunk_num = (nr_chunk > RR_MAX_HOLDING_PAGE_AGE) ?
+			(nr_chunk - RR_MAX_HOLDING_PAGE_AGE) : 0;
 
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, head, link) {
@@ -838,7 +842,7 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 			vrr_info->nr_holding_pages--;
 		} else if (re_test_bit(gfn, dirty_bm)) {
 			/* This page was touched by this vcpu in this quantum */
-			private_page->chunk_num = vrr_info->nr_chunk;
+			private_page->chunk_num = nr_chunk;
 			rr_check_cow_page_before_access(vcpu, private_page);
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
@@ -926,6 +930,8 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	int diff = re_bitmap_size(vrr_info->private_cb) +
 		   re_bitmap_size(&vrr_info->dirty_bitmap) -
 		   vrr_info->nr_holding_pages - vrr_info->nr_private_pages;
+	u64 nr_chunk = vrr_info->nr_chunk;
+	struct list_head *holding_head = &vrr_info->holding_pages;
 
 	if (diff <= 0) {
 		rr_commit_cow_pages_by_bitmap(vcpu);
@@ -937,13 +943,13 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	/* Traverse the private_pages */
 	list_for_each_entry_safe(private_page, temp, head, link) {
 		if (memslot_id(kvm, private_page->gfn) == 8) {
-			private_page->chunk_num = vrr_info->nr_chunk;
+			private_page->chunk_num = nr_chunk;
 			rr_check_cow_page_before_access(vcpu, private_page);
 			copy_page(private_page->original_addr,
 				  private_page->private_addr);
 			private_page->state = RR_COW_STATE_HOLDING;
 			list_move_tail(&private_page->link,
-				       &vrr_info->holding_pages);
+				       holding_head);
 			vrr_info->nr_private_pages--;
 			vrr_info->nr_holding_pages++;
 		} else {
@@ -975,11 +981,12 @@ static void rr_commit_memory_again(struct kvm_vcpu *vcpu)
 	unsigned long *pgfn, *tmp;
 	struct kvm *kvm = vcpu->kvm;
 	struct list_head *holding_head = &vrr_info->holding_pages;
+	u64 nr_chunk = vrr_info->nr_chunk;
 
 	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
 		cow_page = rr_hash_find(cow_hash, *pgfn);
 		RR_ASSERT(cow_page);
-		cow_page->chunk_num = vrr_info->nr_chunk;
+		cow_page->chunk_num = nr_chunk;
 		rr_check_cow_page_before_access(vcpu, cow_page);
 		copy_page(cow_page->original_addr,
 			  cow_page->private_addr);
@@ -1013,6 +1020,7 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 	struct region_bitmap *conflict_bm = vrr_info->private_cb;
 	u64 chunk_num = (vrr_info->nr_chunk > RR_MAX_HOLDING_PAGE_AGE) ?
 			(vrr_info->nr_chunk - RR_MAX_HOLDING_PAGE_AGE) : 0;
+	struct list_head *rollback_head = &vrr_info->rollback_pages;
 
 	/* Traverse the holding_pages */
 	list_for_each_entry_safe(private_page, temp, head, link) {
@@ -1024,8 +1032,7 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 			 * guest.
 			 */
 			private_page->state = RR_COW_STATE_ROLLBACK;
-			list_move_tail(&private_page->link,
-				       &vrr_info->rollback_pages);
+			list_move_tail(&private_page->link, rollback_head);
 			vrr_info->nr_holding_pages--;
 			vrr_info->nr_rollback_pages++;
 		} else if (re_test_bit(gfn, conflict_bm)) {
@@ -1072,6 +1079,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 	struct rr_cow_page *temp;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct list_head *head = &vrr_info->private_pages;
+	struct list_head *rollback_head = &vrr_info->rollback_pages;
 
 	rr_rollback_holding_pages_by_list(vrr_info);
 
@@ -1084,8 +1092,7 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		 * guest.
 		 */
 		private_page->state = RR_COW_STATE_ROLLBACK;
-		list_move_tail(&private_page->link,
-			       &vrr_info->rollback_pages);
+		list_move_tail(&private_page->link, rollback_head);
 		vrr_info->nr_private_pages--;
 		vrr_info->nr_rollback_pages++;
 #else
@@ -1200,15 +1207,16 @@ static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
 	struct rr_cow_page *private_page, *temp;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct list_head *head = &vrr_info->rollback_pages;
+	u64 nr_chunk = vrr_info->nr_chunk;
+	struct list_head *holding_head = &vrr_info->holding_pages;
 
 	list_for_each_entry_safe(private_page, temp, head, link) {
-		private_page->chunk_num = vrr_info->nr_chunk;
+		private_page->chunk_num = nr_chunk;
 		rr_check_cow_page_before_access(vcpu, private_page);
 		copy_page(private_page->private_addr,
 			  private_page->original_addr);
 		private_page->state = RR_COW_STATE_HOLDING;
-		list_move_tail(&private_page->link,
-			       &vrr_info->holding_pages);
+		list_move_tail(&private_page->link, holding_head);
 		vrr_info->nr_rollback_pages--;
 		vrr_info->nr_holding_pages++;
 	}
@@ -1269,10 +1277,12 @@ void rr_apic_reinsert_irq(struct kvm_vcpu *vcpu)
 {
 	struct rr_event *e, *tmp;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct kvm_lapic *apic = vcpu->arch.apic;
+	struct list_head *head = &vrr_info->events_list;
 
 	mutex_lock(&(vrr_info->events_list_lock));
-	list_for_each_entry_safe(e, tmp, &(vrr_info->events_list), link) {
-		apic_accept_irq_without_record(vcpu->arch.apic,
+	list_for_each_entry_safe(e, tmp, head, link) {
+		apic_accept_irq_without_record(apic,
 					       e->delivery_mode,
 					       e->vector, e->level,
 					       e->trig_mode, e->dest_map);
@@ -1287,10 +1297,6 @@ static void  __rr_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, gpa_t gpa, hpa_t
 	bool accessed = *sptep & VMX_EPT_ACCESS_BIT;
 	bool dirty;
 
-#ifdef DEBUG_RECORD_REPLAY
-	dirty = *sptep & VMX_EPT_DIRTY_BIT;
-	RR_ASSERT(accessed || !dirty);
-#endif
 	if (accessed) {
 		gfn = gpa >> PAGE_SHIFT;
 		dirty = *sptep & VMX_EPT_DIRTY_BIT;
@@ -1365,7 +1371,7 @@ static void rr_log_chunk(struct kvm_vcpu *vcpu)
 	krr_info->last_record_vcpu = vcpu->vcpu_id;
 	/* get_random_bytes(&bc, sizeof(unsigned int)); */
 	/* The last argument should be the bc */
-	RR_LOG("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, 0);
+	RR_LOG("1 %d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, 0);
 }
 
 /* Dropping spte may miss some entries in the EPT. We try to complement the
