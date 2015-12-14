@@ -896,6 +896,48 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	}
 }
 
+/* Only commit the dirty_bitmap. Conflict bitmap will be left to be handled
+ * next chunk.
+ * There may be one more cow page left in the private_pages after iterating
+ * the dirty bitmap because of the early check. We just ignore it and let it
+ * to be handled next chunk.
+ */
+static void rr_commit_memory_again(struct kvm_vcpu *vcpu)
+{
+	struct rr_cow_page *cow_page;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct hlist_head *cow_hash = vrr_info->cow_hash;
+	unsigned long *pgfn, *tmp;
+	struct kvm *kvm = vcpu->kvm;
+	struct list_head *holding_head = &vrr_info->holding_pages;
+
+	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
+		cow_page = rr_hash_find(cow_hash, *pgfn);
+		RR_ASSERT(cow_page);
+		cow_page->chunk_num = vrr_info->nr_chunk;
+		rr_check_cow_page_before_access(vcpu, cow_page);
+		copy_page(cow_page->original_addr,
+			  cow_page->private_addr);
+		if (cow_page->state == RR_COW_STATE_PRIVATE) {
+			if (memslot_id(kvm, *pgfn) == 8) {
+				cow_page->state = RR_COW_STATE_HOLDING;
+				list_move_tail(&cow_page->link, holding_head);
+				vrr_info->nr_private_pages--;
+				vrr_info->nr_holding_pages++;
+			} else {
+				rr_spte_restore(cow_page);
+				kmem_cache_free(rr_priv_page_cache,
+						cow_page->private_addr);
+				list_del(&cow_page->link);
+				hlist_del(&cow_page->hlink);
+				kmem_cache_free(rr_cow_page_cache, cow_page);
+				vrr_info->nr_private_pages--;
+			}
+		}
+	}
+	RR_ASSERT(vrr_info->nr_private_pages <= 1);
+}
+
 static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_info)
 {
 	struct rr_cow_page *private_page;
@@ -1016,29 +1058,22 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 		vcpu_it = kvm->vcpus[i];
 		if (vcpu_it == vcpu)
 			continue;
-		RR_ASSERT(vcpu_it->vcpu_id != vcpu->vcpu_id);
 		re_bitmap_or(vcpu_it->rr_info.public_cb,
 			     &vrr_info->dirty_bitmap);
 	}
-	/* Copy conflict_bitmap */
-	swap(vrr_info->private_cb, vrr_info->public_cb);
 
 	/* Commit memory here */
-	rr_commit_memory(vcpu);
+	rr_commit_memory_again(vcpu);
 
 	mutex_unlock(&krr_info->tm_lock);
 
 	up_read(&krr_info->tm_rwlock);
 
-	/* Reset bitmaps */
-	re_bitmap_clear(&vrr_info->access_bitmap);
+	/* We only handle dirty_bitmap here */
 	re_bitmap_clear(&vrr_info->dirty_bitmap);
-	re_bitmap_clear(vrr_info->private_cb);
-
+	RR_ASSERT(re_bitmap_empty(&vrr_info->access_bitmap));
 	vrr_info->commit_again_clean = true;
-
 	vrr_info->tlb_flush = true;
-	return;
 }
 EXPORT_SYMBOL_GPL(rr_commit_again);
 
