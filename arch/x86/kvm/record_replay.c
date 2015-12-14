@@ -1064,6 +1064,51 @@ static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_in
 	}
 }
 
+static inline void rr_rollback_cow_pages_by_bitmap(struct rr_vcpu_info *vrr_info)
+{
+	struct rr_cow_page *cow_page;
+	struct hlist_head *cow_hash = vrr_info->cow_hash;
+	unsigned long *pgfn, *tmp;
+	struct list_head *rollback_head = &vrr_info->rollback_pages;
+
+	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
+		cow_page = rr_hash_find(cow_hash, *pgfn);
+		if (likely(cow_page)) {
+			if (cow_page->state == RR_COW_STATE_HOLDING)
+				vrr_info->nr_holding_pages--;
+			else
+				vrr_info->nr_private_pages--;
+
+			cow_page->state = RR_COW_STATE_ROLLBACK;
+			list_move_tail(&cow_page->link, rollback_head);
+			vrr_info->nr_rollback_pages++;
+		} else {
+			RR_ERR("error: gfn=0x%lx in dirty_bitmap but not in "
+			       "cow pages", *pgfn);
+		}
+	}
+
+	re_bitmap_for_each_bit(pgfn, tmp, vrr_info->private_cb) {
+		cow_page = rr_hash_find(cow_hash, *pgfn);
+		if (cow_page) {
+			if (cow_page->state != RR_COW_STATE_ROLLBACK) {
+				if (cow_page->state == RR_COW_STATE_PRIVATE)
+					vrr_info->nr_private_pages--;
+				else
+					vrr_info->nr_holding_pages--;
+
+				rr_spte_restore(cow_page);
+				kmem_cache_free(rr_priv_page_cache,
+						cow_page->private_addr);
+				list_del(&cow_page->link);
+				hlist_del(&cow_page->hlink);
+				kmem_cache_free(rr_cow_page_cache, cow_page);
+			}
+		}
+	}
+	RR_ASSERT(list_empty(&vrr_info->private_pages));
+}
+
 /* Rollback memory.
  * 1. Check the holding_pages list. For each node, test the gfn in
  *    conflict_bitmap. If set, this page was updated by other vcpus and we need
@@ -1080,6 +1125,14 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct list_head *head = &vrr_info->private_pages;
 	struct list_head *rollback_head = &vrr_info->rollback_pages;
+	int diff = re_bitmap_size(vrr_info->private_cb) +
+		   re_bitmap_size(&vrr_info->dirty_bitmap) -
+		   vrr_info->nr_holding_pages - vrr_info->nr_private_pages;
+
+	if (diff <= 0) {
+		rr_rollback_cow_pages_by_bitmap(vrr_info);
+		return;
+	}
 
 	rr_rollback_holding_pages_by_list(vrr_info);
 
