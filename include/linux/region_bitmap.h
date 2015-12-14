@@ -11,7 +11,7 @@
 #define RE_BITMAP_MAX	0xffffffffffffffffULL
 #define RE_BITMAP_MIN	0x0ULL
 
-#define RE_INIT_CAP	10240
+#define RE_INIT_CAP	20480
 
 struct bits_list {
 	int nbits;	/* Number of valid bits in the list */
