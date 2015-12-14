@@ -462,7 +462,6 @@ void rr_fix_cow_page(struct rr_cow_page *cow_page, u64 *sptep)
 	cow_page->original_addr = pfn_to_kaddr(pfn);
 	rr_spte_set_pfn(sptep, cow_page->private_pfn);
 	rr_spte_set_cow_tag(sptep);
-	*sptep |= (VMX_EPT_ACCESS_BIT | VMX_EPT_DIRTY_BIT);
 	RR_DLOG(MMU, "warning: fix gfn=0x%llx", cow_page->gfn);
 }
 EXPORT_SYMBOL_GPL(rr_fix_cow_page);
@@ -849,6 +848,64 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 	}
 }
 
+/* Commit holding_pages and private_pages indexed by bitmap */
+static inline void rr_commit_cow_pages_by_bitmap(struct kvm_vcpu *vcpu)
+{
+	struct rr_cow_page *cow_page;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct hlist_head *cow_hash = vrr_info->cow_hash;
+	unsigned long *pgfn, *tmp;
+	u64 nr_chunk = vrr_info->nr_chunk;
+	struct kvm *kvm = vcpu->kvm;
+	struct list_head *holding_head = &vrr_info->holding_pages;
+
+	re_bitmap_for_each_bit(pgfn, tmp, vrr_info->private_cb) {
+		cow_page = rr_hash_find(cow_hash, *pgfn);
+		if (cow_page) {
+			RR_ASSERT(cow_page->state == RR_COW_STATE_HOLDING);
+			rr_spte_restore(cow_page);
+			kmem_cache_free(rr_priv_page_cache,
+					cow_page->private_addr);
+			list_del(&cow_page->link);
+			hlist_del(&cow_page->hlink);
+			kmem_cache_free(rr_cow_page_cache, cow_page);
+			vrr_info->nr_holding_pages--;
+		}
+	}
+
+	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
+		cow_page = rr_hash_find(cow_hash, *pgfn);
+		if (likely(cow_page)) {
+			cow_page->chunk_num = nr_chunk;
+			rr_check_cow_page_before_access(vcpu, cow_page);
+			copy_page(cow_page->original_addr,
+				  cow_page->private_addr);
+			if (cow_page->state == RR_COW_STATE_PRIVATE) {
+				if (memslot_id(kvm, cow_page->gfn) == 8) {
+					cow_page->state = RR_COW_STATE_HOLDING;
+					list_move_tail(&cow_page->link,
+						       holding_head);
+					vrr_info->nr_private_pages--;
+					vrr_info->nr_holding_pages++;
+				} else {
+					rr_spte_restore(cow_page);
+					kmem_cache_free(rr_priv_page_cache,
+							cow_page->private_addr);
+					list_del(&cow_page->link);
+					hlist_del(&cow_page->hlink);
+					kmem_cache_free(rr_cow_page_cache,
+							cow_page);
+					vrr_info->nr_private_pages--;
+				}
+			}
+		} else {
+			RR_ERR("error: vcpu=%d gfn=0x%lx in dirty_bitmap "
+			       "but not in cow pages", vcpu->vcpu_id, *pgfn);
+		}
+	}
+	RR_ASSERT(list_empty(&vrr_info->private_pages));
+}
+
 /* Commit memory.
  * 1. Check the holding_pages list. For each node, test the gfn in
  *    conflict_bitmap. If set, this page was updated by other vcpus and we need
@@ -866,6 +923,14 @@ static void rr_commit_memory(struct kvm_vcpu *vcpu)
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct kvm *kvm = vcpu->kvm;
 	struct list_head *head = &vrr_info->private_pages;
+	int diff = re_bitmap_size(vrr_info->private_cb) +
+		   re_bitmap_size(&vrr_info->dirty_bitmap) -
+		   vrr_info->nr_holding_pages - vrr_info->nr_private_pages;
+
+	if (diff <= 0) {
+		rr_commit_cow_pages_by_bitmap(vcpu);
+		return;
+	}
 
 	rr_commit_holding_pages_by_list(vcpu);
 
