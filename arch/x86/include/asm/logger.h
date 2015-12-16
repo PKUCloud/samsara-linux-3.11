@@ -5,9 +5,9 @@
 
 extern int rr_log(const char* fmt, ...);
 
-#define DEBUG_RECORD_REPLAY
+// #define DEBUG_RECORD_REPLAY
 /* Print the real log for record and replay */
-/* #define RECORD_REPLAY_LOG */
+#define RECORD_REPLAY_LOG
 
 #ifdef DEBUG_RECORD_REPLAY
 enum {
