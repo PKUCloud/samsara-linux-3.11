@@ -4817,9 +4817,11 @@ static int handle_io(struct kvm_vcpu *vcpu)
 	++vcpu->stat.io_exits;
 
 	if (string || in) {
-		RR_LOG("3 %d 0x%llx, %d, 0x%llx\n", 0,
-		       vcpu->arch.regs[VCPU_REGS_RIP], 0,
-		       vcpu->arch.regs[VCPU_REGS_RCX]);
+		if (vcpu->rr_info.enabled)
+			RR_LOG("3 %d 0x%llx, %d, 0x%llx\n", 0,
+			       vcpu->arch.regs[VCPU_REGS_RIP], 0,
+			       vcpu->arch.regs[VCPU_REGS_RCX]);
+
 		return emulate_instruction(vcpu, 0) == EMULATE_DONE;
 	}
 
