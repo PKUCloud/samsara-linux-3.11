@@ -6095,6 +6095,7 @@ restart:
 		kvm_lapic_sync_from_vapic(vcpu);
 
 	if (vrr_info->enabled) {
+		++(vrr_info->nr_exits);
 		rr_clear_all_request(vrr_info);
 		r = rr_check_chunk(vcpu);
 		if (r == RR_CHUNK_ROLLBACK) {

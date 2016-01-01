@@ -102,6 +102,7 @@ struct rr_vcpu_info {
 	int nr_rollback_pages;
 #endif
 	bool tlb_flush;
+	u64 nr_exits;
 };
 
 /* Record and replay control info for kvm */

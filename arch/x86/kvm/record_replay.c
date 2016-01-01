@@ -276,6 +276,7 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->nr_rollback_pages = 0;
 #endif
 	rr_info->tlb_flush = true;
+	rr_info->nr_exits = 0;
 	rr_info->enabled = true;
 	rr_info->commit_again_clean = true;
 	RR_DLOG(INIT, "vcpu=%d rr_vcpu_info initialized", vcpu->vcpu_id);
@@ -1620,6 +1621,29 @@ static void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 }
 #endif
 
+static void __rr_print_sta(struct kvm *kvm)
+{
+	int online_vcpus = atomic_read(&kvm->online_vcpus);
+	int i;
+	struct kvm_vcpu *vcpu_it;
+	u64 nr_exits = 0;
+	u64 temp;
+
+	RR_LOG("=== Statistics ===\n");
+	printk(KERN_INFO "=== Statistics ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		temp = vcpu_it->rr_info.nr_exits;
+		nr_exits += temp;
+		RR_LOG("vcpu=%d nr_exits=%lld\n", vcpu_it->vcpu_id,
+		       temp);
+		printk(KERN_INFO "vcpu=%d nr_exits=%lld\n", vcpu_it->vcpu_id,
+		       temp);
+	}
+	RR_LOG("total nr_exits=%lld\n", nr_exits);
+	printk(KERN_INFO "total nr_exits=%lld\n", nr_exits);
+}
+
 static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 {
 	struct rr_kvm_info *krr_info = &vcpu->kvm->rr_info;
@@ -1652,6 +1676,9 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 	rr_clear_all_request(vrr_info);
 	vrr_info->nr_rollback = 0;
 	vrr_info->tlb_flush = false;
+
+	if (vrr_info->is_master)
+		__rr_print_sta(vcpu->kvm);
 
 	/* Release events_list */
 	mutex_lock(&vrr_info->events_list_lock);
