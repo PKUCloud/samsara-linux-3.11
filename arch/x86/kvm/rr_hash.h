@@ -70,27 +70,5 @@ static inline struct rr_cow_page *rr_hash_find(struct hlist_head *hash, u64 gfn)
 	return NULL;
 }
 
-static struct rr_cow_page *rr_hash_find_page(struct hlist_head *hash,
-					     struct rr_cow_page *target_page)
-{
-	u32 hashkey = rr_hashfn(target_page->gfn);
-	struct hlist_head *phead;
-	struct rr_cow_page *ele_page;
-	struct rr_cow_page *ret_page = NULL;
-
-	RR_ASSERT(hashkey < RR_HASH_SIZE);
-	phead = &hash[hashkey];
-	hlist_for_each_entry(ele_page, phead, hlink) {
-		if (ele_page->gfn == target_page->gfn) {
-			if (ele_page == target_page) {
-				ret_page = ele_page;
-			} else {
-				RR_DLOG(MMU, "error: different cow pages for "
-					"gfn=0x%llx", ele_page->gfn);
-			}
-		}
-	}
-	return ret_page;
-}
 #endif
 
