@@ -341,7 +341,7 @@ static void __rr_vcpu_clean_events(struct kvm_vcpu *vcpu)
 	unsigned long rcx = vcpu->arch.regs[VCPU_REGS_RCX];
 
 	list_for_each_entry_safe(e, tmp, &rr_info->events_list, link) {
-		RR_LOG("2 %d %d %d %d 0x%llx, %d, 0x%llx\n",
+		RR_LOG("2 %d %d %d %d %llx %d %llx\n",
 		       e->delivery_mode, e->vector, e->level,
 		       e->trig_mode, rip, 0, rcx);
 		list_del(&e->link);
@@ -1629,7 +1629,7 @@ static void __rr_print_sta(struct kvm *kvm)
 	u64 nr_exits = 0;
 	u64 temp;
 
-	RR_LOG("=== Statistics ===\n");
+	RR_LOG("=== Statistics for Samsara ===\n");
 	printk(KERN_INFO "=== Statistics ===\n");
 	for (i = 0; i < online_vcpus; ++i) {
 		vcpu_it = kvm->vcpus[i];

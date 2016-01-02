@@ -4818,7 +4818,7 @@ static int handle_io(struct kvm_vcpu *vcpu)
 
 	if (string || in) {
 		if (vcpu->rr_info.enabled)
-			RR_LOG("3 %d 0x%llx, %d, 0x%llx\n", 0,
+			RR_LOG("3 %d %llx %d %llx\n", 0,
 			       vcpu->arch.regs[VCPU_REGS_RIP], 0,
 			       vcpu->arch.regs[VCPU_REGS_RCX]);
 
