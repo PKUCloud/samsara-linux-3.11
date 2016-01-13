@@ -108,6 +108,10 @@ struct rr_vcpu_info {
 	bool tlb_flush;
 	u64 nr_exits;
 	u64 nr_exit_reason[RR_NR_EXIT_REASON_MAX];
+	u64 nr_chunk_rollback;
+	u64 nr_chunk_commit;
+	u64 exit_jiffies;
+	u64 cur_exit_jiffies;
 };
 
 /* Record and replay control info for kvm */
@@ -134,6 +138,9 @@ struct rr_kvm_info {
 	 * normally, just wait on this queue.
 	 */
 	wait_queue_head_t exclu_commit_que;
+
+	u64 enabled_jiffies;
+	u64 disabled_jiffies;
 };
 
 struct rr_ops {

@@ -6017,6 +6017,13 @@ restart:
 		vrr_info->tlb_flush = false;
 	}
 
+	if (vrr_info->enabled) {
+		RR_ASSERT(vrr_info->cur_exit_jiffies < jiffies);
+		if (likely(vrr_info->cur_exit_jiffies != 0))
+			vrr_info->exit_jiffies += (jiffies -
+						   vrr_info->cur_exit_jiffies);
+	}
+
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
 
 	if (req_immediate_exit)
@@ -6065,6 +6072,9 @@ restart:
 	barrier();
 
 	kvm_guest_exit();
+
+	if (vrr_info->enabled)
+		vrr_info->cur_exit_jiffies = jiffies;
 
 	/* Record and replay. Unload fpu every time after exit guest to avoid
 	 * frequent unloading when checkpoint or rollback.

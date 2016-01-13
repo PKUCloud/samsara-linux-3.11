@@ -276,6 +276,10 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->nr_rollback_pages = 0;
 #endif
 	memset(rr_info->nr_exit_reason, 0, sizeof(rr_info->nr_exit_reason));
+	rr_info->nr_chunk_rollback = 0;
+	rr_info->nr_chunk_commit = 0;
+	rr_info->exit_jiffies = 0;
+	rr_info->cur_exit_jiffies = 0;
 	rr_info->tlb_flush = true;
 	rr_info->nr_exits = 0;
 	rr_info->enabled = true;
@@ -310,6 +314,8 @@ static void __rr_kvm_enable(struct kvm *kvm)
 	rr_kvm_info->dma_holding_sem = false;
 	init_rwsem(&rr_kvm_info->tm_rwlock);
 	init_waitqueue_head(&rr_kvm_info->exclu_commit_que);
+	rr_kvm_info->disabled_jiffies = 0;
+	rr_kvm_info->enabled_jiffies = jiffies;
 	rr_kvm_info->enabled = true;
 
 	RR_DLOG(INIT, "rr_kvm_info initialized");
@@ -1452,8 +1458,12 @@ rollback:
 	mutex_unlock(&(krr_info->tm_lock));
 
 	if (commit) {
+		++(vrr_info->nr_chunk_commit);
 		rr_commit_memory(vcpu);
-	} else rr_rollback_memory(vcpu);
+	} else {
+		++(vrr_info->nr_chunk_rollback);
+		rr_rollback_memory(vcpu);
+	}
 
 	rr_vcpu_set_chunk_state(vcpu, RR_CHUNK_STATE_FINISHED);
 
@@ -1616,6 +1626,10 @@ static void __rr_print_sta(struct kvm *kvm)
 	u64 temp;
 	u32 exit_reason;
 	u64 cal_exit_reason = 0;
+	u64 nr_chunk_commit = 0;
+	u64 nr_chunk_rollback = 0;
+	struct rr_kvm_info *krr_info = &kvm->rr_info;
+	u64 exit_jiffies = 0;
 
 	RR_LOG("=== Statistics for Samsara ===\n");
 	printk(KERN_INFO "=== Statistics for Samsara ===\n");
@@ -1652,6 +1666,40 @@ static void __rr_print_sta(struct kvm *kvm)
 		RR_ERR("error: calculated_nr_exits=%llu != nr_exits=%llu",
 		       cal_exit_reason, nr_exits);
 	}
+
+	RR_LOG(">>> Stat for chunks:\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		temp = vcpu_it->rr_info.nr_chunk_commit;
+		nr_chunk_commit += temp;
+		RR_LOG("vcpu=%d nr_chunk_commit=%llu\n", vcpu_it->vcpu_id,
+		       temp);
+		temp = vcpu_it->rr_info.nr_chunk_rollback;
+		nr_chunk_rollback += temp;
+		RR_LOG("vcpu=%d nr_chunk_rollback=%llu\n", vcpu_it->vcpu_id,
+		       temp);
+	}
+	RR_LOG("total nr_chunk_commit=%llu\n", nr_chunk_commit);
+	RR_LOG("total nr_chunk_rollback=%llu\n", nr_chunk_rollback);
+
+	RR_LOG(">>> Stat for time:\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		temp = vcpu_it->rr_info.exit_jiffies;
+		exit_jiffies += temp;
+		RR_LOG("vcpu=%d exit_jiffies=%llu\n", vcpu_it->vcpu_id, temp);
+	}
+	RR_LOG("total exit_jiffies=%llu\n", exit_jiffies);
+
+	if (krr_info->enabled_jiffies >= krr_info->disabled_jiffies) {
+		temp = (~0ULL) - krr_info->enabled_jiffies +
+		       krr_info->disabled_jiffies;
+		RR_ERR("warning: jiffies wrapped");
+	} else
+		temp = krr_info->disabled_jiffies - krr_info->enabled_jiffies;
+
+	RR_LOG("record_up_jiffies=%llu (HZ=%u enabled=%llu disabled=%llu)\n",
+	       temp, HZ, krr_info->enabled_jiffies, krr_info->disabled_jiffies);
 }
 
 static int __rr_ape_disable(struct kvm_vcpu *vcpu)
@@ -1664,6 +1712,7 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 		struct rr_chunk_info *chunk, *temp;
 
 		/* Release rr_kvm_info */
+		krr_info->disabled_jiffies = jiffies;
 		krr_info->enabled = false;
 
 		while (krr_info->dma_holding_sem) {
