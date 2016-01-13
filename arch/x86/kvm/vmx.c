@@ -8265,7 +8265,7 @@ static void vmx_rr_trace_vm_exit(struct kvm_vcpu *vcpu)
 	u32 exit_reason = vmx->exit_reason;
 
 	++(vrr_info->nr_exits);
-	if (likely(exit_reason < RR_NR_EXIT_REASON_MAX))
+	if (likely(exit_reason < RR_EXIT_REASON_MAX))
 		++(vrr_info->nr_exit_reason[exit_reason]);
 	else
 		RR_ERR("error: vcpu=%d exit_reason=%u beyonds the range",
