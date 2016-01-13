@@ -69,6 +69,10 @@ struct rr_event {
 	unsigned long *dest_map;
 };
 
+#define RR_EXIT_REASON_MAX	59
+#define RR_EXIT_REASON_WRITE_FAULT	RR_EXIT_REASON_MAX
+#define RR_NR_EXIT_REASON_MAX	(RR_EXIT_REASON_MAX + 1)
+
 /* Record and replay control info for a particular vcpu */
 struct rr_vcpu_info {
 	bool enabled;		/* State of record and replay */
@@ -103,6 +107,7 @@ struct rr_vcpu_info {
 #endif
 	bool tlb_flush;
 	u64 nr_exits;
+	u64 nr_exit_reason[RR_NR_EXIT_REASON_MAX];
 };
 
 /* Record and replay control info for kvm */
@@ -136,6 +141,7 @@ struct rr_ops {
 	void (*tlb_flush)(struct kvm_vcpu *vcpu);
 	void (*ape_vmx_clear)(void);
 	u32 (*get_vmx_exit_reason)(struct kvm_vcpu *vcpu);
+	void (*trace_vm_exit)(struct kvm_vcpu *vcpu);
 };
 
 /* State of the rr_cow_page */
@@ -177,6 +183,7 @@ void rr_vcpu_disable(struct kvm_vcpu *vcpu);
 void rr_memory_cow_fast(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn);
 void rr_fix_cow_page(struct rr_cow_page *cow_page, u64 *sptep);
 struct rr_cow_page *rr_check_cow_page(struct rr_vcpu_info *vrr_info, gfn_t gfn);
+void rr_trace_vm_exit(struct kvm_vcpu *vcpu);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

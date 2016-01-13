@@ -275,6 +275,7 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&rr_info->rollback_pages);
 	rr_info->nr_rollback_pages = 0;
 #endif
+	memset(rr_info->nr_exit_reason, 0, sizeof(rr_info->nr_exit_reason));
 	rr_info->tlb_flush = true;
 	rr_info->nr_exits = 0;
 	rr_info->enabled = true;
@@ -1545,6 +1546,67 @@ static void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
 }
 #endif
 
+struct rr_exit_reason_str {
+	u32 exit_reason;
+	char *str;
+};
+
+static struct rr_exit_reason_str RR_VMX_EXIT_REASONS[] = {
+	{ EXIT_REASON_EXCEPTION_NMI,         "EXCEPTION_NMI" },
+	{ EXIT_REASON_EXTERNAL_INTERRUPT,    "EXTERNAL_INTERRUPT" },
+	{ EXIT_REASON_TRIPLE_FAULT,          "TRIPLE_FAULT" },
+	{ EXIT_REASON_PENDING_INTERRUPT,     "PENDING_INTERRUPT" },
+	{ EXIT_REASON_NMI_WINDOW,            "NMI_WINDOW" },
+	{ EXIT_REASON_TASK_SWITCH,           "TASK_SWITCH" },
+	{ EXIT_REASON_CPUID,                 "CPUID" },
+	{ EXIT_REASON_HLT,                   "HLT" },
+	{ EXIT_REASON_INVLPG,                "INVLPG" },
+	{ EXIT_REASON_RDPMC,                 "RDPMC" },
+	{ EXIT_REASON_RDTSC,                 "RDTSC" },
+	{ EXIT_REASON_VMCALL,                "VMCALL" },
+	{ EXIT_REASON_VMCLEAR,               "VMCLEAR" },
+	{ EXIT_REASON_VMLAUNCH,              "VMLAUNCH" },
+	{ EXIT_REASON_VMPTRLD,               "VMPTRLD" },
+	{ EXIT_REASON_VMPTRST,               "VMPTRST" },
+	{ EXIT_REASON_VMREAD,                "VMREAD" },
+	{ EXIT_REASON_VMRESUME,              "VMRESUME" },
+	{ EXIT_REASON_VMWRITE,               "VMWRITE" },
+	{ EXIT_REASON_VMOFF,                 "VMOFF" },
+	{ EXIT_REASON_VMON,                  "VMON" },
+	{ EXIT_REASON_CR_ACCESS,             "CR_ACCESS" },
+	{ EXIT_REASON_DR_ACCESS,             "DR_ACCESS" },
+	{ EXIT_REASON_IO_INSTRUCTION,        "IO_INSTRUCTION" },
+	{ EXIT_REASON_MSR_READ,              "MSR_READ" },
+	{ EXIT_REASON_MSR_WRITE,             "MSR_WRITE" },
+	{ EXIT_REASON_MWAIT_INSTRUCTION,     "MWAIT_INSTRUCTION" },
+	{ EXIT_REASON_MONITOR_INSTRUCTION,   "MONITOR_INSTRUCTION" },
+	{ EXIT_REASON_PAUSE_INSTRUCTION,     "PAUSE_INSTRUCTION" },
+	{ EXIT_REASON_MCE_DURING_VMENTRY,    "MCE_DURING_VMENTRY" },
+	{ EXIT_REASON_TPR_BELOW_THRESHOLD,   "TPR_BELOW_THRESHOLD" },
+	{ EXIT_REASON_APIC_ACCESS,           "APIC_ACCESS" },
+	{ EXIT_REASON_EPT_VIOLATION,         "EPT_VIOLATION" },
+	{ EXIT_REASON_EPT_MISCONFIG,         "EPT_MISCONFIG" },
+	{ EXIT_REASON_WBINVD,                "WBINVD" },
+	{ EXIT_REASON_APIC_WRITE,            "APIC_WRITE" },
+	{ EXIT_REASON_EOI_INDUCED,           "EOI_INDUCED" },
+	{ EXIT_REASON_INVALID_STATE,         "INVALID_STATE" },
+	{ EXIT_REASON_INVD,                  "INVD" },
+	{ EXIT_REASON_INVPCID,               "INVPCID" },
+	{ EXIT_REASON_PREEMPTION_TIMER,      "PREEMPTION_TIMER" },
+	{ RR_EXIT_REASON_WRITE_FAULT,	     "WRITE_FAULT" }
+};
+
+static inline char *__rr_exit_reason_to_str(u32 exit_reason)
+{
+	int i;
+
+	for (i = 0; i < RR_NR_EXIT_REASON_MAX; ++i) {
+		if (RR_VMX_EXIT_REASONS[i].exit_reason == exit_reason)
+			return RR_VMX_EXIT_REASONS[i].str;
+	}
+	return "[unknown reason]";
+}
+
 static void __rr_print_sta(struct kvm *kvm)
 {
 	int online_vcpus = atomic_read(&kvm->online_vcpus);
@@ -1552,9 +1614,11 @@ static void __rr_print_sta(struct kvm *kvm)
 	struct kvm_vcpu *vcpu_it;
 	u64 nr_exits = 0;
 	u64 temp;
+	u32 exit_reason;
+	u64 cal_exit_reason = 0;
 
 	RR_LOG("=== Statistics for Samsara ===\n");
-	printk(KERN_INFO "=== Statistics ===\n");
+	printk(KERN_INFO "=== Statistics for Samsara ===\n");
 	for (i = 0; i < online_vcpus; ++i) {
 		vcpu_it = kvm->vcpus[i];
 		temp = vcpu_it->rr_info.nr_exits;
@@ -1566,6 +1630,28 @@ static void __rr_print_sta(struct kvm *kvm)
 	}
 	RR_LOG("total nr_exits=%lld\n", nr_exits);
 	printk(KERN_INFO "total nr_exits=%lld\n", nr_exits);
+
+	RR_LOG(">>> Stat for num of exit reasons:\n");
+	for (exit_reason = 0; exit_reason < RR_NR_EXIT_REASON_MAX;
+	     ++exit_reason) {
+		temp = 0;
+		for (i = 0; i < online_vcpus; ++i) {
+			vcpu_it = kvm->vcpus[i];
+			temp += vcpu_it->rr_info.nr_exit_reason[exit_reason];
+		}
+		if (temp == 0)
+			continue;
+
+		if (exit_reason < RR_EXIT_REASON_MAX)
+			cal_exit_reason += temp;
+
+		RR_LOG("%s(#%u)=%llu\n", __rr_exit_reason_to_str(exit_reason),
+		       exit_reason, temp);
+	}
+	if (cal_exit_reason != nr_exits) {
+		RR_ERR("error: calculated_nr_exits=%llu != nr_exits=%llu",
+		       cal_exit_reason, nr_exits);
+	}
 }
 
 static int __rr_ape_disable(struct kvm_vcpu *vcpu)
@@ -1682,3 +1768,8 @@ void rr_vcpu_disable(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(rr_vcpu_disable);
 
+void rr_trace_vm_exit(struct kvm_vcpu *vcpu)
+{
+	rr_ops->trace_vm_exit(vcpu);
+}
+EXPORT_SYMBOL_GPL(rr_trace_vm_exit);

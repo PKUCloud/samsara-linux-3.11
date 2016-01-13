@@ -5291,6 +5291,7 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	gpa_t gpa;
 	u32 error_code;
 	int gla_validity;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 
 	exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
 
@@ -5314,6 +5315,10 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	error_code = exit_qualification & (1U << 1);
 	/* ept page table is present? */
 	error_code |= (exit_qualification >> 3) & 0x1;
+
+	if (vrr_info->enabled && (error_code & PFERR_WRITE_MASK) &&
+	    (error_code & PFERR_PRESENT_MASK))
+		++(vrr_info->nr_exit_reason[RR_EXIT_REASON_WRITE_FAULT]);
 
 	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
 }
@@ -8253,11 +8258,26 @@ static u32 vmx_rr_get_exit_reason(struct kvm_vcpu *vcpu)
 	return to_vmx(vcpu)->exit_reason;
 }
 
+static void vmx_rr_trace_vm_exit(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	u32 exit_reason = vmx->exit_reason;
+
+	++(vrr_info->nr_exits);
+	if (likely(exit_reason < RR_NR_EXIT_REASON_MAX))
+		++(vrr_info->nr_exit_reason[exit_reason]);
+	else
+		RR_ERR("error: vcpu=%d exit_reason=%u beyonds the range",
+		       vcpu->vcpu_id, exit_reason);
+}
+
 static struct rr_ops vmx_rr_ops = {
 	.ape_vmx_setup = vmx_rr_ape_setup,
 	.tlb_flush = vmx_flush_tlb,
 	.ape_vmx_clear = vmx_rr_ape_clear,
 	.get_vmx_exit_reason = vmx_rr_get_exit_reason,
+	.trace_vm_exit = vmx_rr_trace_vm_exit,
 };
 
 static int __init vmx_init(void)
