@@ -73,6 +73,11 @@ struct rr_event {
 #define RR_EXIT_REASON_WRITE_FAULT	RR_EXIT_REASON_MAX
 #define RR_NR_EXIT_REASON_MAX	(RR_EXIT_REASON_MAX + 1)
 
+struct rr_exit_stat {
+	u64 counter;	/* Counter for this eixt reason */
+	u64 jiffies;	/* Total jiffies for exit of this reason */
+};
+
 /* Record and replay control info for a particular vcpu */
 struct rr_vcpu_info {
 	bool enabled;		/* State of record and replay */
@@ -106,8 +111,10 @@ struct rr_vcpu_info {
 	int nr_rollback_pages;
 #endif
 	bool tlb_flush;
+	u32 exit_reason;	/* Exit reason of current exit */
+	bool is_write_pf_exit;
 	u64 nr_exits;
-	u64 nr_exit_reason[RR_NR_EXIT_REASON_MAX];
+	struct rr_exit_stat exit_stat[RR_NR_EXIT_REASON_MAX];
 	u64 nr_chunk_rollback;
 	u64 nr_chunk_commit;
 	u64 exit_jiffies;

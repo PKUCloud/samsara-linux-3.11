@@ -5317,8 +5317,10 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	error_code |= (exit_qualification >> 3) & 0x1;
 
 	if (vrr_info->enabled && (error_code & PFERR_WRITE_MASK) &&
-	    (error_code & PFERR_PRESENT_MASK))
-		++(vrr_info->nr_exit_reason[RR_EXIT_REASON_WRITE_FAULT]);
+	    (error_code & PFERR_PRESENT_MASK)) {
+		++(vrr_info->exit_stat[RR_EXIT_REASON_WRITE_FAULT].counter);
+		vrr_info->is_write_pf_exit = true;
+	}
 
 	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
 }
@@ -8265,8 +8267,10 @@ static void vmx_rr_trace_vm_exit(struct kvm_vcpu *vcpu)
 	u32 exit_reason = vmx->exit_reason;
 
 	++(vrr_info->nr_exits);
+	vrr_info->exit_reason = exit_reason;
+	vrr_info->is_write_pf_exit = false;
 	if (likely(exit_reason < RR_EXIT_REASON_MAX))
-		++(vrr_info->nr_exit_reason[exit_reason]);
+		++(vrr_info->exit_stat[exit_reason].counter);
 	else
 		RR_ERR("error: vcpu=%d exit_reason=%u beyonds the range",
 		       vcpu->vcpu_id, exit_reason);

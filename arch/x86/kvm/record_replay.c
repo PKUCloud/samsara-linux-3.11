@@ -275,7 +275,7 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&rr_info->rollback_pages);
 	rr_info->nr_rollback_pages = 0;
 #endif
-	memset(rr_info->nr_exit_reason, 0, sizeof(rr_info->nr_exit_reason));
+	memset(rr_info->exit_stat, 0, sizeof(rr_info->exit_stat));
 	rr_info->nr_chunk_rollback = 0;
 	rr_info->nr_chunk_commit = 0;
 	rr_info->exit_jiffies = 0;
@@ -1630,6 +1630,9 @@ static void __rr_print_sta(struct kvm *kvm)
 	u64 nr_chunk_rollback = 0;
 	struct rr_kvm_info *krr_info = &kvm->rr_info;
 	u64 exit_jiffies = 0;
+	u64 cal_exit_jiffies = 0;
+	u64 temp_exit_jiffies, temp_exit_counter;
+	struct rr_exit_stat *exit_stat;
 
 	RR_LOG("=== Statistics for Samsara ===\n");
 	printk(KERN_INFO "=== Statistics for Samsara ===\n");
@@ -1645,22 +1648,33 @@ static void __rr_print_sta(struct kvm *kvm)
 	RR_LOG("total nr_exits=%lld\n", nr_exits);
 	printk(KERN_INFO "total nr_exits=%lld\n", nr_exits);
 
-	RR_LOG(">>> Stat for num of exit reasons:\n");
+	RR_LOG(">>> Stat for exit reasons:\n");
 	for (exit_reason = 0; exit_reason < RR_NR_EXIT_REASON_MAX;
 	     ++exit_reason) {
-		temp = 0;
+		temp_exit_counter = 0;
+		temp_exit_jiffies = 0;
 		for (i = 0; i < online_vcpus; ++i) {
-			vcpu_it = kvm->vcpus[i];
-			temp += vcpu_it->rr_info.nr_exit_reason[exit_reason];
+			exit_stat = &(kvm->vcpus[i]->rr_info.exit_stat[exit_reason]);
+			temp_exit_counter += exit_stat->counter;
+			temp_exit_jiffies += exit_stat->jiffies;
 		}
-		if (temp == 0)
+		if (temp_exit_counter == 0) {
+			if (temp_exit_jiffies != 0) {
+				RR_ERR("error: exit_reason=%d counter=%llu "
+				       "jiffies=%llu", exit_reason,
+				       temp_exit_counter, temp_exit_jiffies);
+			}
 			continue;
+		}
 
-		if (exit_reason < RR_EXIT_REASON_MAX)
-			cal_exit_reason += temp;
+		if (exit_reason < RR_EXIT_REASON_MAX) {
+			cal_exit_reason += temp_exit_counter;
+			cal_exit_jiffies += temp_exit_jiffies;
+		}
 
-		RR_LOG("%s(#%u)=%llu\n", __rr_exit_reason_to_str(exit_reason),
-		       exit_reason, temp);
+		RR_LOG("%s(#%u)=%llu jiffies=%llu\n",
+		       __rr_exit_reason_to_str(exit_reason),
+		       exit_reason, temp_exit_counter, temp_exit_jiffies);
 	}
 	if (cal_exit_reason != nr_exits) {
 		RR_ERR("error: calculated_nr_exits=%llu != nr_exits=%llu",
@@ -1690,6 +1704,11 @@ static void __rr_print_sta(struct kvm *kvm)
 		RR_LOG("vcpu=%d exit_jiffies=%llu\n", vcpu_it->vcpu_id, temp);
 	}
 	RR_LOG("total exit_jiffies=%llu\n", exit_jiffies);
+
+	if (exit_jiffies != cal_exit_jiffies) {
+		RR_ERR("error: calculated_exit_jiffies=%llu != "
+		       "exit_jiffies=%llu", cal_exit_jiffies, exit_jiffies);
+	}
 
 	if (krr_info->enabled_jiffies >= krr_info->disabled_jiffies) {
 		temp = (~0ULL) - krr_info->enabled_jiffies +

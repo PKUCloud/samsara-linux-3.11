@@ -5870,6 +5870,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		vcpu->run->request_interrupt_window;
 	bool req_immediate_exit = false;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	u64 temp;
 
 restart:
 	if (vcpu->requests) {
@@ -6019,9 +6020,13 @@ restart:
 
 	if (vrr_info->enabled) {
 		RR_ASSERT(vrr_info->cur_exit_jiffies < jiffies);
-		if (likely(vrr_info->cur_exit_jiffies != 0))
-			vrr_info->exit_jiffies += (jiffies -
-						   vrr_info->cur_exit_jiffies);
+		if (likely(vrr_info->cur_exit_jiffies != 0)) {
+			temp = (jiffies - vrr_info->cur_exit_jiffies);
+			vrr_info->exit_jiffies += temp;
+			vrr_info->exit_stat[vrr_info->exit_reason].jiffies += temp;
+			if (vrr_info->is_write_pf_exit)
+				vrr_info->exit_stat[RR_EXIT_REASON_WRITE_FAULT].jiffies += temp;
+		}
 	}
 
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
