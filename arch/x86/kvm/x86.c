@@ -6019,13 +6019,13 @@ restart:
 	}
 
 	if (vrr_info->enabled) {
-		RR_ASSERT(vrr_info->cur_exit_jiffies < jiffies);
-		if (likely(vrr_info->cur_exit_jiffies != 0)) {
-			temp = (jiffies - vrr_info->cur_exit_jiffies);
-			vrr_info->exit_jiffies += temp;
-			vrr_info->exit_stat[vrr_info->exit_reason].jiffies += temp;
+		if (likely(vrr_info->cur_exit_time != 0)) {
+			rdtscll(temp);
+			temp -= vrr_info->cur_exit_time;
+			vrr_info->exit_time += temp;
+			vrr_info->exit_stat[vrr_info->exit_reason].time += temp;
 			if (vrr_info->is_write_pf_exit)
-				vrr_info->exit_stat[RR_EXIT_REASON_WRITE_FAULT].jiffies += temp;
+				vrr_info->exit_stat[RR_EXIT_REASON_WRITE_FAULT].time += temp;
 		}
 	}
 
@@ -6079,7 +6079,7 @@ restart:
 	kvm_guest_exit();
 
 	if (vrr_info->enabled)
-		vrr_info->cur_exit_jiffies = jiffies;
+		rdtscll(vrr_info->cur_exit_time);
 
 	/* Record and replay. Unload fpu every time after exit guest to avoid
 	 * frequent unloading when checkpoint or rollback.

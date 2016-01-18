@@ -75,7 +75,7 @@ struct rr_event {
 
 struct rr_exit_stat {
 	u64 counter;	/* Counter for this eixt reason */
-	u64 jiffies;	/* Total jiffies for exit of this reason */
+	u64 time;	/* Total ticks for exit of this reason */
 };
 
 /* Record and replay control info for a particular vcpu */
@@ -117,8 +117,8 @@ struct rr_vcpu_info {
 	struct rr_exit_stat exit_stat[RR_NR_EXIT_REASON_MAX];
 	u64 nr_chunk_rollback;
 	u64 nr_chunk_commit;
-	u64 exit_jiffies;
-	u64 cur_exit_jiffies;
+	u64 exit_time;
+	u64 cur_exit_time;
 };
 
 /* Record and replay control info for kvm */
@@ -146,8 +146,8 @@ struct rr_kvm_info {
 	 */
 	wait_queue_head_t exclu_commit_que;
 
-	u64 enabled_jiffies;
-	u64 disabled_jiffies;
+	u64 enabled_time;
+	u64 disabled_time;
 };
 
 struct rr_ops {

@@ -278,8 +278,8 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	memset(rr_info->exit_stat, 0, sizeof(rr_info->exit_stat));
 	rr_info->nr_chunk_rollback = 0;
 	rr_info->nr_chunk_commit = 0;
-	rr_info->exit_jiffies = 0;
-	rr_info->cur_exit_jiffies = 0;
+	rr_info->exit_time = 0;
+	rr_info->cur_exit_time = 0;
 	rr_info->tlb_flush = true;
 	rr_info->nr_exits = 0;
 	rr_info->enabled = true;
@@ -314,8 +314,8 @@ static void __rr_kvm_enable(struct kvm *kvm)
 	rr_kvm_info->dma_holding_sem = false;
 	init_rwsem(&rr_kvm_info->tm_rwlock);
 	init_waitqueue_head(&rr_kvm_info->exclu_commit_que);
-	rr_kvm_info->disabled_jiffies = 0;
-	rr_kvm_info->enabled_jiffies = jiffies;
+	rr_kvm_info->disabled_time = 0;
+	rdtscll(rr_kvm_info->enabled_time);
 	rr_kvm_info->enabled = true;
 
 	RR_DLOG(INIT, "rr_kvm_info initialized");
@@ -1629,9 +1629,9 @@ static void __rr_print_sta(struct kvm *kvm)
 	u64 nr_chunk_commit = 0;
 	u64 nr_chunk_rollback = 0;
 	struct rr_kvm_info *krr_info = &kvm->rr_info;
-	u64 exit_jiffies = 0;
-	u64 cal_exit_jiffies = 0;
-	u64 temp_exit_jiffies, temp_exit_counter;
+	u64 exit_time = 0;
+	u64 cal_exit_time = 0;
+	u64 temp_exit_time, temp_exit_counter;
 	struct rr_exit_stat *exit_stat;
 
 	RR_LOG("=== Statistics for Samsara ===\n");
@@ -1652,29 +1652,29 @@ static void __rr_print_sta(struct kvm *kvm)
 	for (exit_reason = 0; exit_reason < RR_NR_EXIT_REASON_MAX;
 	     ++exit_reason) {
 		temp_exit_counter = 0;
-		temp_exit_jiffies = 0;
+		temp_exit_time = 0;
 		for (i = 0; i < online_vcpus; ++i) {
 			exit_stat = &(kvm->vcpus[i]->rr_info.exit_stat[exit_reason]);
 			temp_exit_counter += exit_stat->counter;
-			temp_exit_jiffies += exit_stat->jiffies;
+			temp_exit_time += exit_stat->time;
 		}
 		if (temp_exit_counter == 0) {
-			if (temp_exit_jiffies != 0) {
+			if (temp_exit_time != 0) {
 				RR_ERR("error: exit_reason=%d counter=%llu "
-				       "jiffies=%llu", exit_reason,
-				       temp_exit_counter, temp_exit_jiffies);
+				       "time=%llu", exit_reason,
+				       temp_exit_counter, temp_exit_time);
 			}
 			continue;
 		}
 
 		if (exit_reason < RR_EXIT_REASON_MAX) {
 			cal_exit_reason += temp_exit_counter;
-			cal_exit_jiffies += temp_exit_jiffies;
+			cal_exit_time += temp_exit_time;
 		}
 
-		RR_LOG("%s(#%u)=%llu jiffies=%llu\n",
+		RR_LOG("%s(#%u)=%llu time=%llu\n",
 		       __rr_exit_reason_to_str(exit_reason),
-		       exit_reason, temp_exit_counter, temp_exit_jiffies);
+		       exit_reason, temp_exit_counter, temp_exit_time);
 	}
 	if (cal_exit_reason != nr_exits) {
 		RR_ERR("error: calculated_nr_exits=%llu != nr_exits=%llu",
@@ -1699,26 +1699,26 @@ static void __rr_print_sta(struct kvm *kvm)
 	RR_LOG(">>> Stat for time:\n");
 	for (i = 0; i < online_vcpus; ++i) {
 		vcpu_it = kvm->vcpus[i];
-		temp = vcpu_it->rr_info.exit_jiffies;
-		exit_jiffies += temp;
-		RR_LOG("vcpu=%d exit_jiffies=%llu\n", vcpu_it->vcpu_id, temp);
+		temp = vcpu_it->rr_info.exit_time;
+		exit_time += temp;
+		RR_LOG("vcpu=%d exit_time=%llu\n", vcpu_it->vcpu_id, temp);
 	}
-	RR_LOG("total exit_jiffies=%llu\n", exit_jiffies);
+	RR_LOG("total exit_time=%llu\n", exit_time);
 
-	if (exit_jiffies != cal_exit_jiffies) {
-		RR_ERR("error: calculated_exit_jiffies=%llu != "
-		       "exit_jiffies=%llu", cal_exit_jiffies, exit_jiffies);
+	if (exit_time != cal_exit_time) {
+		RR_ERR("error: calculated_exit_time=%llu != "
+		       "exit_time=%llu", cal_exit_time, exit_time);
 	}
 
-	if (krr_info->enabled_jiffies >= krr_info->disabled_jiffies) {
-		temp = (~0ULL) - krr_info->enabled_jiffies +
-		       krr_info->disabled_jiffies;
-		RR_ERR("warning: jiffies wrapped");
+	if (krr_info->enabled_time >= krr_info->disabled_time) {
+		temp = (~0ULL) - krr_info->enabled_time +
+		       krr_info->disabled_time;
+		RR_ERR("warning: time wrapped");
 	} else
-		temp = krr_info->disabled_jiffies - krr_info->enabled_jiffies;
+		temp = krr_info->disabled_time - krr_info->enabled_time;
 
-	RR_LOG("record_up_jiffies=%llu (HZ=%u enabled=%llu disabled=%llu)\n",
-	       temp, HZ, krr_info->enabled_jiffies, krr_info->disabled_jiffies);
+	RR_LOG("record_up_time=%llu (enabled=%llu disabled=%llu)\n",
+	       temp, krr_info->enabled_time, krr_info->disabled_time);
 }
 
 static int __rr_ape_disable(struct kvm_vcpu *vcpu)
@@ -1731,7 +1731,7 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 		struct rr_chunk_info *chunk, *temp;
 
 		/* Release rr_kvm_info */
-		krr_info->disabled_jiffies = jiffies;
+		rdtscll(krr_info->disabled_time);
 		krr_info->enabled = false;
 
 		while (krr_info->dma_holding_sem) {
