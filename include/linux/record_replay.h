@@ -27,11 +27,6 @@ struct kvm_lapic;
 
 #define RR_MAX_HOLDING_PAGE_AGE	100
 
-/* If defined, we use a separate list to hold pages needed to rollback and
- * before entering guest, we copy the new content of those pages.
- */
-#define RR_ROLLBACK_PAGES
-
 #define RR_ASYNC_PREEMPTION_EPT	(KVM_RR_CTRL_MEM_EPT | KVM_RR_CTRL_MODE_ASYNC |\
 				 KVM_RR_CTRL_KICK_PREEMPTION)
 
@@ -102,14 +97,7 @@ struct rr_vcpu_info {
 	struct rr_chunk_info chunk_info;
 	struct list_head private_pages;
 	int nr_private_pages;
-	struct list_head holding_pages; /* For pages that have been COW before */
-	int nr_holding_pages;
 	struct hlist_head *cow_hash; /* Hash table for cow pages */
-#ifdef RR_ROLLBACK_PAGES
-	/* For pages that need to rollback */
-	struct list_head rollback_pages;
-	int nr_rollback_pages;
-#endif
 	bool tlb_flush;
 	u32 exit_reason;	/* Exit reason of current exit */
 	bool is_write_pf_exit;

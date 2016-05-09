@@ -269,12 +269,6 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->chunk_info.state = RR_CHUNK_STATE_IDLE;
 	INIT_LIST_HEAD(&rr_info->private_pages);
 	rr_info->nr_private_pages = 0;
-	INIT_LIST_HEAD(&rr_info->holding_pages);
-	rr_info->nr_holding_pages = 0;
-#ifdef RR_ROLLBACK_PAGES
-	INIT_LIST_HEAD(&rr_info->rollback_pages);
-	rr_info->nr_rollback_pages = 0;
-#endif
 	memset(rr_info->exit_stat, 0, sizeof(rr_info->exit_stat));
 	rr_info->nr_chunk_rollback = 0;
 	rr_info->nr_chunk_commit = 0;
@@ -732,170 +726,25 @@ static __always_inline void rr_spte_restore(struct rr_cow_page *cow_page)
 	rr_spte_clear_cow_tag(sptep);
 }
 
-static inline void rr_age_holding_page(struct rr_vcpu_info *vrr_info,
-				       struct rr_cow_page *private_page,
-				       u64 target_chunk_num)
+static void rr_commit_memory(struct kvm_vcpu *vcpu)
 {
-	if (private_page->chunk_num < target_chunk_num) {
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct list_head *head = &vrr_info->private_pages;
+
+	/* Traverse the private_pages */
+	list_for_each_entry_safe(private_page, temp, head, link) {
+		rr_check_cow_page_before_access(vcpu, private_page);
+		copy_page(private_page->original_addr,
+			  private_page->private_addr);
 		rr_spte_restore(private_page);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
 		list_del(&private_page->link);
 		hlist_del(&private_page->hlink);
 		kmem_cache_free(rr_cow_page_cache, private_page);
-		vrr_info->nr_holding_pages--;
-	}
-}
-
-static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *private_page;
-	struct rr_cow_page *temp;
-	gfn_t gfn;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-	struct list_head *head = &vrr_info->holding_pages;
-	struct region_bitmap *conflict_bm = vrr_info->private_cb;
-	struct region_bitmap *dirty_bm = &vrr_info->dirty_bitmap;
-	u64 nr_chunk = vrr_info->nr_chunk;
-	u64 chunk_num = (nr_chunk > RR_MAX_HOLDING_PAGE_AGE) ?
-			(nr_chunk - RR_MAX_HOLDING_PAGE_AGE) : 0;
-
-	/* Traverse the holding_pages */
-	list_for_each_entry_safe(private_page, temp, head, link) {
-		gfn = private_page->gfn;
-		/* Whether this page has been touched by other vcpus */
-		if (re_test_bit(gfn, conflict_bm)) {
-			rr_spte_restore(private_page);
-			kmem_cache_free(rr_priv_page_cache,
-					private_page->private_addr);
-			list_del(&private_page->link);
-			hlist_del(&private_page->hlink);
-			kmem_cache_free(rr_cow_page_cache, private_page);
-			vrr_info->nr_holding_pages--;
-		} else if (re_test_bit(gfn, dirty_bm)) {
-			/* This page was touched by this vcpu in this quantum */
-			private_page->chunk_num = nr_chunk;
-			rr_check_cow_page_before_access(vcpu, private_page);
-			copy_page(private_page->original_addr,
-				  private_page->private_addr);
-		} else
-			rr_age_holding_page(vrr_info, private_page,
-					    chunk_num);
-	}
-}
-
-/* Commit holding_pages and private_pages indexed by bitmap */
-static inline void rr_commit_cow_pages_by_bitmap(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *cow_page;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-	struct hlist_head *cow_hash = vrr_info->cow_hash;
-	unsigned long *pgfn, *tmp;
-	u64 nr_chunk = vrr_info->nr_chunk;
-	struct kvm *kvm = vcpu->kvm;
-	struct list_head *holding_head = &vrr_info->holding_pages;
-
-	re_bitmap_for_each_bit(pgfn, tmp, vrr_info->private_cb) {
-		cow_page = rr_hash_find(cow_hash, *pgfn);
-		if (cow_page) {
-			RR_ASSERT(cow_page->state == RR_COW_STATE_HOLDING);
-			rr_spte_restore(cow_page);
-			kmem_cache_free(rr_priv_page_cache,
-					cow_page->private_addr);
-			list_del(&cow_page->link);
-			hlist_del(&cow_page->hlink);
-			kmem_cache_free(rr_cow_page_cache, cow_page);
-			vrr_info->nr_holding_pages--;
-		}
-	}
-
-	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
-		cow_page = rr_hash_find(cow_hash, *pgfn);
-		if (likely(cow_page)) {
-			cow_page->chunk_num = nr_chunk;
-			rr_check_cow_page_before_access(vcpu, cow_page);
-			copy_page(cow_page->original_addr,
-				  cow_page->private_addr);
-			if (cow_page->state == RR_COW_STATE_PRIVATE) {
-				if (memslot_id(kvm, cow_page->gfn) == 8) {
-					cow_page->state = RR_COW_STATE_HOLDING;
-					list_move_tail(&cow_page->link,
-						       holding_head);
-					vrr_info->nr_private_pages--;
-					vrr_info->nr_holding_pages++;
-				} else {
-					rr_spte_restore(cow_page);
-					kmem_cache_free(rr_priv_page_cache,
-							cow_page->private_addr);
-					list_del(&cow_page->link);
-					hlist_del(&cow_page->hlink);
-					kmem_cache_free(rr_cow_page_cache,
-							cow_page);
-					vrr_info->nr_private_pages--;
-				}
-			}
-		} else {
-			RR_ERR("error: vcpu=%d gfn=0x%lx in dirty_bitmap "
-			       "but not in cow pages", vcpu->vcpu_id, *pgfn);
-		}
-	}
-	RR_ASSERT(list_empty(&vrr_info->private_pages));
-}
-
-/* Commit memory.
- * 1. Check the holding_pages list. For each node, test the gfn in
- *    conflict_bitmap. If set, this page was updated by other vcpus and we need
- *    to release the private pages and this node, set back the original pfn in
- *    spte, withdraw the write permission. If not, test the gfn in dirty_bitmap.
- *    If set, this page was written by this vcpu in this quantum. We need to
- *    update the content back to the original page.
- * 2. Commit the private_pages list and move it to the back of the
- *    holding_pages list.
- */
-static void rr_commit_memory(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *private_page;
-	struct rr_cow_page *temp;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-	struct kvm *kvm = vcpu->kvm;
-	struct list_head *head = &vrr_info->private_pages;
-	int diff = re_bitmap_size(vrr_info->private_cb) +
-		   re_bitmap_size(&vrr_info->dirty_bitmap) -
-		   vrr_info->nr_holding_pages - vrr_info->nr_private_pages;
-	u64 nr_chunk = vrr_info->nr_chunk;
-	struct list_head *holding_head = &vrr_info->holding_pages;
-
-	if (diff <= 0) {
-		rr_commit_cow_pages_by_bitmap(vcpu);
-		return;
-	}
-
-	rr_commit_holding_pages_by_list(vcpu);
-
-	/* Traverse the private_pages */
-	list_for_each_entry_safe(private_page, temp, head, link) {
-		if (memslot_id(kvm, private_page->gfn) == 8) {
-			private_page->chunk_num = nr_chunk;
-			rr_check_cow_page_before_access(vcpu, private_page);
-			copy_page(private_page->original_addr,
-				  private_page->private_addr);
-			private_page->state = RR_COW_STATE_HOLDING;
-			list_move_tail(&private_page->link,
-				       holding_head);
-			vrr_info->nr_private_pages--;
-			vrr_info->nr_holding_pages++;
-		} else {
-			rr_check_cow_page_before_access(vcpu, private_page);
-			copy_page(private_page->original_addr,
-				  private_page->private_addr);
-			rr_spte_restore(private_page);
-			kmem_cache_free(rr_priv_page_cache,
-					private_page->private_addr);
-			list_del(&private_page->link);
-			hlist_del(&private_page->hlink);
-			kmem_cache_free(rr_cow_page_cache, private_page);
-			vrr_info->nr_private_pages--;
-		}
+		vrr_info->nr_private_pages--;
 	}
 }
 
@@ -911,176 +760,36 @@ static void rr_commit_memory_again(struct kvm_vcpu *vcpu)
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct hlist_head *cow_hash = vrr_info->cow_hash;
 	unsigned long *pgfn, *tmp;
-	struct kvm *kvm = vcpu->kvm;
-	struct list_head *holding_head = &vrr_info->holding_pages;
-	u64 nr_chunk = vrr_info->nr_chunk;
 
 	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
 		cow_page = rr_hash_find(cow_hash, *pgfn);
 		RR_ASSERT(cow_page);
-		cow_page->chunk_num = nr_chunk;
 		rr_check_cow_page_before_access(vcpu, cow_page);
 		copy_page(cow_page->original_addr,
 			  cow_page->private_addr);
 		if (cow_page->state == RR_COW_STATE_PRIVATE) {
-			if (memslot_id(kvm, *pgfn) == 8) {
-				cow_page->state = RR_COW_STATE_HOLDING;
-				list_move_tail(&cow_page->link, holding_head);
-				vrr_info->nr_private_pages--;
-				vrr_info->nr_holding_pages++;
-			} else {
-				rr_spte_restore(cow_page);
-				kmem_cache_free(rr_priv_page_cache,
-						cow_page->private_addr);
-				list_del(&cow_page->link);
-				hlist_del(&cow_page->hlink);
-				kmem_cache_free(rr_cow_page_cache, cow_page);
-				vrr_info->nr_private_pages--;
-			}
+			rr_spte_restore(cow_page);
+			kmem_cache_free(rr_priv_page_cache,
+					cow_page->private_addr);
+			list_del(&cow_page->link);
+			hlist_del(&cow_page->hlink);
+			kmem_cache_free(rr_cow_page_cache, cow_page);
+			vrr_info->nr_private_pages--;
 		}
 	}
 	RR_ASSERT(vrr_info->nr_private_pages <= 1);
 }
 
-static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_info)
-{
-	struct rr_cow_page *private_page;
-	struct rr_cow_page *temp;
-	gfn_t gfn;
-	struct list_head *head = &vrr_info->holding_pages;
-	struct region_bitmap *dirty_bm = &vrr_info->dirty_bitmap;
-	struct region_bitmap *conflict_bm = vrr_info->private_cb;
-	u64 chunk_num = (vrr_info->nr_chunk > RR_MAX_HOLDING_PAGE_AGE) ?
-			(vrr_info->nr_chunk - RR_MAX_HOLDING_PAGE_AGE) : 0;
-	struct list_head *rollback_head = &vrr_info->rollback_pages;
-
-	/* Traverse the holding_pages */
-	list_for_each_entry_safe(private_page, temp, head, link) {
-		gfn = private_page->gfn;
-#ifdef RR_ROLLBACK_PAGES
-		if (re_test_bit(gfn, dirty_bm)) {
-			/* We do nothing here but keep these dirty pages in a
-			 * list and copy the new content back before entering
-			 * guest.
-			 */
-			private_page->state = RR_COW_STATE_ROLLBACK;
-			list_move_tail(&private_page->link, rollback_head);
-			vrr_info->nr_holding_pages--;
-			vrr_info->nr_rollback_pages++;
-		} else if (re_test_bit(gfn, conflict_bm)) {
-			rr_spte_restore(private_page);
-			kmem_cache_free(rr_priv_page_cache,
-					private_page->private_addr);
-			list_del(&private_page->link);
-			hlist_del(&private_page->hlink);
-			kmem_cache_free(rr_cow_page_cache, private_page);
-			vrr_info->nr_holding_pages--;
-		} else
-			rr_age_holding_page(vrr_info, private_page, chunk_num);
-#else
-		/* Whether this page has been touched by other vcpus or by
-		 * this vcpu in this quantum.
-		 */
-		if (re_test_bit(gfn, conflict_bm) ||
-		    re_test_bit(gfn, dirty_bm)) {
-			rr_spte_restore(private_page);
-			kmem_cache_free(rr_priv_page_cache,
-					private_page->private_addr);
-			list_del(&private_page->link);
-			hlist_del(&private_page->hlink);
-			kmem_cache_free(rr_cow_page_cache, private_page);
-			vrr_info->nr_holding_pages--;
-		} else
-			rr_age_holding_page(vrr_info, private_page, chunk_num);
-#endif
-	}
-}
-
-static inline void rr_rollback_cow_pages_by_bitmap(struct rr_vcpu_info *vrr_info)
-{
-	struct rr_cow_page *cow_page;
-	struct hlist_head *cow_hash = vrr_info->cow_hash;
-	unsigned long *pgfn, *tmp;
-	struct list_head *rollback_head = &vrr_info->rollback_pages;
-
-	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
-		cow_page = rr_hash_find(cow_hash, *pgfn);
-		if (likely(cow_page)) {
-			if (cow_page->state == RR_COW_STATE_HOLDING)
-				vrr_info->nr_holding_pages--;
-			else
-				vrr_info->nr_private_pages--;
-
-			cow_page->state = RR_COW_STATE_ROLLBACK;
-			list_move_tail(&cow_page->link, rollback_head);
-			vrr_info->nr_rollback_pages++;
-		} else {
-			RR_ERR("error: gfn=0x%lx in dirty_bitmap but not in "
-			       "cow pages", *pgfn);
-		}
-	}
-
-	re_bitmap_for_each_bit(pgfn, tmp, vrr_info->private_cb) {
-		cow_page = rr_hash_find(cow_hash, *pgfn);
-		if (cow_page) {
-			if (cow_page->state != RR_COW_STATE_ROLLBACK) {
-				if (cow_page->state == RR_COW_STATE_PRIVATE)
-					vrr_info->nr_private_pages--;
-				else
-					vrr_info->nr_holding_pages--;
-
-				rr_spte_restore(cow_page);
-				kmem_cache_free(rr_priv_page_cache,
-						cow_page->private_addr);
-				list_del(&cow_page->link);
-				hlist_del(&cow_page->hlink);
-				kmem_cache_free(rr_cow_page_cache, cow_page);
-			}
-		}
-	}
-	RR_ASSERT(list_empty(&vrr_info->private_pages));
-}
-
-/* Rollback memory.
- * 1. Check the holding_pages list. For each node, test the gfn in
- *    conflict_bitmap. If set, this page was updated by other vcpus and we need
- *    to release the private pages and this node, set back the original pfn in
- *    spte, withdraw the write permission. If not, test the gfn in dirty_bitmap.
- *    If set, this page was written by this vcpu in this quantum. We need to
- *    rollback this page.
- * 2. Rollback the private_pages list.
- */
 static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 {
 	struct rr_cow_page *private_page;
 	struct rr_cow_page *temp;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	struct list_head *head = &vrr_info->private_pages;
-	struct list_head *rollback_head = &vrr_info->rollback_pages;
-	int diff = re_bitmap_size(vrr_info->private_cb) +
-		   re_bitmap_size(&vrr_info->dirty_bitmap) -
-		   vrr_info->nr_holding_pages - vrr_info->nr_private_pages;
-
-	if (diff <= 0) {
-		rr_rollback_cow_pages_by_bitmap(vrr_info);
-		return;
-	}
-
-	rr_rollback_holding_pages_by_list(vrr_info);
 
 	/* Traverse the private_pages */
 	list_for_each_entry_safe(private_page, temp, head, link)
 	{
-#ifdef RR_ROLLBACK_PAGES
-		/* We do nothing here but keep these dirty pages in a
-		 * list and copy the new content back before entering
-		 * guest.
-		 */
-		private_page->state = RR_COW_STATE_ROLLBACK;
-		list_move_tail(&private_page->link, rollback_head);
-		vrr_info->nr_private_pages--;
-		vrr_info->nr_rollback_pages++;
-#else
 		rr_spte_restore(private_page);
 		kmem_cache_free(rr_priv_page_cache,
 				private_page->private_addr);
@@ -1088,7 +797,6 @@ static void rr_rollback_memory(struct kvm_vcpu *vcpu)
 		hlist_del(&private_page->hlink);
 		kmem_cache_free(rr_cow_page_cache, private_page);
 		vrr_info->nr_private_pages--;
-#endif
 	}
 }
 
@@ -1185,41 +893,10 @@ retry:
 	}
 }
 
-#ifdef RR_ROLLBACK_PAGES
-/* Update pages of the rollback_pages list from the public memory */
-static void rr_copy_rollback_pages(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *private_page, *temp;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-	struct list_head *head = &vrr_info->rollback_pages;
-	u64 nr_chunk = vrr_info->nr_chunk;
-	struct list_head *holding_head = &vrr_info->holding_pages;
-
-	list_for_each_entry_safe(private_page, temp, head, link) {
-		private_page->chunk_num = nr_chunk;
-		rr_check_cow_page_before_access(vcpu, private_page);
-		copy_page(private_page->private_addr,
-			  private_page->original_addr);
-		private_page->state = RR_COW_STATE_HOLDING;
-		list_move_tail(&private_page->link, holding_head);
-		vrr_info->nr_rollback_pages--;
-		vrr_info->nr_holding_pages++;
-	}
-}
-#endif
-
 void rr_post_check(struct kvm_vcpu *vcpu)
 {
-#ifdef RR_ROLLBACK_PAGES
-	bool is_rollback = (vcpu->rr_info.chunk_info.action == RR_CHUNK_ROLLBACK);
-#endif
-
 	rr_vcpu_chunk_list_check_and_del(vcpu);
 	rr_clear_request(RR_REQ_POST_CHECK, &vcpu->rr_info);
-#ifdef RR_ROLLBACK_PAGES
-	if (is_rollback)
-		rr_copy_rollback_pages(vcpu);
-#endif
 }
 EXPORT_SYMBOL_GPL(rr_post_check);
 
@@ -1516,46 +1193,6 @@ int rr_check_chunk(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(rr_check_chunk);
 
-static void rr_clear_holding_pages(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *private_page;
-	struct rr_cow_page *temp;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-
-	list_for_each_entry_safe(private_page, temp,
-				 &vrr_info->holding_pages,
-				 link) {
-		rr_spte_restore(private_page);
-		kmem_cache_free(rr_priv_page_cache,
-				private_page->private_addr);
-		list_del(&private_page->link);
-		hlist_del(&private_page->hlink);
-		kmem_cache_free(rr_cow_page_cache, private_page);
-		vrr_info->nr_holding_pages--;
-	}
-}
-
-#ifdef RR_ROLLBACK_PAGES
-static void rr_clear_rollback_pages(struct kvm_vcpu *vcpu)
-{
-	struct rr_cow_page *private_page;
-	struct rr_cow_page *temp;
-	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
-
-	list_for_each_entry_safe(private_page, temp,
-				 &vrr_info->rollback_pages,
-				 link) {
-		rr_spte_restore(private_page);
-		kmem_cache_free(rr_priv_page_cache,
-				private_page->private_addr);
-		list_del(&private_page->link);
-		hlist_del(&private_page->hlink);
-		kmem_cache_free(rr_cow_page_cache, private_page);
-		vrr_info->nr_rollback_pages--;
-	}
-}
-#endif
-
 struct rr_exit_reason_str {
 	u32 exit_reason;
 	char *str;
@@ -1774,13 +1411,7 @@ static int __rr_ape_disable(struct kvm_vcpu *vcpu)
 	vrr_info->public_cb = &vrr_info->conflict_bitmap_1;
 	vrr_info->private_cb = &vrr_info->conflict_bitmap_2;
 
-	rr_clear_holding_pages(vcpu);
-#ifdef RR_ROLLBACK_PAGES
-	rr_clear_rollback_pages(vcpu);
-	RR_ASSERT(vrr_info->nr_rollback_pages == 0);
-#endif
 	RR_ASSERT(vrr_info->nr_private_pages == 0);
-	RR_ASSERT(vrr_info->nr_holding_pages == 0);
 
 	rr_clear_hash(&vrr_info->cow_hash);
 
