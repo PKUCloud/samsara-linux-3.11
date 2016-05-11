@@ -1378,6 +1378,16 @@ static void rr_gen_bitmap_from_private_pages(struct kvm_vcpu *vcpu)
 	}
 }
 
+static void rr_copy_and_clear_conflict_bm(struct rr_vcpu_info *vrr_info)
+{
+	if (!re_bitmap_empty(vrr_info->private_cb)) {
+		RR_ERR("warning: private conflict bitmap is not empty");
+		re_bitmap_clear(vrr_info->private_cb);
+	}
+	re_bitmap_or(vrr_info->private_cb, vrr_info->public_cb);
+	re_bitmap_clear(vrr_info->public_cb);
+}
+
 static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -1454,7 +1464,8 @@ rollback:
 	vrr_info->chunk_info.state = RR_CHUNK_STATE_BUSY;
 	rr_vcpu_insert_chunk_list(vcpu);
 
-	swap(vrr_info->public_cb, vrr_info->private_cb);
+	/* Copy public_cb to private_cb and clear public_cb */
+	rr_copy_and_clear_conflict_bm(vrr_info);
 	mutex_unlock(&(krr_info->tm_lock));
 
 	if (commit) {
