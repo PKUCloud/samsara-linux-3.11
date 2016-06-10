@@ -31,8 +31,12 @@ struct logger_dev logger_dev;        //the device struct
 // Declare two cache pointer
 struct kmem_cache *data_cache;    //data page cache
 struct kmem_cache *quantum_cache;   //for struct logger_quantum
+struct kmem_cache *log_cache;
 
 struct proc_dir_entry *entry;
+
+static void *fetch_buf;
+static struct logger_log *cur_log;
 
 // open function
 int logger_open(struct inode *inode, struct file *filp)
@@ -92,6 +96,9 @@ ssize_t logger_read(struct file *filp, char __user *buf, size_t count,
 		}else if(unlikely(dev->state == FLUSHED)) {
 			//return remaining data to user directly
 			goto flushed;
+		} else {
+			ret = -EBUSY;
+			goto out;
 		}
 	}
 	
@@ -133,15 +140,145 @@ out:
 	return ret;
 }
 
+static bool logger_decode_one_log(const char *buf, int size, int *start)
+{
+	int cur;
+	char c;
+	bool complete = false;
+	bool new_log = false;
+
+	if (!cur_log) {
+		/* A new log */
+		cur_log = kmem_cache_zalloc(log_cache, GFP_ATOMIC);
+	}
+	for (cur = *start; cur < size; ++cur) {
+		if (buf[cur] != '\n') {
+			if (cur_log->len == LOGGER_LOG_MAX_LEN - 1) {
+				pr_err("error: set a larger "
+				       "LOGGER_LOG_MAX_LEN=%d\n",
+				       LOGGER_LOG_MAX_LEN);
+				continue;
+			}
+			cur_log->data[cur_log->len++] = buf[cur];
+		} else {
+			cur_log->data[cur_log->len] = '\0';
+			complete = true;
+			break;
+		}
+	}
+
+	if (!complete)
+		goto out;
+
+	c = cur_log->data[0];
+	if (c < '1' || c > '9') {
+		/* Not a real log */
+		kmem_cache_free(log_cache, cur_log);
+		cur_log = NULL;
+		goto out;
+	}
+
+	new_log = true;
+out:
+	*start = cur + 1;
+	return new_log;
+}
+
+static void logger_decode_logs_from_buf(struct logger_dev *dev, const char *buf,
+					int size)
+{
+	int cur = 0;
+	bool new_log;
+	int type, vcpu_id;
+	struct vcpu_log *plog;
+
+	while (cur < size) {
+		new_log = logger_decode_one_log(buf, size, &cur);
+		if (new_log) {
+			sscanf(cur_log->data, "%d %d", &type, &vcpu_id);
+			if (vcpu_id >= LOGGER_MAX_VCPUS) {
+				pr_err("error: log's vcpu_id %d is larger than "
+				       "LOGGER_MAX_VCPUS\n", vcpu_id);
+				kmem_cache_free(log_cache, cur_log);
+				cur_log = NULL;
+				continue;
+			}
+			plog = &dev->vcpu_logs[vcpu_id];
+			spin_lock(&plog->log_lock);
+			list_add_tail(&cur_log->link, &plog->logs);
+			if (plog->nr_logs++ == 0)
+				wake_up_interruptible(&plog->queue);
+			spin_unlock(&plog->log_lock);
+			cur_log = NULL;
+		}
+	}
+}
+
+static inline int logger_total_logs(struct logger_dev *dev)
+{
+	int ret = 0;
+	int i;
+
+	for (i = 0; i < LOGGER_MAX_VCPUS; ++i) {
+		ret += dev->vcpu_logs[i].nr_logs;
+	}
+
+	return ret;
+}
+
 //write function
 ssize_t logger_write(struct file *filp, const char __user *buf, size_t count,
-	loff_t *f_pos)
+		     loff_t *f_pos)
 {
-	return count;
+	struct logger_dev *dev = filp->private_data;
+	int ret = count;
+	int size = 0;
+
+	spin_lock(&dev->dev_lock);
+	if (dev->state != INPUT) {
+		ret = -EBUSY;
+		spin_unlock(&dev->dev_lock);
+		goto out;
+	}
+	while (logger_total_logs(dev) >= LOGGER_MAX_LOGS) {
+		if (unlikely(dev->state == FLUSHED)) {
+			spin_unlock(&dev->dev_lock);
+			goto flushed;
+		}
+
+		/* Enough data to be read. Sleep. */
+		spin_unlock(&dev->dev_lock);
+		if (wait_event_interruptible(dev->queue,
+					     (logger_total_logs(dev) < LOGGER_MAX_LOGS
+					      || dev->state == FLUSHED)))
+			return -ERESTARTSYS;
+		spin_lock(&dev->dev_lock);
+	}
+	spin_unlock(&dev->dev_lock);
+
+	size = min(LOGGER_QUANTUM, (int)count);
+	ret = copy_from_user(fetch_buf, buf, size);
+	if (ret) {
+		pr_err("error: fail to copy from user %d/%d\n", ret, size);
+		ret = -EFAULT;
+		goto out;
+	}
+
+	logger_decode_logs_from_buf(dev, fetch_buf, size);
+	ret = size;
+	*f_pos += size;
+out:
+	return ret;
+
+flushed:
+	dev->state = INPUT;
+	return -EBUSY;
 }
 
 //mmap is available, but confined in a different file mmap.c
 extern int logger_mmap(struct file *filp, struct vm_area_struct *vma);
+
+void logger_trim(void);
 
 /*
 * The ioctl() implementation
@@ -163,6 +300,20 @@ long logger_ioctl(struct file *filp,
 			dev->state = FLUSHED;
 			wake_up_interruptible(&dev->queue);         //maybe there is some question here with read
 			spin_unlock(&dev->dev_lock);
+			break;
+
+		case LOGGER_SET_STATE:
+			/* Set the state of logger */
+			if (arg != NORMAL && arg != INPUT) {
+				return -EINVAL;
+			}
+			spin_lock(&dev->dev_lock);
+			dev->state = arg;
+			/* Reset logger */
+			logger_trim();
+			spin_unlock(&dev->dev_lock);
+			printk(KERN_INFO "%s: set logger to state %lu\n",
+			       __func__, arg);
 			break;
 
 		default:
@@ -287,6 +438,17 @@ static struct file_operations logger_file_ops = {
  * End of interfaces for seq_file
  */
 
+static void logger_vcpu_logs_init(struct logger_dev *dev)
+{
+	int i;
+
+	for (i = 0; i < LOGGER_MAX_VCPUS; ++i) {
+		spin_lock_init(&dev->vcpu_logs[i].log_lock);
+		INIT_LIST_HEAD(&dev->vcpu_logs[i].logs);
+		init_waitqueue_head(&dev->vcpu_logs[i].queue);
+	}
+}
+
 //init function
 int logger_init(void)
 {
@@ -310,6 +472,8 @@ int logger_init(void)
 	spin_lock_init(&logger_dev.dev_lock);
 	init_waitqueue_head(&logger_dev.queue);
 
+	logger_vcpu_logs_init(&logger_dev);
+
 	//create cache. 3.11 is different from 2.6
 	data_cache = kmem_cache_create("logger_data", logger_quantum,
 		0, 0, NULL);        //no ctor/dtor  SLAB_HWCACHE_ALIGN??
@@ -325,6 +489,20 @@ int logger_init(void)
 		result = -ENOMEM;
 		pr_err("error: fail to kmem_cache_create() for logger\n");
 		goto fail_create_cache;
+	}
+
+	log_cache = kmem_cache_create("logger_log", sizeof(struct logger_log),
+				      0, 0, NULL);
+	if (!log_cache) {
+		result = -ENOMEM;
+		pr_err("error: fail to kmem_cache_create() for logger\n");
+		goto fail_create_cache;
+	}
+
+	fetch_buf = kmalloc(LOGGER_QUANTUM, GFP_ATOMIC);
+	if (!fetch_buf) {
+		pr_err("error: fail to kmalloc() for fetch_buf\n");
+		goto fail_add_dev;
 	}
 
 	//setup cdev
@@ -352,11 +530,17 @@ fail_add_proc:
 	class_destroy(logger_dev.logger_class);
 
 fail_add_dev:
-	kmem_cache_destroy(quantum_cache);
+	if (fetch_buf)
+		kfree(fetch_buf);
 
 fail_create_cache:
 	if(data_cache)
 		kmem_cache_destroy(data_cache);
+	if (quantum_cache)
+		kmem_cache_destroy(quantum_cache);
+	if (log_cache)
+		kmem_cache_destroy(log_cache);
+
 	unregister_chrdev_region(dev, 1);
 
 out:
@@ -367,7 +551,10 @@ out:
 void logger_trim(void)
 {
 	struct logger_quantum *cur, *next;
-	
+	int i;
+	struct vcpu_log *plog;
+	struct logger_log *log, *tmp;
+
 	cur = logger_dev.head;
 	while (cur) {
 		next = cur->next;
@@ -379,6 +566,22 @@ void logger_trim(void)
 	logger_dev.tail = NULL;
 	logger_dev.str = logger_dev.end = NULL;
 	logger_dev.size = 0;
+
+	for (i = 0; i < LOGGER_MAX_VCPUS; ++i) {
+		plog = &logger_dev.vcpu_logs[i];
+		spin_lock(&plog->log_lock);
+		list_for_each_entry_safe(log, tmp, &plog->logs, link) {
+			list_del(&log->link);
+			kmem_cache_free(log_cache, log);
+		}
+		plog->nr_logs = 0;
+		spin_unlock(&plog->log_lock);
+	}
+
+	if (cur_log) {
+		kmem_cache_free(log_cache, cur_log);
+		cur_log = NULL;
+	}
 }
 
 void logger_cleanup(void)
@@ -397,6 +600,12 @@ void logger_cleanup(void)
 
 	if(quantum_cache)
 		kmem_cache_destroy(quantum_cache);
+
+	if (log_cache)
+		kmem_cache_destroy(log_cache);
+
+	if (fetch_buf)
+		kfree(fetch_buf);
 
 	spin_unlock(&logger_dev.dev_lock);
 
@@ -1249,6 +1458,44 @@ out:
 	return r;   
 }
 EXPORT_SYMBOL_GPL(rr_log);
+
+struct logger_log *rr_fetch_log(int vcpu_id)
+{
+	struct vcpu_log *plog;
+	struct logger_log *ret = NULL;
+
+	if (unlikely(vcpu_id >= LOGGER_MAX_VCPUS)) {
+		pr_err("error: %s vcpu_id=%d is largger than LOGGER_MAX_VCPUS\n",
+		       __func__, vcpu_id);
+		return NULL;
+	}
+	plog = &logger_dev.vcpu_logs[vcpu_id];
+	spin_lock(&plog->log_lock);
+	while (plog->nr_logs == 0) {
+		/* We need to wait for a new log */
+		if (unlikely(logger_dev.state == FLUSHED))
+			goto out;
+
+		spin_unlock(&plog->log_lock);
+		if (wait_event_interruptible(plog->queue, (plog->nr_logs > 0 ||
+					     logger_dev.state == FLUSHED)))
+			return NULL;
+		spin_lock(&plog->log_lock);
+	}
+	ret = list_first_entry(&plog->logs, struct logger_log, link);
+	list_del(&ret->link);
+	plog->nr_logs--;
+out:
+	spin_unlock(&plog->log_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(rr_fetch_log);
+
+void rr_free_log(struct logger_log *log)
+{
+	kmem_cache_free(log_cache, log);
+}
+EXPORT_SYMBOL_GPL(rr_free_log);
 
 module_init(logger_init);
 module_exit(logger_cleanup);

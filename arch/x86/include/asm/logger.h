@@ -4,6 +4,8 @@
 #include <asm/bug.h>
 
 extern int rr_log(const char* fmt, ...);
+extern struct logger_log *rr_fetch_log(int vcpu_id);
+extern void rr_free_log(struct logger_log *log);
 
 // #define DEBUG_RECORD_REPLAY
 /* Print the real log for record and replay */

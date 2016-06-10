@@ -6,11 +6,31 @@
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/device.h>
+#include <linux/types.h>
 
 #define LOGGER_MAJOR 0		//dynamic major by default
 #define LOGGER_QUANTUM 4096	//use a quantum size of 4096
 /* 1 - to print timestamp at the front of every message */
 #define PRINT_TIME 0
+
+#define LOGGER_MAX_VCPUS	16
+#define LOGGER_MAX_LOGS		1024
+
+#define LOGGER_LOG_MAX_LEN	256
+
+/* Define your own log format here */
+struct logger_log {
+	char data[LOGGER_LOG_MAX_LEN];
+	int len;
+	struct list_head link;
+};
+
+struct vcpu_log {
+	spinlock_t log_lock;
+	struct list_head logs;
+	int nr_logs;
+	wait_queue_head_t queue;
+};
 
 struct logger_quantum {
 	void *data;            //pointer to a page
@@ -30,6 +50,7 @@ struct logger_dev {
 	struct class *logger_class;
 	wait_queue_head_t queue;   //queue to mmap  //maybe change to sem?
 	int print_time;         //if set, print timestamp at the front of every message
+	struct vcpu_log vcpu_logs[LOGGER_MAX_VCPUS];
 };
 
 #define ZEROPAD	1		/* pad with zero */
@@ -42,9 +63,11 @@ struct logger_dev {
 
 #define NORMAL 0
 #define FLUSHED 1
+#define INPUT	2
 
 #define LOGGER_IOC_MAGIC 0XAF
 #define LOGGER_FLUSH	_IO(LOGGER_IOC_MAGIC, 0)
+#define LOGGER_SET_STATE	_IO(LOGGER_IOC_MAGIC, 1)
 
 #define assert(expr) \
         if(unlikely(!(expr))) {				        \
