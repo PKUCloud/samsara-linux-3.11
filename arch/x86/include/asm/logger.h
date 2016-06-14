@@ -4,6 +4,7 @@
 #include <asm/bug.h>
 
 extern int rr_log(const char* fmt, ...);
+extern int rr_log_buf(const unsigned char *buf, int len);
 extern struct logger_log *rr_fetch_log(int vcpu_id);
 extern void rr_free_log(struct logger_log *log);
 

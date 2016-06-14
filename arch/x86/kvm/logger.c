@@ -1433,6 +1433,29 @@ static int __print_record(const char* fmt, va_list args)
 	return length;
 }
 
+//should get the lock before calling this function
+static int __print_record_buf(const unsigned char* buf, int len)
+{
+	char **str, **end;
+	int i;
+
+	if (len <= 0) {
+		return 0;
+	}
+	str = &logger_dev.str;
+	end = &logger_dev.end;
+	i = 0;
+	while (len - i > *end - *str) {
+		memcpy(*str, buf + i, *end - *str);
+		i += (*end - *str);
+		logger_alloc_page();
+	}
+
+	memcpy(*str, buf + i, len - i);
+	*str += (len - i);
+	return len;
+}
+
 int rr_log(const char* fmt, ...)
 {
 	va_list args;  
@@ -1458,6 +1481,28 @@ out:
 	return r;   
 }
 EXPORT_SYMBOL_GPL(rr_log);
+
+int rr_log_buf(const unsigned char *buf, int len)
+{
+	int r;
+
+	spin_lock(&logger_dev.dev_lock);
+	if(logger_dev.state != NORMAL) {
+		r = -1;
+		goto out;
+	}
+	r = __print_record_buf(buf, len);
+
+	logger_dev.size += r;
+	if(logger_dev.size >= logger_quantum) {
+		wake_up_interruptible(&logger_dev.queue);
+	}
+
+out:
+	spin_unlock(&logger_dev.dev_lock);
+	return r;
+}
+EXPORT_SYMBOL_GPL(rr_log_buf);
 
 struct logger_log *rr_fetch_log(int vcpu_id)
 {
