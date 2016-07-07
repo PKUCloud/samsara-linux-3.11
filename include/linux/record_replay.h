@@ -21,7 +21,7 @@ struct kvm_lapic;
 #define RR_BITMAP_SIZE		(1024 * 1024)
 
 /* Max consecutive rollback times before exclusive commit */
-#define RR_CONSEC_RB_TIME	3
+#define RR_CONSEC_RB_TIME	1
 
 #define RR_EARLY_CHECK
 
@@ -35,7 +35,8 @@ struct kvm_lapic;
 #define RR_ASYNC_PREEMPTION_EPT	(KVM_RR_CTRL_MEM_EPT | KVM_RR_CTRL_MODE_ASYNC |\
 				 KVM_RR_CTRL_KICK_PREEMPTION)
 
-#define RR_DEFAULT_PREEMTION_TIMER_VAL	30000
+#define RR_DEFAULT_PREEMTION_TIMER_VAL	300000
+#define RR_MINIMAL_PREEMTION_TIMER_VAL  10000
 
 #define RR_CHUNK_COMMIT			0
 #define RR_CHUNK_ROLLBACK		1
@@ -119,6 +120,21 @@ struct rr_vcpu_info {
 	u64 nr_chunk_commit;
 	u64 exit_time;
 	u64 cur_exit_time;
+
+	/* Execution time profilling */
+	u64 checkpoint_time;
+	u64 commit_begin_time;
+	u64 commit_time;
+	bool commit_flag;
+	u64 traverse_EPT_time;
+	u64 wait_for_exclusive_commit_time;
+	u64 wait_for_commit_lcok_time;
+	u64 conflict_detection_time;
+	u64 broadcast_bitmap_time;
+	u64 write_log_time;
+	u64 insert_chunk_list_and_swap_bitmap_time;
+	u64 commit_rollback_memory_time;
+	
 };
 
 /* Record and replay control info for kvm */

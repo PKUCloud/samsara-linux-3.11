@@ -5871,6 +5871,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_immediate_exit = false;
 	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
 	u64 temp;
+	u64 time_start_temp;
+	u64 time_end_temp;
 
 restart:
 	if (vcpu->requests) {
@@ -5932,8 +5934,12 @@ restart:
 		/* We need to read back the value from hardware fpu
 		 * (unload the fpu).
 		 */
+
+		rdtscll(time_start_temp);	//time profilling
 		rr_put_guest_fpu(vcpu);
 		rr_vcpu_checkpoint(vcpu);
+		rdtscll(time_end_temp);		//time profilling
+		vrr_info->checkpoint_time += time_end_temp - time_start_temp;
 	}
 
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
@@ -5987,6 +5993,8 @@ restart:
 		rr_post_check(vcpu);
 	}
 
+
+
 	preempt_disable();
 
 	kvm_x86_ops->prepare_guest_switch(vcpu);
@@ -6027,6 +6035,12 @@ restart:
 			if (vrr_info->is_write_pf_exit)
 				vrr_info->exit_stat[RR_EXIT_REASON_WRITE_FAULT].time += temp;
 		}
+	}
+	/* commit time profilling */
+	if (vrr_info->commit_flag == 1) {
+		rdtscll(time_end_temp);		//time profilling
+		vrr_info->commit_time += time_end_temp - vrr_info->commit_begin_time;
+		vrr_info->commit_flag = 0;
 	}
 
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
@@ -6110,9 +6124,15 @@ restart:
 		kvm_lapic_sync_from_vapic(vcpu);
 
 	if (vrr_info->enabled) {
+		rdtscll(vrr_info->commit_begin_time);	/* commit time profilling */
+		
 		rr_trace_vm_exit(vcpu);
 		rr_clear_all_request(vrr_info);
 		r = rr_check_chunk(vcpu);
+
+		if (r == RR_CHUNK_COMMIT || r == RR_CHUNK_ROLLBACK)
+			vrr_info->commit_flag = 1;	/* commit time profilling */
+		
 		if (r == RR_CHUNK_ROLLBACK) {
 			/* Unload fpu from the hardware before we
 			 * rollback fpu, or kvm may override the value

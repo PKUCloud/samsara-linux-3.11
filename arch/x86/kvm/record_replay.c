@@ -279,6 +279,18 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->nr_chunk_rollback = 0;
 	rr_info->nr_chunk_commit = 0;
 	rr_info->exit_time = 0;
+	rr_info->checkpoint_time = 0;
+	rr_info->commit_begin_time = 0;
+	rr_info->commit_flag = 0;
+	rr_info->commit_time = 0;
+	rr_info->traverse_EPT_time = 0;
+	rr_info->wait_for_exclusive_commit_time = 0;
+	rr_info->wait_for_commit_lcok_time = 0;
+	rr_info->conflict_detection_time = 0;
+	rr_info->broadcast_bitmap_time = 0;
+	rr_info->write_log_time = 0;
+	rr_info->insert_chunk_list_and_swap_bitmap_time = 0;
+	rr_info->commit_rollback_memory_time = 0;
 	rr_info->cur_exit_time = 0;
 	rr_info->tlb_flush = true;
 	rr_info->nr_exits = 0;
@@ -1387,10 +1399,21 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 	int commit = 1;
 	struct kvm_vcpu *vcpu_it;
+	u64 time_start_temp;
+	u64 time_end_temp;
+
 
 	RR_ASSERT(vrr_info->enabled);
+
+	rdtscll(time_start_temp);	/* time profilling */
+	//traverse whole EPT to get read-set & write set
 	rr_gen_bitmap_from_spt(vcpu);
+	//traverse the pages in COW set to complete read-set & write set
 	rr_gen_bitmap_from_private_pages(vcpu);
+	rdtscll(time_end_temp);		/* time profilling */
+	vrr_info->traverse_EPT_time += time_end_temp - time_start_temp;
+
+	rdtscll(time_start_temp);	/* time profilling */
 	if (!vrr_info->exclusive_commit &&
 	    atomic_read(&krr_info->normal_commit) < 1) {
 		/* Now anothter vcpu is in exclusive commit state */
@@ -1402,10 +1425,17 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 			goto out;
 		}
 	}
+	rdtscll(time_end_temp);		/* time profilling */
+	vrr_info->wait_for_exclusive_commit_time += time_end_temp - time_start_temp;
 
+	rdtscll(time_start_temp);	/* time profilling */
 	++vrr_info->nr_chunk;
 	down_read(&(krr_info->tm_rwlock));
 	mutex_lock(&(krr_info->tm_lock));
+	rdtscll(time_end_temp);		/* time profilling */
+	vrr_info->wait_for_commit_lcok_time += time_end_temp - time_start_temp;
+
+	rdtscll(time_start_temp);	/* time profilling */
 	if (!re_bitmap_empty(vrr_info->public_cb)) {
 		/* Detect conflict */
 		if (rr_detect_conflict(&vrr_info->access_bitmap,
@@ -1413,6 +1443,8 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 			commit = 0;
 		}
 	}
+	rdtscll(time_end_temp);		/* time profilling */
+	vrr_info->conflict_detection_time += time_end_temp - time_start_temp;
 
 	if (commit) {
 		if (vrr_info->exclusive_commit) {
@@ -1428,6 +1460,7 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 			goto rollback;
 		}
 		/* Set dirty bitmap */
+		rdtscll(time_start_temp);	/* time profilling */
 		for (i = 0; i < online_vcpus; ++i) {
 			vcpu_it = kvm->vcpus[i];
 			if (vcpu_it == vcpu)
@@ -1435,28 +1468,54 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 			re_bitmap_or(vcpu_it->rr_info.public_cb,
 				     &vrr_info->dirty_bitmap);
 		}
+		rdtscll(time_end_temp);		/* time profilling */
+		vrr_info->broadcast_bitmap_time += time_end_temp - time_start_temp;
 
 		vrr_info->nr_rollback = 0;
+		rdtscll(time_start_temp);	/* time profilling */
 		rr_log_chunk(vcpu);
+		rdtscll(time_end_temp);		/* time profilling */
+		vrr_info->write_log_time += time_end_temp - time_start_temp;
+
+		// increase chunk size (preemption)
+		vrr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
 	} else {
 rollback:
 		vrr_info->nr_rollback++;
 		if (!vrr_info->exclusive_commit &&
 		    vrr_info->nr_rollback >= RR_CONSEC_RB_TIME) {
-			if (atomic_dec_and_test(&krr_info->normal_commit)) {
+		    // solution 1: exclusive commit
+			//if (atomic_dec_and_test(&krr_info->normal_commit)) {
 				/* Now we can enter exclusive commit state */
-				vrr_info->exclusive_commit = 1;
+			//	vrr_info->exclusive_commit = 1;
+			//}
+
+			//solution 2: multiplicative-decrease
+			vrr_info->timer_value /= 2;
+			if (vrr_info->timer_value < RR_MINIMAL_PREEMTION_TIMER_VAL){
+				vrr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
+				// exclusive commit
+				if (atomic_dec_and_test(&krr_info->normal_commit)) {
+				/* Now we can enter exclusive commit state */
+					vrr_info->exclusive_commit = 1;
+				}
 			}
 		}
 	}
+	
 	/* Insert chunk_info to rr_info->chunk_list */
+	rdtscll(time_start_temp);	/* time profilling */
 	vrr_info->chunk_info.action = commit ? RR_CHUNK_COMMIT : RR_CHUNK_ROLLBACK;
 	vrr_info->chunk_info.state = RR_CHUNK_STATE_BUSY;
 	rr_vcpu_insert_chunk_list(vcpu);
 
 	swap(vrr_info->public_cb, vrr_info->private_cb);
 	mutex_unlock(&(krr_info->tm_lock));
+	rdtscll(time_end_temp);		/* time profilling */
+	vrr_info->insert_chunk_list_and_swap_bitmap_time += time_end_temp - time_start_temp;	
 
+
+	rdtscll(time_start_temp);	/* time profilling */
 	if (commit) {
 		++(vrr_info->nr_chunk_commit);
 		rr_commit_memory(vcpu);
@@ -1464,6 +1523,8 @@ rollback:
 		++(vrr_info->nr_chunk_rollback);
 		rr_rollback_memory(vcpu);
 	}
+	rdtscll(time_end_temp);		/* time profilling */
+	vrr_info->commit_rollback_memory_time += time_end_temp - time_start_temp;	
 
 	rr_vcpu_set_chunk_state(vcpu, RR_CHUNK_STATE_FINISHED);
 
@@ -1474,7 +1535,9 @@ rollback:
 	re_bitmap_clear(&vrr_info->dirty_bitmap);
 	re_bitmap_clear(vrr_info->private_cb);
 
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
+	RR_LOG("VCPU %d, Current chunk preemption timer: %d\n", 
+			vcpu->vcpu_id, vrr_info->timer_value);
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vrr_info->timer_value);
 out:
 	vrr_info->tlb_flush = true;
 	return commit;
@@ -1695,6 +1758,8 @@ static void __rr_print_sta(struct kvm *kvm)
 	}
 	RR_LOG("total nr_chunk_commit=%llu\n", nr_chunk_commit);
 	RR_LOG("total nr_chunk_rollback=%llu\n", nr_chunk_rollback);
+	RR_LOG("total rollback rate=%d%%\n", 
+		   (nr_chunk_rollback * 100) / (nr_chunk_commit + nr_chunk_rollback));
 
 	RR_LOG(">>> Stat for time:\n");
 	for (i = 0; i < online_vcpus; ++i) {
@@ -1719,6 +1784,88 @@ static void __rr_print_sta(struct kvm *kvm)
 
 	RR_LOG("record_up_time=%llu (enabled=%llu disabled=%llu)\n",
 	       temp, krr_info->enabled_time, krr_info->disabled_time);
+
+	/* Printing profilling info */
+	RR_LOG(">>> Execution time profilling:\n");
+
+	RR_LOG("=== Total commit time ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d commit_time=%llu\n", vcpu_it->vcpu_id, 
+				vcpu_it->rr_info.commit_time);
+	}
+
+	RR_LOG("=== Time consumed on making checkpoint ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d checkpoint_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.checkpoint_time, 
+				((vcpu_it->rr_info.checkpoint_time * 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on traversing EPT to get read&write-set ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d EPT_traversal_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.traverse_EPT_time * 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on waiting for the exclusive commit ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d wait_for_exclusive_commit_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.wait_for_exclusive_commit_time* 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on waiting for the commit lock ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d wait_for_commit_lcok_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.wait_for_commit_lcok_time* 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on conflict detection ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d conflict_detection_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.conflict_detection_time * 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on broadcasting dirty bitmap ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d broadcast_bitmap_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.broadcast_bitmap_time * 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on writing chunk log ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d write_log_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.write_log_time * 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on inserting chunk info and swaping bitmap ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d insert_chunk_list_and_swap_bitmap_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.insert_chunk_list_and_swap_bitmap_time * 100) / vcpu_it->rr_info.commit_time));
+	}
+
+	RR_LOG("=== Time consumed on commit and rollback memory ===\n");
+	for (i = 0; i < online_vcpus; ++i) {
+		vcpu_it = kvm->vcpus[i];
+		RR_LOG("vcpu=%d commit_rollback_memory_time=%llu proportion = %d%%\n", vcpu_it->vcpu_id,
+				vcpu_it->rr_info.traverse_EPT_time, 
+				((vcpu_it->rr_info.commit_rollback_memory_time * 100) / vcpu_it->rr_info.commit_time));
+	}
 }
 
 static int __rr_ape_disable(struct kvm_vcpu *vcpu)
