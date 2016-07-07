@@ -1438,15 +1438,24 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 
 		vrr_info->nr_rollback = 0;
 		rr_log_chunk(vcpu);
+
+        //increase chunk size (preemption timer)
+        vrr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
 	} else {
 rollback:
 		vrr_info->nr_rollback++;
 		if (!vrr_info->exclusive_commit &&
 		    vrr_info->nr_rollback >= RR_CONSEC_RB_TIME) {
-			if (atomic_dec_and_test(&krr_info->normal_commit)) {
-				/* Now we can enter exclusive commit state */
-				vrr_info->exclusive_commit = 1;
-			}
+			//do binary exponential back off
+            vrr_info->timer_value /= 2;
+            if (vrr_info->timer_value < RR_MINIMAL_PREEMTION_TIMER_VAL){
+                vrr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
+                //exclusive commit
+                if (atomic_dec_and_test(&krr_info->normal_commit)) {
+				    /* Now we can enter exclusive commit state */
+				    vrr_info->exclusive_commit = 1;
+			    }
+            }
 		}
 	}
 	/* Insert chunk_info to rr_info->chunk_list */
@@ -1474,7 +1483,7 @@ rollback:
 	re_bitmap_clear(&vrr_info->dirty_bitmap);
 	re_bitmap_clear(vrr_info->private_cb);
 
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, rr_ctrl.timer_value);
+	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, vrr_info->timer_value);
 out:
 	vrr_info->tlb_flush = true;
 	return commit;
