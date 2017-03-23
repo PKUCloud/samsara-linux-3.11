@@ -70,5 +70,11 @@ static inline struct rr_cow_page *rr_hash_find(struct hlist_head *hash, u64 gfn)
 	return NULL;
 }
 
+//rsr
+static inline void rr_hash_del(struct rr_cow_page *ele_page)
+{
+	hlist_del(&ele_page->hlink);
+}
+
 #endif
 

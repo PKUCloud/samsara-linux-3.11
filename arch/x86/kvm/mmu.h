@@ -3,6 +3,8 @@
 
 #include <linux/kvm_host.h>
 #include "kvm_cache_regs.h"
+#include <asm/logger.h>
+
 
 #define PT64_PT_BITS 9
 #define PT64_ENT_PER_PAGE (1 << PT64_PT_BITS)
@@ -52,6 +54,17 @@
 
 int kvm_mmu_get_spte_hierarchy(struct kvm_vcpu *vcpu, u64 addr, u64 sptes[4]);
 void kvm_mmu_set_mmio_spte_mask(u64 mmio_mask);
+void zap_pages_rsr(struct kvm_vcpu *vcpu);
+void make_mmu_pages_available_rsr(struct kvm_vcpu *vcpu);
+
+
+
+//rsr
+int drop_spte_rsr(struct kvm *kvm, u64 *sptep);
+void drop_access_spte_rsr(struct kvm *kvm, gfn_t gfn);
+void invalid_root_rsr(struct kvm_vcpu *vcpu, int flag);
+
+
 
 /*
  * Return values of handle_mmio_page_fault_common:
@@ -74,6 +87,9 @@ int kvm_init_shadow_mmu(struct kvm_vcpu *vcpu, struct kvm_mmu *context);
 
 static inline unsigned int kvm_mmu_available_pages(struct kvm *kvm)
 {
+	//RR_LOG("n_max_mmu_pages=%d n_used_mmu_pages=%d\n",
+	//	kvm->arch.n_max_mmu_pages, kvm->arch.n_used_mmu_pages);
+
 	if (kvm->arch.n_max_mmu_pages > kvm->arch.n_used_mmu_pages)
 		return kvm->arch.n_max_mmu_pages -
 			kvm->arch.n_used_mmu_pages;

@@ -1482,6 +1482,7 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 	}
 
 	r = kvm_read_hva(data, (void __user *)addr + offset, len);
+	
 	if (r)
 		return -EFAULT;
 	return 0;

@@ -267,6 +267,9 @@ struct kvm_vcpu {
 	struct kvm_vcpu_arch arch;
 	/* Record and replay */
 	struct rr_vcpu_info rr_info;
+
+	//rsr
+	unsigned long mmu_vcpu_valid_gen;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)

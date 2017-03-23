@@ -89,7 +89,10 @@
 #define KVM_MMU_HASH_SHIFT 10
 #define KVM_NUM_MMU_PAGES (1 << KVM_MMU_HASH_SHIFT)
 #define KVM_MIN_FREE_MMU_PAGES 5
+//rsr
 #define KVM_REFILL_PAGES 25
+#define KVM_MMU_MAX_AVILABLE_PAGES 200
+
 #define KVM_MAX_CPUID_ENTRIES 80
 #define KVM_NR_FIXED_MTRR_REGION 88
 #define KVM_NR_VAR_MTRR 8
@@ -241,6 +244,9 @@ struct kvm_mmu_page {
 
 	/* Record and replay */
 	struct kvm_vcpu *vcpu;
+
+	//rsr
+	unsigned long mmu_vcpu_valid_gen;
 };
 
 struct kvm_pio_request {

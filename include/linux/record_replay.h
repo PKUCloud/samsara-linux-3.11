@@ -45,6 +45,9 @@ struct kvm_lapic;
 #define RR_REQ_CHECKPOINT		0
 #define RR_REQ_COMMIT_AGAIN		1
 #define RR_REQ_POST_CHECK		2
+//rsr
+#define RR_REQ_DELETE_PRIVATE_PAGE	3
+
 
 /* Macros for rr_chunk_info.state */
 #define RR_CHUNK_STATE_IDLE		0
@@ -70,8 +73,9 @@ struct rr_event {
 	unsigned long *dest_map;
 };
 
-#define RR_EXIT_REASON_MAX	59
-#define RR_EXIT_REASON_WRITE_FAULT	RR_EXIT_REASON_MAX
+#define RR_EXIT_REASON_MAX	60
+#define RR_EXIT_REASON_WRITE_FAULT	59
+#define RR_EXIT_REASON_READ_FAULT	60
 #define RR_NR_EXIT_REASON_MAX	(RR_EXIT_REASON_MAX + 1)
 
 struct rr_exit_stat {
@@ -114,12 +118,19 @@ struct rr_vcpu_info {
 	bool tlb_flush;
 	u32 exit_reason;	/* Exit reason of current exit */
 	bool is_write_pf_exit;
+	int is_read_pf_exit;
 	u64 nr_exits;
 	struct rr_exit_stat exit_stat[RR_NR_EXIT_REASON_MAX];
 	u64 nr_chunk_rollback;
 	u64 nr_chunk_commit;
 	u64 exit_time;
 	u64 cur_exit_time;
+
+	//rsr
+	int nr_read_fault;
+	int nr_write_fault;
+	u64 total_lost_read_fault;
+	u64 total_lost_write_fault;
 };
 
 /* Record and replay control info for kvm */
@@ -199,6 +210,9 @@ void rr_memory_cow_fast(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn);
 void rr_fix_cow_page(struct rr_cow_page *cow_page, u64 *sptep);
 struct rr_cow_page *rr_check_cow_page(struct rr_vcpu_info *vrr_info, gfn_t gfn);
 void rr_trace_vm_exit(struct kvm_vcpu *vcpu);
+
+//rsr
+void rr_delete_private_pages(struct kvm_vcpu *vcpu);
 
 static inline void rr_make_request(int req, struct rr_vcpu_info *rr_info)
 {

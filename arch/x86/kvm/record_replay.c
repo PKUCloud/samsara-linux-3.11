@@ -265,6 +265,13 @@ static void __rr_vcpu_enable(struct kvm_vcpu *vcpu)
 	rr_info->exclusive_commit = 0;
 	rr_info->nr_rollback = 0;
 	rr_info->nr_chunk = 0;
+
+	//rsr
+	rr_info->nr_read_fault = 0;
+	rr_info->nr_write_fault = 0;
+	rr_info->total_lost_read_fault = 0;
+	rr_info->total_lost_write_fault = 0;
+	
 	rr_info->chunk_info.vcpu_id = vcpu->vcpu_id;
 	rr_info->chunk_info.state = RR_CHUNK_STATE_IDLE;
 	INIT_LIST_HEAD(&rr_info->private_pages);
@@ -436,7 +443,7 @@ EXPORT_SYMBOL_GPL(rr_set_mmio_spte_mask);
 
 static inline void rr_spte_set_cow_tag(u64 *sptep)
 {
-	RR_ASSERT(!(*sptep & RR_PT_COW_TAG));
+	//RR_ASSERT(!(*sptep & RR_PT_COW_TAG));
 	*sptep |= RR_PT_COW_TAG;
 }
 
@@ -608,7 +615,9 @@ static void *__rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write,
 	u64 bitand = PT_PRESENT_MASK;
 
 	RR_ASSERT(level == PT64_ROOT_LEVEL);
-	RR_ASSERT(shadow_addr != INVALID_PAGE);
+	//RR_ASSERT(shadow_addr != INVALID_PAGE);
+	if (shadow_addr == INVALID_PAGE)
+		return NULL;
 
 	for (; level >= PT_PAGE_TABLE_LEVEL; level --) {
 		index = SHADOW_PT_INDEX(addr, level);
@@ -649,6 +658,8 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 	gpa_t gpa;
 	u64 present;
 
+	// rsr
+	//kvm_mmu_reload(vcpu);
 	kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write, &present);
 	if (kaddr == NULL) {
 		vrr_info->tlb_flush = true;
@@ -660,6 +671,8 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 				temp = error_code | PFERR_PRESENT_MASK;
 			} else temp = error_code;
 
+			// rsr
+			//kvm_mmu_reload(vcpu);
 			r = tdp_page_fault(vcpu, gpa, temp, false);
 			if (unlikely(r < 0)) {
 				RR_ERR("error: vcpu=%d tdp_page_fault failed "
@@ -667,6 +680,9 @@ void *rr_ept_gfn_to_kaddr(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 				       vcpu->vcpu_id, gfn, r);
 				return NULL;
 			}
+
+			// rsr
+			//kvm_mmu_reload(vcpu);
 			kaddr = __rr_ept_gfn_to_kaddr(vcpu, gfn, write,
 						      &present);
 		}
@@ -702,6 +718,8 @@ static void rr_check_cow_page_before_access(struct kvm_vcpu *vcpu,
 		vcpu->rr_info.tlb_flush = true;
 		gpa = gfn_to_gpa(cow_page->gfn);
 		while (*sptep == 0) {
+			// rsr
+			kvm_mmu_reload(vcpu);
 			r = tdp_page_fault(vcpu, gpa, PFERR_WRITE_MASK,
 					   false);
 			if (unlikely(r < 0)) {
@@ -731,6 +749,72 @@ static __always_inline void rr_spte_restore(struct rr_cow_page *cow_page)
 	rr_spte_withdraw_wperm(sptep);
 	rr_spte_clear_cow_tag(sptep);
 }
+
+//rsr - withdraw read permission
+static __always_inline void rr_spte_withdraw_cow_page(struct kvm_vcpu *vcpu, u64 *sptep)
+{
+	if (*sptep == 0) {
+		return;
+	}
+
+	//*sptep = 0;
+	
+	*sptep &= ~PT_WRITABLE_MASK;
+	//*sptep &= ~PT_PRESENT_MASK;
+	//*sptep &= ~PT_ACCESSED_MASK;
+	drop_spte_rsr(vcpu->kvm, sptep);
+}
+
+static __always_inline void rr_spte_withdraw_access_pages(struct kvm_vcpu *vcpu)
+{
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	unsigned long *pgfn, *tmp;
+	u64 *sptep;
+	int nr_drop = 0;
+	struct rr_cow_page *cow_page;
+	struct hlist_head *cow_hash = vrr_info->cow_hash;
+
+	
+	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->access_bitmap) {
+		drop_access_spte_rsr(vcpu->kvm, *pgfn);
+		cow_page = rr_hash_find(cow_hash, *pgfn);
+		if (cow_page) {
+			RR_ASSERT(cow_page->state == RR_COW_STATE_HOLDING);
+			rr_spte_restore(cow_page);
+			kmem_cache_free(rr_priv_page_cache,
+					cow_page->private_addr);
+			list_del(&cow_page->link);
+			hlist_del(&cow_page->hlink);
+			kmem_cache_free(rr_cow_page_cache, cow_page);
+			vrr_info->nr_holding_pages--;
+		}
+		nr_drop++;
+	}
+	
+	re_bitmap_clear(&vrr_info->access_bitmap);
+
+	
+	re_bitmap_for_each_bit(pgfn, tmp, &vrr_info->dirty_bitmap) {
+		drop_access_spte_rsr(vcpu->kvm, *pgfn);
+		cow_page = rr_hash_find(cow_hash, *pgfn);
+		if (cow_page) {
+			RR_ASSERT(cow_page->state == RR_COW_STATE_HOLDING);
+			rr_spte_restore(cow_page);
+			kmem_cache_free(rr_priv_page_cache,
+					cow_page->private_addr);
+			list_del(&cow_page->link);
+			hlist_del(&cow_page->hlink);
+			kmem_cache_free(rr_cow_page_cache, cow_page);
+			vrr_info->nr_holding_pages--;
+		}
+		nr_drop++;
+	}
+	
+	re_bitmap_clear(&vrr_info->dirty_bitmap);
+
+	RR_LOG("withdraw_access_pages = %d\n", nr_drop);
+}
+
 
 static inline void rr_age_holding_page(struct rr_vcpu_info *vrr_info,
 				       struct rr_cow_page *private_page,
@@ -782,6 +866,87 @@ static inline void rr_commit_holding_pages_by_list(struct kvm_vcpu *vcpu)
 			rr_age_holding_page(vrr_info, private_page,
 					    chunk_num);
 	}
+}
+
+extern void kvm_zap_obsolete_pages(struct kvm * kvm);
+
+//rsr - delete all private pages
+void rr_delete_private_pages(struct kvm_vcpu *vcpu)
+{
+	struct rr_cow_page *private_page;
+	struct rr_cow_page *temp;
+	struct rr_vcpu_info *vrr_info = &vcpu->rr_info;
+	struct list_head *head = &vrr_info->holding_pages;
+	int nr_drop = 0;
+
+	struct rr_cow_page *ele_page;
+	struct hlist_head *hash = vrr_info->cow_hash; 
+	struct hlist_head *phead;
+	struct hlist_node *tmp;
+	int i;
+
+
+	list_for_each_entry_safe(private_page, temp, head, link){
+		rr_spte_restore(private_page);
+		rr_spte_withdraw_cow_page(vcpu, private_page->sptep);
+		kmem_cache_free(rr_priv_page_cache,
+				private_page->private_addr);
+		list_del(&private_page->link);
+		hlist_del(&private_page->hlink);
+		kmem_cache_free(rr_cow_page_cache, private_page);
+		vrr_info->nr_holding_pages--;
+		nr_drop++;
+	}
+	RR_LOG("withdraw_cow_page = %d\n", nr_drop);
+	vrr_info->tlb_flush = true;
+
+
+	rr_spte_withdraw_access_pages(vcpu);
+
+	//re_bitmap_clear(&vrr_info->access_bitmap);
+	//re_bitmap_clear(&vrr_info->dirty_bitmap);
+
+	invalid_root_rsr(vcpu, 0);
+
+/*	
+	for (i = 0; i < RR_HASH_SIZE; ++i) {
+		phead = &hash[i];
+		if (phead){
+			hlist_for_each_entry_safe(ele_page, tmp, phead, hlink){
+				if (ele_page){
+					//if (drop_spte_rsr(vcpu->kvm, ele_page->sptep)){
+						kmem_cache_free(rr_priv_page_cache,	ele_page->private_addr);
+						list_del(&ele_page->link);
+						hlist_del(&ele_page->hlink);
+						kmem_cache_free(rr_cow_page_cache, ele_page);
+						vrr_info->nr_holding_pages--;
+					//}
+				}
+			}
+		}
+			
+	}
+*/	
+
+	//vcpu->kvm->arch.mmu_valid_gen++;
+	//vcpu->mmu_vcpu_valid_gen++;
+
+	//if(!(vcpu->mmu_vcpu_valid_gen % 50000)){
+	//	RR_ASSERT(!(vcpu->mmu_vcpu_valid_gen % 50000));
+	//	spin_lock(&(vcpu->kvm->mmu_lock));
+	//	kvm_zap_obsolete_pages(vcpu->kvm);
+	//	spin_unlock(&(vcpu->kvm->mmu_lock));
+	//}
+	
+	kvm_mmu_unload(vcpu);
+	kvm_mmu_reload(vcpu);
+
+	//spin_lock(&vcpu->kvm->mmu_lock);
+	//make_mmu_pages_available_rsr(vcpu);
+	//spin_unlock(&vcpu->kvm->mmu_lock);
+	
+
+	invalid_root_rsr(vcpu, 1);
 }
 
 /* Commit holding_pages and private_pages indexed by bitmap */
@@ -939,7 +1104,7 @@ static void rr_commit_memory_again(struct kvm_vcpu *vcpu)
 			}
 		}
 	}
-	RR_ASSERT(vrr_info->nr_private_pages <= 1);
+	//RR_ASSERT(vrr_info->nr_private_pages <= 1);
 }
 
 static inline void rr_rollback_holding_pages_by_list(struct rr_vcpu_info *vrr_info)
@@ -1127,8 +1292,9 @@ void rr_commit_again(struct kvm_vcpu *vcpu)
 	up_read(&krr_info->tm_rwlock);
 
 	/* We only handle dirty_bitmap here */
-	re_bitmap_clear(&vrr_info->dirty_bitmap);
-	RR_ASSERT(re_bitmap_empty(&vrr_info->access_bitmap));
+	//re_bitmap_clear(&vrr_info->dirty_bitmap);
+	//rsr - delay clearing access bitmap may lead to bugs.
+	//RR_ASSERT(re_bitmap_empty(&vrr_info->access_bitmap));
 	vrr_info->commit_again_clean = true;
 	vrr_info->tlb_flush = true;
 }
@@ -1349,8 +1515,8 @@ static void rr_log_chunk(struct kvm_vcpu *vcpu)
 	struct rr_kvm_info *krr_info = &vcpu->kvm->rr_info;
 	unsigned long rcx, rip;
 
-	if (vcpu->vcpu_id == krr_info->last_record_vcpu)
-		return;
+	//if (vcpu->vcpu_id == krr_info->last_record_vcpu)
+	//	return;
 	rcx = kvm_register_read(vcpu, VCPU_REGS_RCX);
 	rip = vmcs_readl(GUEST_RIP);
 	krr_info->last_record_vcpu = vcpu->vcpu_id;
@@ -1387,6 +1553,9 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 	int online_vcpus = atomic_read(&(kvm->online_vcpus));
 	int commit = 1;
 	struct kvm_vcpu *vcpu_it;
+
+	//rsr
+	int read_fault, write_fault, read_bitmap, write_bitmap;
 
 	RR_ASSERT(vrr_info->enabled);
 	rr_gen_bitmap_from_spt(vcpu);
@@ -1439,6 +1608,23 @@ static int rr_ape_check_chunk(struct kvm_vcpu *vcpu)
 		vrr_info->nr_rollback = 0;
 		rr_log_chunk(vcpu);
 
+		//rsr
+		write_bitmap = re_bitmap_size(&vrr_info->dirty_bitmap);
+		read_bitmap = re_bitmap_size(&vrr_info->access_bitmap) - write_bitmap;
+		write_fault = vrr_info->nr_write_fault;
+		read_fault = vrr_info->nr_read_fault;
+		vrr_info->total_lost_read_fault += read_bitmap - read_fault;
+		vrr_info->total_lost_write_fault += write_bitmap - write_fault;
+
+		RR_LOG("write_bitmap %d write_fault %d lost %d\n", 
+				write_bitmap, write_fault, write_bitmap - write_fault);
+		RR_LOG("read_bitmap %d read_fault %d lost %d\n", 
+				read_bitmap, read_fault, read_bitmap - read_fault);
+		
+		//rr_make_request(RR_REQ_DELETE_PRIVATE_PAGE, vrr_info);
+		vrr_info->nr_read_fault = 0;
+		vrr_info->nr_write_fault = 0;
+
         //increase chunk size (preemption timer)
         vrr_info->timer_value = RR_DEFAULT_PREEMTION_TIMER_VAL;
 	} else {
@@ -1479,7 +1665,8 @@ rollback:
 	up_read(&(krr_info->tm_rwlock));
 
 	/* Reset bitmaps */
-	re_bitmap_clear(&vrr_info->access_bitmap);
+	// rsr - delay clearing access_bitmap till next enter
+	//re_bitmap_clear(&vrr_info->access_bitmap);
 	re_bitmap_clear(&vrr_info->dirty_bitmap);
 	re_bitmap_clear(vrr_info->private_cb);
 
@@ -1612,7 +1799,8 @@ static struct rr_exit_reason_str RR_VMX_EXIT_REASONS[] = {
 	{ EXIT_REASON_INVD,                  "INVD" },
 	{ EXIT_REASON_INVPCID,               "INVPCID" },
 	{ EXIT_REASON_PREEMPTION_TIMER,      "PREEMPTION_TIMER" },
-	{ RR_EXIT_REASON_WRITE_FAULT,	     "WRITE_FAULT" }
+	{ RR_EXIT_REASON_WRITE_FAULT,	     "WRITE_FAULT" },
+	{ RR_EXIT_REASON_READ_FAULT,	     "READ_FAULT" }
 };
 
 static inline char *__rr_exit_reason_to_str(u32 exit_reason)
@@ -1642,6 +1830,7 @@ static void __rr_print_sta(struct kvm *kvm)
 	u64 cal_exit_time = 0;
 	u64 temp_exit_time, temp_exit_counter;
 	struct rr_exit_stat *exit_stat;
+	u64 temp_total_lost_read_fault = 0;
 
 	RR_LOG("=== Statistics for Samsara ===\n");
 	printk(KERN_INFO "=== Statistics for Samsara ===\n");
@@ -1653,7 +1842,14 @@ static void __rr_print_sta(struct kvm *kvm)
 		       temp);
 		printk(KERN_INFO "vcpu=%d nr_exits=%lld\n", vcpu_it->vcpu_id,
 		       temp);
+
+		RR_LOG("vcpu=%d total lost read fault=%lld\n", 
+				vcpu_it->vcpu_id, vcpu_it->rr_info.total_lost_read_fault);
+		temp_total_lost_read_fault += vcpu_it->rr_info.total_lost_read_fault;
+		RR_LOG("vcpu=%d total lost write fault=%lld\n", 
+				vcpu_it->vcpu_id, vcpu_it->rr_info.total_lost_write_fault);
 	}
+	RR_LOG("total lost read fault=%lld\n", temp_total_lost_read_fault);
 	RR_LOG("total nr_exits=%lld\n", nr_exits);
 	printk(KERN_INFO "total nr_exits=%lld\n", nr_exits);
 
@@ -1676,7 +1872,7 @@ static void __rr_print_sta(struct kvm *kvm)
 			continue;
 		}
 
-		if (exit_reason < RR_EXIT_REASON_MAX) {
+		if (exit_reason < RR_EXIT_REASON_MAX - 1) {
 			cal_exit_reason += temp_exit_counter;
 			cal_exit_time += temp_exit_time;
 		}

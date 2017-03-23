@@ -3490,6 +3490,7 @@ static int kvm_vm_ioctl_set_nr_mmu_pages(struct kvm *kvm,
 
 	kvm_mmu_change_mmu_pages(kvm, kvm_nr_mmu_pages);
 	kvm->arch.n_requested_mmu_pages = kvm_nr_mmu_pages;
+	RR_LOG("n_requested_mmu_pages = %u\n", kvm->arch.n_requested_mmu_pages);
 
 	mutex_unlock(&kvm->slots_lock);
 	return 0;
@@ -5987,6 +5988,12 @@ restart:
 		rr_post_check(vcpu);
 	}
 
+	//rsr - delete all private pages
+	//if (rr_check_request(RR_REQ_DELETE_PRIVATE_PAGE, vrr_info)) {
+	//	rr_delete_private_pages(vcpu);
+	//}
+
+
 	preempt_disable();
 
 	kvm_x86_ops->prepare_guest_switch(vcpu);
@@ -6026,8 +6033,11 @@ restart:
 			vrr_info->exit_stat[vrr_info->exit_reason].time += temp;
 			if (vrr_info->is_write_pf_exit)
 				vrr_info->exit_stat[RR_EXIT_REASON_WRITE_FAULT].time += temp;
+			if (vrr_info->is_read_pf_exit == 2)
+				vrr_info->exit_stat[RR_EXIT_REASON_READ_FAULT].time += temp;
 		}
 	}
+
 
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
 

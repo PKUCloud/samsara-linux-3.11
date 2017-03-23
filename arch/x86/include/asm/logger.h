@@ -8,7 +8,7 @@ extern int rr_log_buf(const unsigned char *buf, int len);
 extern struct logger_log *rr_fetch_log(int vcpu_id);
 extern void rr_free_log(struct logger_log *log);
 
-// #define DEBUG_RECORD_REPLAY
+#define DEBUG_RECORD_REPLAY
 /* Print the real log for record and replay */
 #define RECORD_REPLAY_LOG
 
@@ -17,7 +17,8 @@ enum {
 	RR_DB_GEN, RR_DB_INIT, RR_DB_MMU,
 };
 #define RR_DBBIT(x)	(1 << RR_DB_##x)
-static int rr_dbflags = RR_DBBIT(GEN) | RR_DBBIT(INIT) | RR_DBBIT(MMU);
+//static int rr_dbflags = RR_DBBIT(GEN) | RR_DBBIT(INIT) | RR_DBBIT(MMU);
+static int rr_dbflags = RR_DBBIT(GEN);
 
 #define RR_DLOG(what, fmt, ...) do { \
 	if (rr_dbflags & RR_DBBIT(what)) { \
