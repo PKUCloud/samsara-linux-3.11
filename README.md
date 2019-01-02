@@ -15,4 +15,4 @@ on commodity processors to track the read-set and write-set for implementing a c
 so, we avoid all memory access detections, which is a major source of overhead in prior works.
 
 
-To read more about the Samsara,check out [the project page](http://zhenxiao.com/phantasy/).
+To read more about the Samsara,check out [the project page](http://zhenxiao.com/replay/).
